@@ -243,35 +243,6 @@
       (when path
         {:path-elems (mapv parse-path-elem path)}))))
 
-(t/ann parse-HVec [(t/I (t/Seq t/Any) t/Sequential) -> Type])
-(defn parse-HVec [[_ fixed & opts :as syn]]
-  (let [_ (when-not (vector? fixed)
-            (err/int-error "First argument to HVec must be a vector"))
-        _ (when-not (even? (count opts))
-            (err/int-error "Uneven keyword arguments to HVec"))
-        {:keys [filter-sets objects]} opts]
-    (when (contains? opts :filter-sets)
-      (when-not (vector? filter-sets)
-        (err/int-error ":filter-sets must be a vector")))
-    (when (contains? opts :objects)
-      (when-not (vector? objects)
-        (err/int-error ":objects must be a vector")))
-    (merge
-      {:op :HVec
-       :types (mapv parse fixed)
-       :children (vec (concat
-                        [:types]
-                        (when filter-sets
-                          [:filter-sets])
-                        (when objects
-                          [:objects])))}
-      (when filter-sets
-        (assert (vector? filter-sets))
-        {:filter-sets (mapv parse-filter-set filter-sets)})
-      (when objects
-        (assert (vector? objects))
-        {:objects (mapv parse-object objects)}))))
-
 (t/defalias RestDrest
   (HMap :mandatory {:types (t/U nil (t/Coll Type))}
         :optional {:rest (t/U nil Type)
@@ -330,17 +301,28 @@
                           (when drest
                             [:drest])
                           (when rest
-                            [:rest])))}
+                            [:rest])
+                          (when filter-sets
+                            [:filter-sets])
+                          (when objects
+                            [:objects])
+                          (when (true? repeat) [:repeat])))}
         (when drest
           {:drest drest})
         (when rest
-          {:rest rest})))))
+          {:rest rest})
+        (when filter-sets
+          {:filter-sets (mapv parse-filter-set filter-sets)})
+        (when objects
+          {:objects (mapv parse-object filter-sets)})
+        (when (true? repeat) {:repeat true})))))
 
+(def parse-HVec (parse-h* :HVec "Invalid heterogeneous vector syntax:"))
 (def parse-HSequential (parse-h* :HSequential "Invalid HSeqnential syntax:"))
 (def parse-HSeq (parse-h* :HSeq "Invalid HSeq syntax:"))
 
 (def parse-quoted-hvec (fn [syn]
-                         ((parse-h* :HVec "Invalid heterogeneous vector syntax:") [nil syn])))
+                         (parse-HVec [nil syn])))
 
 (defn parse-quoted-hseq [syn]
   (let [types (mapv parse syn)]
