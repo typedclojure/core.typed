@@ -81,7 +81,8 @@
                   :filters (:fs v)
                   :objects (:objects v)
                   :rest (:rest v)
-                  :drest (:drest v)))
+                  :drest (:drest v)
+                  :repeat (:repeat v)))
 
 (t/ann ^:no-check HList->HSequential [HeterogeneousList -> HSequential])
 (defn HList->HSequential [l]
@@ -97,7 +98,8 @@
                   :filters (:fs s)
                   :objects (:objects s)
                   :rest (:rest s)
-                  :drest (:drest s)))
+                  :drest (:drest s)
+                  :repeat (:repeat s)))
 
 (t/tc-ignore
 (def AnyHSequential?
