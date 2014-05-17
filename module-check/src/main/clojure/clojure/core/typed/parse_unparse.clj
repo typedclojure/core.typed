@@ -576,29 +576,8 @@
   (err/deprecated-plain-op 'Vector* 'HVec)
   (parse-quoted-hvec (rest syn)))
 
-(declare parse-hvec-types parse-object parse-filter-set parse-hvec-types)
-
-(defn parse-HVec [[_ syn & opts]]
-  (let [_ (when-not (vector? syn)
-            (err/int-error "First argument to HVec must be a vector"))
-        _ (when-not (even? (count opts))
-            (err/int-error "Uneven keyword arguments to HVec"))
-        {:keys [filter-sets objects]} opts
-        {:keys [fixed drest rest]} (parse-hvec-types syn)]
-    (r/-hvec fixed
-             :filters (when filter-sets
-                        (mapv parse-filter-set filter-sets))
-             :objects (when objects
-                        (mapv parse-object objects))
-             :drest drest
-             :rest rest)))
-
-(defmethod parse-type-list 'HVec [t] 
-  (err/deprecated-plain-op 'HVec)
-  (parse-HVec t))
-(defmethod parse-type-list 'clojure.core.typed/HVec [t] (parse-HVec t))
-(defmethod parse-type-list 'cljs.core.typed/HVec [t] (parse-HVec t))
-
+;; parse-HVec, parse-HSequential and parse-HSeq have many common patterns
+;; so we reuse them
 (defn parse-types-with-rest-drest [err-msg]
   (fn [syns]
     (let [rest? (#{'*} (last syns))
@@ -635,42 +614,34 @@
 (def parse-hvec-types (parse-types-with-rest-drest
                         "Invalid heterogeneous vector syntax:"))
 
-(def parse-hsequential-type (parse-types-with-rest-drest
+(def parse-hsequential-types (parse-types-with-rest-drest
                               "Invalid heterogeneous sequential syntax:"))
 
-(defn parse-HSequential [[_ syn & {:keys [filter-sets objects]}]]
-  (let [{:keys [fixed drest rest]} (parse-hsequential-type syn)]
-    (r/-hsequential fixed
-                    :filters (when filter-sets
-                               (mapv parse-filter-set filter-sets))
-                    :objects (when objects
-                               (mapv parse-object objects))
-                    :drest drest
-                    :rest rest)))
-
-(defmethod parse-type-list 'HSequential [t] 
-  (err/deprecated-plain-op 'HSequential)
-  (parse-HSequential t))
-(defmethod parse-type-list 'clojure.core.typed/HSequential [t] (parse-HSequential t))
-(defmethod parse-type-list 'cljs.core.typed/HSequential [t] (parse-HSequential t))
-
-(def parse-hseq-type (parse-types-with-rest-drest
+(def parse-hseq-types (parse-types-with-rest-drest
                       "Invalid heterogeneous seq syntax:"))
 
-(defn parse-HSeq [[_ syn & opts]]
-  (let [{:keys [fixed drest rest]} (parse-hseq-type syn)
-        _ (when-not (even? (count opts))
-            (err/int-error "Wrong number of keyword arguments to HSeq"))
-        {:keys [filter-sets objects] :as opt-map} opts
-        _ (when-not (every? keyword? (keys opt-map))
-            (err/int-error "Given non-keyword keyword arguments to HSeq"))]
-    (r/-hseq fixed
-             :filters (when filter-sets
-                        (mapv parse-filter-set filter-sets))
-             :objects (when objects
-                        (mapv parse-object objects))
-             :drest drest
-             :rest rest)))
+(declare parse-object parse-filter-set)
+
+(defn parse-heterogeneous* [parse-h*-types constructor]
+  (fn [[_ syn & {:keys [filter-sets objects]}]]
+    (let [{:keys [fixed drest rest]} (parse-h*-types syn)]
+      (constructor fixed
+                   :filters (when filter-sets
+                              (mapv parse-filter-set filter-sets))
+                   :objects (when objects
+                              (mapv parse-object objects))
+                   :drest drest
+                   :rest rest))))
+
+(def parse-HVec (parse-heterogeneous* parse-hvec-types r/-hvec))
+(def parse-HSequential (parse-heterogeneous* parse-hsequential-types r/-hsequential))
+(def parse-HSeq (parse-heterogeneous* parse-hseq-types r/-hseq))
+
+(defmethod parse-type-list 'HVec [t] (parse-HVec t))
+(defmethod parse-type-list 'clojure.core.typed/HVec [t] (parse-HVec t))
+
+(defmethod parse-type-list 'HSequential [t] (parse-HSequential t))
+(defmethod parse-type-list 'clojure.core.typed/HSequential [t] (parse-HSequential t))
 
 (defmethod parse-type-list 'HSeq [t] 
   (err/deprecated-plain-op 'HSeq)
@@ -1595,32 +1566,32 @@
            (when (c/complete-hmap? v)
              [:complete? true]))))
 
-(defmethod unparse-type* HeterogeneousSeq
-  [{:keys [types rest drest fs objects] :as v}]
-  (list* (unparse-Name-symbol-in-ns `t/HSeq)
-         (concat
-           (map unparse-type (:types v))
-           (when rest [(unparse-type rest) '*])
-           (when drest [(unparse-type (:pre-type drest)) '... (unparse-bound (:name drest))]))
-         (concat
-           (when-not (every? #{(fl/-FS f/-top f/-top)} fs)
-             [:filter-sets (mapv unparse-filter-set fs)])
-           (when-not (every? #{orep/-empty} objects)
-             [:objects (mapv unparse-object objects)]))))
-
-(defmethod unparse-type* HSequential
-  [{:keys [types rest drest fs objects] :as v}]
-  (list* (unparse-Name-symbol-in-ns `t/HSequential)
-         (vec
+(defn unparse-heterogeneous* [sym vec?]
+  (fn [{:keys [types rest drest fs objects] :as v}]
+    (let [first-part (concat
+                       (map unparse-type (:types v))
+                       (when rest [(unparse-type rest) '*])
+                       (when drest [(unparse-type (:pre-type drest))
+                                    '...
+                                    (unparse-bound (:name drest))]))]
+    (list* sym
+           (if vec?
+             (vec first-part)
+             first-part)
            (concat
-             (map unparse-type (:types v))
-             (when rest [(unparse-type rest) '*])
-             (when drest [(unparse-type (:pre-type drest)) '... (unparse-bound (:name drest))])))
-         (concat
-           (when-not (every? #{(fl/-FS f/-top f/-top)} fs)
-             [:filter-sets (mapv unparse-filter-set fs)])
-           (when-not (every? #{orep/-empty} objects)
-             [:objects (mapv unparse-object objects)]))))
+             (when-not (every? #{(fl/-FS f/-top f/-top)} fs)
+               [:filter-sets (mapv unparse-filter-set fs)])
+             (when-not (every? #{orep/-empty} objects)
+               [:objects (mapv unparse-object objects)]))))))
+
+(defmethod unparse-type* HeterogeneousVector [v]
+  ((unparse-heterogeneous* 'HVec true) v))
+
+(defmethod unparse-type* HeterogeneousSeq [v]
+  ((unparse-heterogeneous* 'HSeq false) v))
+
+(defmethod unparse-type* HSequential [v]
+  ((unparse-heterogeneous* 'HSequential true) v))
 
 (defmethod unparse-type* HSet
   [{:keys [fixed] :as v}]
@@ -1639,21 +1610,6 @@
              [:complete? (:complete? v)])
            (when (:nilable-non-empty? v)
              [:nilable-non-empty? (:nilable-non-empty? v)]))))
-
-(defmethod unparse-type* HeterogeneousVector
-  [{:keys [types rest drest fs objects] :as v}]
-  (list* (unparse-Name-symbol-in-ns `t/HVec)
-         (vec
-           (concat
-             (map unparse-type (:types v))
-             (when rest [(unparse-type rest) '*])
-             (when drest [(unparse-type (:pre-type drest)) '... (unparse-bound (:name drest))])))
-         (when vs/*verbose-types*
-           (concat
-             (when-not (every? #{(fl/-FS f/-top f/-top)} fs)
-               [:filter-sets (mapv unparse-filter-set fs)])
-             (when-not (every? #{orep/-empty} objects)
-               [:objects (mapv unparse-object objects)])))))
 
 (defmethod unparse-type* HeterogeneousList
   [v]
