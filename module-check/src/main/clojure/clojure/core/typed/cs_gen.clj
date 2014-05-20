@@ -698,6 +698,7 @@
                       (r/make-ExactCountRange (count (:types S))))
                 T)
 
+        ; TODO add :repeat support
         (and (r/HSequential? S)
              (r/RClass? T))
         (cs-gen V X Y
@@ -716,6 +717,7 @@
                          (count (:types S)))))
                 T)
 
+        ; TODO add :repeat support
         (and (r/HeterogeneousVector? S)
              (r/RClass? T))
         (cs-gen V X Y
@@ -769,7 +771,7 @@
   (cset-meet* (concat
                 (cond
                   ;simple case
-                  (not-any? (some-fn :rest :drest) [S T])
+                  (not-any? (some-fn :rest :drest :repeat) [S T])
                   [(cs-gen-list V X Y (:types S) (:types T))]
 
                   ;rest on right, optionally on left
