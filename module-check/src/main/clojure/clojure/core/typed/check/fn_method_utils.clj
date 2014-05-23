@@ -42,4 +42,5 @@
       (when drest
         (second drest))
       (when kws
-        (second kws))))))
+        (second kws))
+      nil))))

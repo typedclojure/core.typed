@@ -758,23 +758,26 @@
 
 (u/ann-record Function [dom :- (t/U nil (t/Seqable Type)),
                         rng :- Result,
-                        rest :- (t/U nil Type)
-                        drest :- (t/U nil DottedPretype)
-                        kws :- (t/U nil KwArgs)])
-(u/def-type Function [dom rng rest drest kws]
+                        rest :- (U nil Type)
+                        drest :- (U nil DottedPretype)
+                        kws :- (U nil KwArgs)
+                        prest :- (U nil Type)])
+(u/def-type Function [dom rng rest drest kws prest]
   "A function arity, must be part of an intersection"
   [(or (nil? dom)
        (sequential? dom))
    (every? Type? dom)
    (Result? rng)
    ;at most one of rest drest or kws can be provided
-   (#{0 1} (count (filter identity [rest drest kws])))
+   (#{0 1} (count (filter identity [rest drest kws prest])))
    (or (nil? rest)
        (Type? rest))
    (or (nil? drest)
        (DottedPretype? drest))
    (or (nil? kws)
-       (KwArgs? kws))]
+       (KwArgs? kws))
+   (or (nil? prest)
+       (Type? prest))]
   :methods
   [p/TCAnyType])
 
@@ -1059,26 +1062,25 @@
                  (or flow (-flow (ind/-top-fn))))))
 
 (t/ann ^:no-check make-Function
-       (t/IFn [(t/U nil (t/Seqable Type)) Type -> Function]
-           [(t/U nil (t/Seqable Type)) Type (t/U nil Type) -> Function]
-           [(t/U nil (t/Seqable Type)) Type (t/U nil Type) (t/U nil Type) 
-            & :optional 
-              {:filter (t/U nil p/IFilterSet) :object (t/U nil p/IRObject)
-               :flow (t/U nil FlowSet)
-               :mandatory-kws (t/U nil (t/Map Type Type))
-               :optional-kws (t/U nil (t/Map Type Type))}
-            -> Function]))
+       [(U nil (t/Seqable Type))
+        Type
+        & :optional
+        {:rest (U nil Type) :drest (U nil Type) :prest (U nil Type)
+         :filter (U nil p/IFilterSet) :object (U nil p/IRObject)
+         :flow (U nil FlowSet)
+         :mandatory-kws (U nil (t/Map Type Type))
+         :optional-kws (U nil (t/Map Type Type))}
+        -> Function])
 (defn make-Function
   "Make a function, wrap range type in a Result.
   Accepts optional :filter and :object parameters that default to the most general filter
   and EmptyObject"
-  ([dom rng] (make-Function dom rng nil nil))
-  ([dom rng rest] (make-Function dom rng rest nil))
-  ([dom rng rest drest & {:keys [filter object mandatory-kws optional-kws flow]}]
-   (Function-maker dom (make-Result rng filter object flow)
-                   rest drest (when (or mandatory-kws optional-kws)
-                                (-kw-args :mandatory (or mandatory-kws {})
-                                          :optional (or optional-kws {}))))))
+  [dom rng & {:keys [rest drest prest filter object mandatory-kws optional-kws flow] :as opt}]
+  {:pre [(every? keyword? (keys opt))]}
+  (Function-maker dom (make-Result rng filter object flow)
+                  rest drest (when (or mandatory-kws optional-kws)
+                               (-kw-args :mandatory (or mandatory-kws {})
+                                         :optional (or optional-kws {}))) prest))
 
 
 ;;;;;;;;;;;;;;;;;

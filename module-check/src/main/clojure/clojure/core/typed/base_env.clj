@@ -47,9 +47,7 @@
                       (recur (inc num)
                              (conj result (conj dom rtn-type))
                              (conj dom num-t))))
-                  (repeat rtn-type)
-                  (repeat nil)
-                  (repeat nil))))))
+                  (repeat rtn-type))))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Initial type aliases
@@ -113,11 +111,10 @@ clojure.java.io/IOFactory
 (defn ^:private count-type []
   (impl/with-clojure-impl
     (r/make-FnIntersection
-      (r/make-Function 
+      (r/make-Function
         [(prs/parse-type '(U nil (clojure.core.typed/Seqable Any) clojure.lang.Counted))]
         (prs/parse-type '(U java.lang.Integer java.lang.Long))
-        nil nil
-        :object (obj/-path [(pe/CountPE-maker)] 0)))))
+        :object (obj/->Path [(pe/CountPE-maker)] 0)))))
 
 (defn ^:private nth-type []
   (impl/with-clojure-impl

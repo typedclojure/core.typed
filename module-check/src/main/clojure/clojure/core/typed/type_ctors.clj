@@ -1818,7 +1818,7 @@
                                                         [k (sb v)])))]
                                      (-> kws
                                        (update-in [:mandatory] abstract-kw-map)
-                                       (update-in [:optional] abstract-kw-map)))))))
+                                       (update-in [:optional] abstract-kw-map)))) nil)))
 
 (f/add-fold-case ::abstract-many
                  HeterogeneousVector
@@ -1960,7 +1960,7 @@
                                                     [k (sb v)])))]
                                  (-> kws
                                    (update-in [:mandatory] instantiate-kw-map)
-                                   (update-in [:optional] instantiate-kw-map)))))))
+                                   (update-in [:optional] instantiate-kw-map)))) nil)))
 
 (f/add-fold-case ::instantiate-many
                  HeterogeneousVector
@@ -2112,19 +2112,16 @@
            (r/make-Function
              [(-partial-hmap {(r/-val kw) (r/make-F 'x)})]
              (r/make-F 'x)
-             nil nil
              :object (or/-path [(path/-kpe kw)] 0))
            (r/make-Function
              [(Un (make-HMap
                     :optional {(r/-val kw) (r/make-F 'x)})
                   r/-nil)]
              (Un r/-nil (r/make-F 'x))
-             nil nil
              :object (or/-path [(path/-kpe kw)] 0))
            (r/make-Function
              [r/-any]
              r/-any
-             nil nil
              :object (or/-path [(path/-kpe kw)] 0)))))
 
 (t/ann KeywordValue->Fn [Value -> r/Type])

@@ -295,6 +295,7 @@
         ;                              (last params))]
         ;                   (r/make-Function (mapv parse-meta (map meta fixed))
         ;                                    r/-any
+        ;                                    :rest
         ;                                    (when variadic
         ;                                      (parse-meta rest))))))
         ]

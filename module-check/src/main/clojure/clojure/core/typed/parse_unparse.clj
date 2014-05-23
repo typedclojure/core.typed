@@ -239,13 +239,11 @@
 (defn predicate-for [on-type]
   (let [RClass-of @(RClass-of-var)]
     (r/make-FnIntersection
-      (r/make-Function [r/-any] 
-        (impl/impl-case
-          :clojure (RClass-of Boolean)
-          :cljs    (r/BooleanCLJS-maker))
-        nil nil
-        :filter (fl/-FS (fl/-filter on-type 0)
-                        (fl/-not-filter on-type 0))))))
+      (r/make-Function [r/-any] (impl/impl-case
+                                  :clojure (RClass-of Boolean)
+                                  :cljs    (r/BooleanCLJS-maker))
+                       :filter (fl/-FS (fl/-filter on-type 0)
+                                       (fl/-not-filter on-type 0))))))
 
 (defn parse-Pred [[_ & [t-syn :as args]]]
   (when-not (== 1 (count args))
@@ -1160,8 +1158,10 @@
             (err/int-error "Must provide syntax after &"))]
     (r/make-Function (mapv parse-type fixed-dom)
                      (parse-type rng)
+                     :rest
                      (when asterix-pos
                        (parse-type rest-type))
+                     :drest
                      (when ellipsis-pos
                        (let [bnd (dvar/*dotted-scope* drest-bnd)
                              _ (when-not bnd 
