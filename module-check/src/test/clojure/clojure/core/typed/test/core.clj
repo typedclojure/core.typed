@@ -5403,6 +5403,9 @@
 	(is-clj (subtype? (parse-type '(HSeq [Number String Number String]))
 										(parse-type '(HSequential [Number String] :repeat true)))))
 
+(deftest function-prest
+  (is-cf (fn [a & rst] 1) [Number (HSeq [Number String] :repeat true) <* -> Number]))
+
 ;    (is-tc-e 
 ;      (let [f (fn [{:keys [a] :as m} :- '{:a (U nil Num)}] :- '{:a Num} 
 ;                {:pre [(number? a)]} 

@@ -1373,11 +1373,12 @@
 
             :else (invoke/normal-invoke check expr fexpr args expected :cfexpr cfexpr)))))))
 
-(defn check-rest-fn [remain-dom rest drest kws]
+(defn check-rest-fn [remain-dom & {:keys [rest drest kws prest]}]
   {:pre [(or (r/Type? rest)
+             (r/Type? prest)
              (r/DottedPretype? drest)
              (r/KwArgs? kws))
-         (#{1} (count (filter identity [rest drest kws])))
+         (#{1} (count (filter identity [rest drest kws prest])))
          (every? r/Type? remain-dom)]
    :post [(r/Type? %)]}
   (cond
@@ -1390,6 +1391,8 @@
                          :rest rest
                          :drest drest)
                 (r/make-CountRange 1)))
+
+    prest (c/Un r/-nil prest)
 
     :else (c/KwArgs->Type kws)))
 
