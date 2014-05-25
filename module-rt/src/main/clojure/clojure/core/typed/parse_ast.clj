@@ -828,11 +828,13 @@
 
         {ellipsis-pos '...
          asterix-pos '*
-         ampersand-pos '&}
+         ampersand-pos '&
+         push-rest-pos '<*}
         (zipmap all-dom (range))
 
-        _ (when-not (#{0 1} (count (filter identity [asterix-pos ellipsis-pos ampersand-pos])))
-            (err/int-error "Can only provide one rest argument option: & ... or *"))
+        _ (when-not (#{0 1} (count (filter identity [asterix-pos ellipsis-pos ampersand-pos
+                                                     push-rest-pos])))
+            (err/int-error "Can only provide one rest argument option: & ... * or <*"))
 
         _ (when-let [ks (seq (remove #{:filters :object :flow} (keys opts)))]
             (err/int-error (str "Invalid function keyword option/s: " ks)))
@@ -850,6 +852,7 @@
                     asterix-pos (take (dec asterix-pos) all-dom)
                     ellipsis-pos (take (dec ellipsis-pos) all-dom)
                     ampersand-pos (take ampersand-pos all-dom)
+                    push-rest-pos (take (dec push-rest-pos) all-dom)
                     :else all-dom)
 
         rest-type (when asterix-pos
@@ -874,7 +877,13 @@
             kwsyn))
 
         _ (when-not (or (not ampersand-pos) (seq kws-seq)) 
-            (err/int-error "Must provide syntax after &"))]
+            (err/int-error "Must provide syntax after &"))
+
+        prest-type (when push-rest-pos
+                     (nth all-dom (dec push-rest-pos)))
+        _ (when-not (or (not push-rest-pos)
+                        (= (count all-dom) (inc push-rest-pos)))
+            (err/int-error (str "Trailing syntax after push-rest parameter: " (pr-str (drop (inc push-rest-pos) all-dom)))))]
     (merge
       {:op :Fn-method
        :dom (mapv parse fixed-dom)
@@ -886,7 +895,9 @@
                               (when asterix-pos
                                 [:rest])
                               (when ellipsis-pos
-                                [:drest])))}
+                                [:drest])
+                              (when push-rest-pos
+                                [:prest])))}
       (when asterix-pos
         {:rest (parse rest-type)})
       (when ellipsis-pos
@@ -899,7 +910,9 @@
             :f {:op :F :name gbnd}
             :drest (with-frees {drest-bnd gbnd} ;with dotted bound in scope as free
                      (parse drest-type))
-            :name gbnd}})))))
+            :name gbnd}}))
+      (when push-rest-pos
+        {:prest (parse prest-type)}))))
 
 (defn parse-Fn [[_ & args :as syn]]
   {:op :Fn
