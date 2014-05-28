@@ -1801,7 +1801,7 @@
 
 (f/add-fold-case ::abstract-many
                  Function
-                 (fn [{:keys [dom rng rest drest kws] :as ty} {{:keys [name count outer sb]} :locals}]
+                 (fn [{:keys [dom rng rest drest kws prest] :as ty} {{:keys [name count outer sb]} :locals}]
                    (r/Function-maker (doall (map sb dom))
                                  (sb rng)
                                  (when rest (sb rest))
@@ -1818,7 +1818,9 @@
                                                         [k (sb v)])))]
                                      (-> kws
                                        (update-in [:mandatory] abstract-kw-map)
-                                       (update-in [:optional] abstract-kw-map)))) nil)))
+                                       (update-in [:optional] abstract-kw-map))))
+                                 (when prest
+                                   (sb prest)))))
 
 (f/add-fold-case ::abstract-many
                  HeterogeneousVector
@@ -1942,7 +1944,7 @@
 
 (f/add-fold-case ::instantiate-many
                Function
-               (fn [{:keys [dom rng rest drest kws]} {{:keys [count outer image sb]} :locals}]
+               (fn [{:keys [dom rng rest drest kws prest]} {{:keys [count outer image sb]} :locals}]
                  (r/Function-maker (map sb dom)
                              (sb rng)
                              (when rest
@@ -1960,7 +1962,9 @@
                                                     [k (sb v)])))]
                                  (-> kws
                                    (update-in [:mandatory] instantiate-kw-map)
-                                   (update-in [:optional] instantiate-kw-map)))) nil)))
+                                   (update-in [:optional] instantiate-kw-map))))
+                             (when prest
+                               (sb prest)))))
 
 (f/add-fold-case ::instantiate-many
                  HeterogeneousVector
