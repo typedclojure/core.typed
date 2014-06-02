@@ -504,6 +504,7 @@
    (every? p/IRObject? objects)
    (apply = (map count [types fs objects]))
    (#{0 1} (count (filter identity [rest drest repeat])))
+   (if repeat (not-empty types) true)
    ((some-fn nil? Type?) rest)
    ((some-fn nil? DottedPretype?) drest)
    ((some-fn true? false?) repeat)]
@@ -554,6 +555,7 @@
    (every? p/IRObject? objects)
    (apply = (map count [types fs objects]))
    (#{0 1} (count (filter identity [rest drest repeat])))
+   (if repeat (not-empty types) true)
    ((some-fn nil? Type?) rest)
    ((some-fn nil? DottedPretype?) drest)
    ((some-fn true? false?) repeat)]
@@ -596,6 +598,7 @@
    (every? p/IRObject? objects)
    (apply = (map count [types fs objects]))
    (#{0 1} (count (filter identity [rest drest repeat])))
+   (if repeat (not-empty types) true)
    ((some-fn nil? Type?) rest)
    ((some-fn nil? DottedPretype?) drest)
    ((some-fn true? false?) repeat)]
@@ -768,8 +771,10 @@
        (sequential? dom))
    (every? Type? dom)
    (Result? rng)
-   ;at most one of rest drest or kws can be provided
+   ;at most one of rest drest kws or prest can be provided
    (#{0 1} (count (filter identity [rest drest kws prest])))
+   ; we could have prest without repeat, but why would you do that
+   (if prest (and (:repeat prest) (:types prest)) true)
    (or (nil? rest)
        (Type? rest))
    (or (nil? drest)
