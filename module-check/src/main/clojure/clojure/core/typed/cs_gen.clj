@@ -1195,6 +1195,21 @@
                 c
                 (err/int-error (str "No constraint for bound " dbound)))))))
 
+; FIXME remove :no-check
+(t/ann ^:no-check move-prest-to-dmap [cset t/Sym (HMap :mandatory {:mode (U (Value :remain) (Value :repeat))}) -> cset])
+(defn move-prest-to-dmap [cset dbound {:keys [mode]}]
+  {:pre [(cr/cset? cset)
+         (symbol? dbound)
+         (or (= :remain mode) (= :repeat mode))]
+   :post [(cr/cset? %)]}
+  (mover cset dbound nil
+         (fn [cmap dmap]
+           (if-let [c (cmap dbound)]
+             (let [{:keys [remain repeat]} (dmap dbound)]
+               (cr/->dcon-repeat
+                 (if (= :remain mode) (conj remain c) (if (nil? remain) [] remain))
+                 (if (= :repeat mode) (conj repeat c) (if (nil? repeat) [] repeat))))
+             (err/int-error (str "No constraint for bound " dbound))))))
 
 ;; dbound : index variable
 ;; vars : listof[type variable] - temporary variables
@@ -1344,7 +1359,7 @@
                                 (count (-> S :prest :types))))))
         (fail! S T)
         (let [[short-T rest-T] (split-at s-dom-count t-dom)
-              short-cs (cs-gen-list V X Y s-dom short-T)
+              short-cs (cs-gen-list V X Y short-T s-dom)
               gen-repeat (fn gen-repeat [small big]
                            (reduce
                              (fn [acc cur]
@@ -1353,7 +1368,7 @@
                              (take (/ (count big)
                                       (count small)) (repeat small))))
               rest-S (gen-repeat (-> S :prest :types) rest-T)
-              rest-cs (cs-gen-list V X Y rest-S rest-T)
+              rest-cs (cs-gen-list V X Y rest-T rest-S)
               ret-mapping (cs-gen V X Y (:rng S) (:rng T))]
           (cset-meet* [short-cs rest-cs ret-mapping])))))
 
