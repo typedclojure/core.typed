@@ -1031,7 +1031,7 @@
         :else cu/not-special))))
 
 ;apply hash-map
-(add-invoke-apply-method 'clojure.core/hash-map
+#_(add-invoke-apply-method 'clojure.core/hash-map
   [{[fn-expr & args] :args :as expr} & [expected]]
   {:post [(or 
             (and (-> % u/expr-type r/TCResult?)

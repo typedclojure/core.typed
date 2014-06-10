@@ -554,7 +554,7 @@
   (is-clj (= (-> 
            (tc-t (let [a {:a 1}]
                    (if (seq? a)
-                     (apply hash-map a)
+                     (apply (clojure.core.typed/inst hash-map Keyword Number) a)
                      a)))
            ret-t)
          (-complete-hmap {(-val :a) (-val 1)})))
@@ -3082,6 +3082,8 @@
 
 (deftest apply-hmap-test
   (is-tc-e (apply hash-map [:a 1 :b 2])
+           :expected (Map Keyword Number)
+           #_
            (HMap :mandatory {:a Number
                              :b Number}
                  :complete? true)))
@@ -5412,7 +5414,7 @@
   (is-clj (not (subtype? (parse-type `[(HSeq [String Number] :repeat true) ~'<* ~'-> String])
                          (parse-type `[(HSeq [String Number String] :repeat true) ~'<* ~'-> String]))))
   (is (check-ns 'clojure.core.typed.test.prest-cs-gen))
-  #_(is-tc-e (map (inst hash-map Number String) [1 2 3] ["a b c"])
+  (is-tc-e (map (inst hash-map Number String) [1 2 3] ["a b c"])
            :expected (NonEmptySeq (Map Number String)))
   )
 
