@@ -1699,8 +1699,7 @@
                                       (not entry) (cons v no-entry)
                                       (or (cr/i-subst? entry)
                                           (cr/i-subst-starred? entry)
-                                          (cr/i-subst-dotted? entry)
-                                          (cr/i-subst-repeat? entry)) no-entry
+                                          (cr/i-subst-dotted? entry)) no-entry
                                       :else false)))
                                 [] Y)]
                     (and absent-entries
@@ -1756,13 +1755,7 @@
                                (doall
                                  (for [f (:fixed dc)]
                                    (constraint->type f idx-hash :variable k))))]
-;                          [k (cr/i-subst-repeat-maker 
-;                               (doall
-;                                 (for [f (:fixed dc)]
-;                                   (constraint->type f idx-hash :variable k)))
-;                               (doall
-;                                 (for [f (:repeat dc)]
-;                                   (constraint->type f idx-hash :variable k))))]
+
                           :else (err/int-error (prn-str "What is this? " dc)))))
 
                     (into {}
