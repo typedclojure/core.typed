@@ -24,7 +24,7 @@
    (r/TCResult? body)])
 
 ;[FnResult -> Function]
-(defn FnResult->Function [{:keys [args kws rest drest prest body] :as fres}]
+(defn FnResult->Function [{:keys [args kws rest drest prest pdot body] :as fres}]
   {:pre [(FnResult? fres)]
    :post [(r/Function? %)]}
   (u/p :check/FnResult->Function
@@ -32,7 +32,8 @@
         rest-param-name (or (first rest)
                             (first drest)
                             (first prest)
-                            (first kws))
+                            (first kws)
+                            (first pdot))
         arg-names (concat (map first args)
                           (when rest-param-name
                             [rest-param-name]))]
@@ -46,4 +47,6 @@
       (when kws
         (second kws))
       (when prest
-        (second prest))))))
+        (second prest))
+      (when pdot
+        (second pdot))))))
