@@ -1131,8 +1131,9 @@
         {ellipsis-pos '...
          asterix-pos '*
          kw-asterix-pos :*
+         ampersand-pos '&
          push-rest-pos '<*
-         ampersand-pos '&}
+         push-dot-pos '<...}
         (zipmap all-dom (range))
 
         _ (when-not (#{0 1} (count (filter identity [asterix-pos ellipsis-pos ampersand-pos 
@@ -1158,6 +1159,7 @@
                     ellipsis-pos (take (dec ellipsis-pos) all-dom)
                     ampersand-pos (take ampersand-pos all-dom)
                     push-rest-pos (take (dec push-rest-pos) all-dom)
+                    push-dot-pos (take (dec push-dot-pos) all-dom)
                     :else all-dom)
 
         rest-type (when asterix-pos
@@ -1167,11 +1169,16 @@
             (err/int-error (str "Trailing syntax after rest parameter: " (pr-str (drop (inc asterix-pos) all-dom)))))
         [drest-type _ drest-bnd :as drest-seq] (when ellipsis-pos
                                                  (drop (dec ellipsis-pos) all-dom))
-        _ (when-not (or (not ellipsis-pos) (= 3 (count drest-seq))) 
+        _ (when-not (or (not ellipsis-pos) (= 3 (count drest-seq)))
             (err/int-error "Dotted rest entry must be 3 entries"))
         _ (when-not (or (not ellipsis-pos) (symbol? drest-bnd))
             (err/int-error "Dotted bound must be symbol"))
-        ;TODO check for duplicate entries
+        [pdot-type _ pdot-bnd :as pdot-seq] (when push-dot-pos
+                                              (drop (dec push-dot-pos) all-dom))
+        _ (when-not (or (not push-dot-pos) (= 3 (count pdot-seq)))
+            (err/int-error "push dotted rest entry must be 3 entries"))
+        _ (when-not (or (not push-dot-pos) (symbol? pdot-bnd))
+            (err/int-error "push dotted bound must be symbol"))
         [& {optional-kws :optional mandatory-kws :mandatory} :as kws-seq]
         (let [kwsyn (when ampersand-pos
                       (drop (inc ampersand-pos) all-dom))]
@@ -1207,6 +1214,15 @@
                      :prest
                      (when push-rest-pos
                        (parse-type prest-type))
+                     :pdot
+                     (when push-dot-pos
+                       (let [bnd (dvar/*dotted-scope* pdot-bnd)
+                             _ (when-not bnd
+                                 (err/int-error (str (pr-str pdot-bnd) " is not in scope as a dotted variable")))]
+                         (r/DottedPretype1-maker
+                           (free-ops/with-frees [bnd] ;with dotted bound in scope as free
+                             (parse-type pdot-type))
+                           (:name bnd))))
                      :filter filters
                      :object object
                      :flow flow
@@ -1451,7 +1467,7 @@
     `(~'B ~name)))
 
 (defmethod unparse-type* Function
-  [{:keys [dom rng kws rest drest prest]}]
+  [{:keys [dom rng kws rest drest prest pdot]}]
   (vec (concat (doall (map unparse-type dom))
                (when rest
                  [(unparse-type rest) '*])
@@ -1470,6 +1486,11 @@
                               [:optional (unparse-kw-map optional)])))))
                (when prest
                  [(unparse-type prest) '<*])
+               (when pdot
+                 (let [{:keys [pre-type name]} pdot]
+                   [(unparse-type pre-type)
+                    '<...
+                    (unparse-bound name)]))
                ['->]
                (unparse-result rng))))
 
