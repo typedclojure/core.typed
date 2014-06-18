@@ -673,12 +673,42 @@
   (let [_ (when-not (<= 1 (count args))
             (err/int-error "Wrong arguments to Assoc"))
         [t & entries] args
-        _ (when-not (even? (count entries))
-            (err/int-error "Uneven arguments to Assoc"))]
+        {ellipsis-pos '...}
+        (zipmap entries (range))
+
+        [entries dentries] (split-at (if ellipsis-pos
+                                       (dec ellipsis-pos)
+                                       (count entries))
+                                     entries)
+        _ (when-not (-> entries count even?)
+            (err/int-error (str "Incorrect Assoc syntax: "
+                                syn
+                                " , must have even number of key/val pair.")))
+        _ (when-not (or (not ellipsis-pos)
+                        (= (count dentries) 3))
+            (err/int-error (str "Incorrect Assoc syntax: "
+                                syn
+                                " , must have even number of key/val pair.")))
+        [drest-type _ drest-bnd] (when ellipsis-pos
+                                   dentries)
+        _ (when-not (or (not ellipsis-pos) (symbol? drest-bnd))
+            (err/int-error "Dotted bound must be symbol"))]
     {:op :Assoc
      :type (parse t)
      :entries (mapv parse entries)
-     :children [:type :entries]}))
+     :dentries (when ellipsis-pos
+                 (let [bnd (*dotted-scope* drest-bnd)
+                       _ (when-not (symbol? bnd)
+                           (err/int-error (str (pr-str drest-bnd)
+                                               " is not in scope as a dotted variable")))
+                       gbnd (gensym bnd)]
+                   {:drest
+                    {:op :dotted-pretype
+                     :f {:op :F :name gbnd}
+                     :drest (with-frees {drest-bnd gbnd} ;with dotted bound in scope as free
+                              (parse drest-type))
+                     :name gbnd}}))
+     :children (concat [:type :entries] (when ellipsis-pos [:dentries]))}))
 
 (defmethod parse-seq* 'Assoc [syn] 
   (err/deprecated-plain-op 'Assoc)
@@ -829,11 +859,11 @@
         {ellipsis-pos '...
          asterix-pos '*
          ampersand-pos '&
-         push-rest-pos '<*}
+         push-rest-pos '<*
+         push-dot-pos '<...}
         (zipmap all-dom (range))
 
-        _ (when-not (#{0 1} (count (filter identity [asterix-pos ellipsis-pos ampersand-pos
-                                                     push-rest-pos])))
+        _ (when-not (#{0 1} (count (filter identity [asterix-pos ellipsis-pos ampersand-pos push-rest-pos push-dot-pos])))
             (err/int-error "Can only provide one rest argument option: & ... * or <*"))
 
         _ (when-let [ks (seq (remove #{:filters :object :flow} (keys opts)))]
@@ -853,6 +883,7 @@
                     ellipsis-pos (take (dec ellipsis-pos) all-dom)
                     ampersand-pos (take ampersand-pos all-dom)
                     push-rest-pos (take (dec push-rest-pos) all-dom)
+                    push-dot-pos (take (dec push-dot-pos) all-dom)
                     :else all-dom)
 
         rest-type (when asterix-pos
@@ -866,6 +897,12 @@
             (err/int-error "Dotted rest entry must be 3 entries"))
         _ (when-not (or (not ellipsis-pos) (symbol? drest-bnd))
             (err/int-error "Dotted bound must be symbol"))
+        [pdot-type _ pdot-bnd :as pdot-seq] (when push-dot-pos
+                                                 (drop (dec push-dot-pos) all-dom))
+        _ (when-not (or (not push-dot-pos) (= 3 (count pdot-seq)))
+            (err/int-error "push dotted rest entry must be 3 entries"))
+        _ (when-not (or (not push-dot-pos) (symbol? pdot-bnd))
+            (err/int-error "push dotted bound must be symbol"))
         [& {optional-kws :optional mandatory-kws :mandatory} :as kws-seq]
         (let [kwsyn (when ampersand-pos
                       (drop (inc ampersand-pos) all-dom))]
@@ -897,7 +934,9 @@
                               (when ellipsis-pos
                                 [:drest])
                               (when push-rest-pos
-                                [:prest])))}
+                                [:prest])
+                              (when push-dot-pos
+                                [:pdot])))}
       (when asterix-pos
         {:rest (parse rest-type)})
       (when ellipsis-pos
@@ -912,7 +951,18 @@
                      (parse drest-type))
             :name gbnd}}))
       (when push-rest-pos
-        {:prest (parse prest-type)}))))
+        {:prest (parse prest-type)})
+      (when push-dot-pos
+        (let [bnd (*dotted-scope* pdot-bnd)
+              _ (when-not (symbol? bnd)
+                  (err/int-error (str (pr-str pdot-bnd) " is not in scope as a dotted variable")))
+              gbnd (gensym bnd)]
+          {:pdot
+           {:op :dotted-pretype
+            :f {:op :F :name gbnd}
+            :drest (with-frees {pdot-bnd gbnd} ;with dotted bound in scope as free
+                     (parse pdot-type))
+            :name gbnd}})))))
 
 (defn parse-Fn [[_ & args :as syn]]
   {:op :Fn
