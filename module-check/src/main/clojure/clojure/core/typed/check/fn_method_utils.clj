@@ -13,7 +13,7 @@
 (defonce ^:dynamic *check-fn-method1-rest-type* nil)
 
 ;lam-result in TR
-(u/def-type FnResult [args kws rest drest prest body]
+(u/def-type FnResult [args kws rest drest prest pdot body]
   "Results of checking a fn method"
   [(every? symbol? (map first args))
    (every? r/Type? (map second args))
@@ -21,6 +21,7 @@
    ((some-fn nil? (con/hvector-c? symbol? r/Type?)) rest)
    ((some-fn nil? (con/hvector-c? symbol? r/Type?)) prest)
    ((some-fn nil? (con/hvector-c? symbol? r/DottedPretype?)) drest)
+   ((some-fn nil? (con/hvector-c? symbol? r/DottedPretype?)) pdot)
    (r/TCResult? body)])
 
 ;[FnResult -> Function]
