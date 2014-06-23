@@ -295,7 +295,7 @@
          (not (:rest dc1)))
     (dcon-meet dc2 dc1)
 
-    (and (every? cr/dcon-repeat? [dc1 dc2]))
+    (every? cr/dcon-repeat? [dc1 dc2])
     (let [[{short-fixed :fixed short-repeat :repeat}
            {long-fixed :fixed long-repeat :repeat}]
           (sort-by (fn [x] (-> x :fixed count)) [dc1 dc2])
@@ -303,19 +303,22 @@
           l-fixed-count (count long-fixed)
           s-repeat-count (count short-repeat)
           l-repeat-count (count long-repeat)
-          diff (- l-fixed-count s-fixed-count)]
-      (assert (and (= short-repeat long-repeat)
-                   (zero? (rem diff s-repeat-count))))
+          diff (- l-fixed-count s-fixed-count)
+          _ (assert (= s-repeat-count l-repeat-count))
+          vector' (t/inst vector c c Any Any Any Any)
+          merged-repeat (for> :- c
+                              [[c1 c2] :- '[c c], (map vector' short-repeat long-repeat)]
+                              (c-meet c1 c2 (:X c1)))]
+      (assert (zero? (rem diff s-repeat-count)))
       (cr/->dcon-repeat
-        (let [vector' (t/inst vector c c Any Any Any Any)]
-          (doall
-            (for> :- c
-              [[c1 c2] :- '[c c], (map vector'
-                                       long-fixed
-                                       (concat short-fixed
-                                               (gen-repeat (quot diff s-repeat-count) short-repeat)))]
-              (c-meet c1 c2 (:X c1)))))
-        short-repeat))
+        (doall
+          (for> :- c
+            [[c1 c2] :- '[c c], (map vector'
+                                     long-fixed
+                                     (concat short-fixed
+                                             (gen-repeat (quot diff s-repeat-count) short-repeat)))]
+            (c-meet c1 c2 (:X c1))))
+        merged-repeat))
 
     :else (err/nyi-error (str "NYI dcon-meet " dc1 dc2)))))
 
@@ -894,11 +897,11 @@
                         _ (when-not (Y dbound)
                             (fail! S T))
                         merged-X (merge X {dbound (Y dbound)})
-                        get-list-of-c (fn [S-list]
+                        get-list-of-c (fn get-list-of-c [S-list]
                                         (mapv #(get-c-from-cmap % dbound)
                                               (for> :- cset
                                                     [s :- r/Type, S-list]
-                                                    (cs-gen V merged-X Y t-dty s))))
+                                                    (cs-gen V merged-X Y s t-dty))))
                         repeat-c (get-list-of-c (:types S))]
                     [(assoc-in (cr/empty-cset X Y) [:maps 0 :dmap :map dbound] (cr/->dcon-repeat [] repeat-c))])
 
@@ -1517,7 +1520,7 @@
             S-prest-types (-> S :prest :types)
             S-prest-types-count (count S-prest-types)
             merged-X (merge X {dbound (Y dbound)})
-            get-list-of-c (fn [S-list]
+            get-list-of-c (fn get-list-of-c [S-list]
                             (mapv #(get-c-from-cmap % dbound)
                                   (for> :- cset
                                         [s :- r/Type, S-list]
