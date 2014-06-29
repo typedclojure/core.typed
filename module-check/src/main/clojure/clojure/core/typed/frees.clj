@@ -263,34 +263,30 @@
   (combine-frees (flip-variances (frees input-type))
                  (frees output-type)))
 
-(add-frees-method [::any-var HeterogeneousSeq]
-  [{:keys [types fs objects rest drest]}]
-  (apply combine-frees (concat (mapv frees (concat types fs objects))
-                               (when rest [(frees rest)])
-                               (when drest
-                                 [(dissoc (-> (:pre-type drest) frees)
-                                          (:name drest))]))))
-
 (add-frees-method [::any-var HeterogeneousMap]
   [{:keys [types optional]}]
   (apply combine-frees (mapv frees (concat (keys types) (vals types)
                                            (keys optional) (vals optional)))))
 
-(add-frees-method [::any-var HeterogeneousVector]
-  [{:keys [types fs objects rest drest]}] 
-  (apply combine-frees (concat (mapv frees (concat types fs objects))
-                               (when rest [(frees rest)])
-                               (when drest
-                                 [(dissoc (-> (:pre-type drest) frees)
-                                          (:name drest))]))))
-
-(add-frees-method [::any-var HSequential]
+(defn heterogeneous*-frees-any-var
   [{:keys [types fs objects rest drest]}]
   (apply combine-frees (concat (mapv frees (concat types fs objects))
                                (when rest [(frees rest)])
                                (when drest
                                  [(dissoc (-> (:pre-type drest) frees)
                                           (:name drest))]))))
+
+(add-frees-method [::any-var HeterogeneousSeq]
+  [t]
+  (heterogeneous*-frees-any-var t))
+
+(add-frees-method [::any-var HeterogeneousVector]
+  [t]
+  (heterogeneous*-frees-any-var t))
+
+(add-frees-method [::any-var HSequential]
+  [t]
+  (heterogeneous*-frees-any-var t))
 
 (add-frees-method [::any-var HSet]
   [{:keys [fixed]}]
