@@ -922,6 +922,10 @@
         (r/HeterogeneousVector? S)
         (cs-gen V X Y (c/upcast-hvec S) T)
 
+        (and (r/AssocType? S)
+             (r/Protocol? T))
+        (cs-gen V X Y (:target S) T)
+
         :else
         (do (when-not (subtype? S T) 
               (fail! S T))
@@ -2049,6 +2053,8 @@
         ;_ (prn "short-S" (map prs/unparse-type short-S))
         ;_ (prn "T" (map prs/unparse-type T))
         ;_ (prn "rest-S" (map prs/unparse-type rest-S))
+        ;_ (prn "R" R)
+        ;_ (prn "expected" expected)
         expected-cset (if expected
                         (cs-gen #{} X {dotted-var dotted-bnd} R expected)
                         (cr/empty-cset {} {}))
