@@ -7,6 +7,5 @@
   (is-tc-e   (function? function?) Boolean
              :requires [[clojure.test :refer [function?]]])
   (is-tc-err   (function? function?) String
-             :requires [[clojure.test :refer [function?]]])
-  (is-tc-err   (function? function) Boolean
              :requires [[clojure.test :refer [function?]]]))
+
