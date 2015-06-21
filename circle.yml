@@ -4,7 +4,3 @@ machine:
 dependencies:
   override:
     - true
-test:
-  override:
-    - mvn test
-
