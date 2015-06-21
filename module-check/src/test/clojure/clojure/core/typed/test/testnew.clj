@@ -22,3 +22,11 @@
 (deftest is-test
   (is-tc-e ( is (= 4 (+ 2 2))) Boolean))
 
+(deftest run-test-test
+  (is-tc-e (run-tests) Map
+           :require[[clojure.test] :refer [run-tests]])
+  (is-tc-err(run-tests) String
+           :require[[clojure.test] :refer [run-tests]])
+   (is-tc-err(run-tests "a") Map
+           :require[[clojure.test] :refer [run-tests]]))
+
