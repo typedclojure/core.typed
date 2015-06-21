@@ -11,8 +11,6 @@
   
 (deftest assert-any-test
   (is-tc-e   (assert-any "Hi" (= 4(+ 2 2) )) Any
-             :requires [[clojure.test :refer [assert-any]]])
-  (is-tc-err   (assert-any? 4 function?) Any
              :requires [[clojure.test :refer [assert-any]]]))
            
 (deftest do-report-test
