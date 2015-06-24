@@ -4877,6 +4877,16 @@
                (if (-> m :op keyword #{:plus})
                  (inc (:plus m))
                  (dec (:minus m))))))
+  (is-tc-e (do 
+             (defalias M (U '{:op Num
+                              :plus Int}
+                            '{:op Str
+                              :minus Int}))
+             (let [m :- M, {:op 1
+                            :plus 1}]
+               (if (-> m :op keyword not)
+                 (inc (:plus m))
+                 (dec (:minus m))))))
   )
 
 ;    (is-tc-e 
