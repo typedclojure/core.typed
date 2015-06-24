@@ -2,16 +2,16 @@
 
 <a href='http://typedclojure.org'><img src='images/part-of-typed-clojure-project.png'></a>
 
-Gradual typing in Clojure, as a library.
+Optional typing in Clojure, as a library.
 
 ## Releases and Dependency Information
 
-Latest stable release is 0.2.84.
+Latest stable release is 0.3.0-alpha5.
 
 Leiningen dependency information:
 
 ```clojure
-[org.clojure/core.typed "0.2.84"]
+[org.clojure/core.typed "0.3.0-alpha5"]
 
 ...
 ; for very recent releases
@@ -26,7 +26,7 @@ Maven dependency information:
 <dependency>
   <groupId>org.clojure</groupId>
   <artifactId>core.typed</artifactId>
-  <version>0.2.84</version>
+  <version>0.3.0-alpha5</version>
   <!-- slim jar -->
   <!-- <classifier>slim</classifier> -->
 </dependency>
@@ -82,6 +82,8 @@ See [wiki](https://github.com/clojure/core.typed/wiki).
 
 ## Developer Information
 
+- [Typed Clojure Contributor Code of Conduct](CODE_OF_CONDUCT.md)
+- [Contributing guidelines](CONTRIBUTING.md)
 - [GitHub Project](https://github.com/clojure/core.typed)
 - [Bug Tracker](http://dev.clojure.org/jira/browse/CTYP)
 - [Continuous Integration](http://build.clojure.org/job/core.typed/)

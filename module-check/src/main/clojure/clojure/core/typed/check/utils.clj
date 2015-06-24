@@ -1,6 +1,7 @@
 (ns ^:skip-wiki clojure.core.typed.check.utils
   (:require [clojure.core.typed :as t]
             [clojure.core.typed.utils :as u]
+            [clojure.core.typed.profiling :as p]
             [clojure.core.typed.ns-deps :as ns-deps]
             [clojure.core.typed.ns-deps-utils :as ns-depsu]
             [clojure.core.typed.reflect-utils :as reflect-u]
@@ -157,7 +158,7 @@
                             (when nilable?
                               [r/-nil]))))]
     typ
-    (err/tc-delayed-error (str "Method symbol " sym " does not resolve to a type"))))
+    (err/tc-delayed-error (str "Method or field symbol " sym " does not resolve to a type"))))
 
 ;[t/Sym Boolean -> (Option Type)]
 (defn- symbol->PArray [sym nilable?]
@@ -356,29 +357,45 @@
    :post [((every-pred namespace symbol?) %)]}
   (symbol (name declaring-class) (name name-sym)))
 
+(defn method-nilable-param? [msym nparams n]
+  {:post [(con/boolean? %)]}
+  (let [n (mtd-param-nil/nilable-param? msym nparams n)]
+    (if n
+      (u/p :check.method/has-nilable-param)
+      (u/p :check.method/no-nilable-param))
+    n))
+
+(defn method-nonnilable-return? [msym nparams]
+  {:post [(con/boolean? %)]}
+  (let [n (mtd-ret-nil/nonnilable-return? msym nparams)]
+    (if n
+      (u/p :check.method/has-nonnilable-return)
+      (u/p :check.method/no-nonnilable-return))
+    n))
 
 ;[clojure.reflect.Method -> Type]
 (defn Method->Type [{:keys [parameter-types return-type flags] :as method}]
   {:pre [(instance? clojure.reflect.Method method)]
    :post [(r/FnIntersection? %)]}
+  (p/p :check.method/inside-Method->Type)
   (let [msym (Method->symbol method)
         nparams (count parameter-types)]
-    (r/make-FnIntersection (r/make-Function (doall (map (fn [[n tsym]]
-                                                          (Java-symbol->Type
-                                                            tsym
-                                                            (mtd-param-nil/nilable-param? msym nparams n)))
+    (r/make-FnIntersection (r/make-Function (doall (map (fn [[n tsym]] 
+                                                          (Java-symbol->Type 
+                                                            tsym 
+                                                            (method-nilable-param? msym nparams n)))
                                                       (map-indexed vector
                                                                    (if (:varargs flags)
                                                                      (butlast parameter-types)
                                                                      parameter-types))))
-                                          (Java-symbol->Type
-                                            return-type
-                                            (not (mtd-ret-nil/nonnilable-return? msym nparams)))
+                                          (Java-symbol->Type 
+                                            return-type 
+                                            (not (method-nonnilable-return? msym nparams)))
                                           :rest
                                           (when (:varargs flags)
-                                            (Java-symbol->Type
-                                              (last parameter-types)
-                                              (mtd-param-nil/nilable-param? msym nparams (dec nparams))))))))
+                                            (Java-symbol->Type 
+                                              (last parameter-types) 
+                                              (method-nilable-param? msym nparams (dec nparams))))))))
 
 ;[clojure.reflect.Constructor -> Type]
 (defn Constructor->Function [{:keys [declaring-class parameter-types] :as ctor}]
@@ -437,50 +454,56 @@
 (defn check-ns-and-deps*
   "Type check a namespace and its dependencies.
   Assumes type annotations in each namespace
-  has already been collected."
-  ([nsym {:keys [ast-for-ns
-                 check-asts
-                 check-ns]}]
+  has already been collected.
+  
+  Always checks the given namespaces, however skips dependencies
+  that are in *already-checked*."
+  ([nsym {:keys [ast-for-ns check-asts check-ns]}]
    {:pre [(symbol? nsym)]
     :post [(nil? %)]}
    (u/p :check/check-ns-and-deps
-   (let []
-     (cond 
-       (already-checked? nsym) (do
-                                 ;(println (str "Already checked " nsym ", skipping"))
-                                 ;(flush)
-                                 nil)
-       :else
-       ; check deps
-       (let [deps (u/p :check/ns-immediate-deps 
-                    (ns-deps/typed-deps nsym))]
-         (checked-ns! nsym)
-         ;check deps added with typed-deps
-         (doseq [dep deps]
-           (check-ns dep))
-         ;check normal dependencies
-         (doseq [dep (ns-depsu/deps-for-ns nsym)
-                 :when (ns-depsu/should-check-ns? nsym)]
-           (check-ns dep))
-         ; ignore ns declaration
-         (let [ns-form (ns-depsu/ns-form-for-ns nsym)
-               check? (boolean (some-> ns-form ns-depsu/should-check-ns-form?))]
-           (if-not check?
-             (do (println (str "Not checking " nsym 
-                               (cond
-                                 (not ns-form) " (ns form missing)"
-                                 (ns-depsu/collect-only-ns? ns-form) " (tagged :collect-only in ns metadata)"
-                                 (not (ns-depsu/requires-tc? ns-form)) " (does not depend on clojure.core.typed)")))
-                 (flush))
-             (let [start (. System (nanoTime))
-                   asts (u/p :check/gen-analysis (ast-for-ns nsym))
-                   _ (println "Start checking" nsym)
-                   _ (flush)
-                   casts (check-asts asts)
-                   _ (assert (== (count casts) (count asts)))
-                   _ (when-let [checked-asts vs/*checked-asts*]
-                       (swap! checked-asts assoc nsym casts))
-                   _ (println "Checked" nsym "in" (/ (double (- (. System (nanoTime)) start)) 1000000.0) "msecs")
-                   _ (flush)
-                   ]
-         nil)))))))))
+    (let [deps (u/p :check/ns-immediate-deps 
+                 (ns-deps/typed-deps nsym))]
+      (checked-ns! nsym)
+      ;check deps added with typed-deps
+      (doseq [dep deps
+              :when (not (already-checked? dep))]
+        (check-ns dep))
+      ;check normal dependencies
+      (doseq [dep (ns-depsu/deps-for-ns nsym)
+              :when (and (ns-depsu/should-check-ns? nsym)
+                         (not (already-checked? dep)))]
+        (check-ns dep))
+      ; ignore ns declaration
+      (let [ns-form (ns-depsu/ns-form-for-ns nsym)
+            check? (boolean (some-> ns-form ns-depsu/should-check-ns-form?))]
+        (if-not check?
+          (do (println (str "Not checking " nsym 
+                            (cond
+                              (not ns-form) " (ns form missing)"
+                              (ns-depsu/collect-only-ns? ns-form) " (tagged :collect-only in ns metadata)"
+                              (not (ns-depsu/requires-tc? ns-form)) " (does not depend on clojure.core.typed)")))
+              (flush))
+          (let [start (. System (nanoTime))
+                asts (u/p :check/gen-analysis (ast-for-ns nsym))
+                _ (println "Start checking" nsym)
+                _ (flush)
+                casts (check-asts asts)
+                _ (assert (== (count casts) (count asts)))
+                _ (when-let [checked-asts vs/*checked-asts*]
+                    (swap! checked-asts assoc nsym casts))
+                _ (println "Checked" nsym "in" (/ (double (- (. System (nanoTime)) start)) 1000000.0) "msecs")
+                _ (flush)
+                ]
+            nil)))))))
+
+(defn find-updated-locals [env1 env2]
+  {:pre [(map? env1)
+         (map? env2)]}
+  (set
+    (filter identity
+            (for [[k v1] env1]
+              (when-let [v2 (get env2 k)]
+                (when (and (sub/subtype? v1 v2)
+                           (not (sub/subtype? v2 v1)))
+                  k))))))

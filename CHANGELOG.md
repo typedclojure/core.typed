@@ -1,6 +1,101 @@
-# 0.2.85 - SNAPSHOT
+# 0.3.0-SNAPSHOT
+
+- Breaking change:
+  - all `check-ns` operations now avoid rechecking transitive dependencies.
+    To explicitly recheck dependencies use the `:clean` keyword parameter.
+
+- Fix CTYP-214
+
+# 0.3.0-alpha5 - 2 June 2015
+
+- restore original ns in nREPL eval 
+
+# 0.3.0-alpha4 - 31 May 2015
+
+- support .cljc files in `load`
+- warn if :no-check is being removed from a var
+- annotate
+- clojure.repl/print-doc
+- complete.core annotations
+
+# 0.3.0-alpha3 - 30 May 2015
+
+- REPL tweaks
+
+# 0.3.0-alpha2 - 29 May 2015
+
+- support :load-file nREPL packets
+
+# 0.3.0-alpha1 - 28 May 2015
+
+- improved typed REPL interactions
+- fix `*e` annotation, can be nil
+- depend on clojure 1.7.0-RC1
+
+## Breaking
+
+`clojure.core.typed/check-form-info` return map entry `:delayed-errors`
+deprecated for `:ex`.
+
+# 0.2.92 - 20 May 2015
+
+- removed `*checking*` var
+- bump tools.reader to 0.9.2
+
+# 0.2.91 - 19 May 2015
+
+- improve application error messages
+  - find most general function signature
+
+# 0.2.90 - 18 May 2015
+
+- tweaks to REPL
+
+# 0.2.89 - 18 May 2015
+
+Thanks to Allen Rohner who provided patches for this release.
+
+- Fix CTYP-215
+- Fix CTYP-174
+- Fix CTYP-181
+  - better types for primitive casts
+- Fix CTYP-170
+- Fix CTYP-200
+
+# 0.2.88 - 18 May 2015
+
+## Typed REPL
+
+core.typed is now integrated into the compilation process for namespaces with
+`:core.typed` metadata mapped to a true value.
+
+To enable the typed REPL, add this to your project.clj:
+
+```clojure
+  :repl-options {:nrepl-middleware [clojure.core.typed.repl/wrap-clj-repl]}
+```
+
+Then the typed REPL can be invoked by code such as this.
+
+```clojure
+(ns ^:core.typed typed)
+
+(inc 'a)
+```
+
+# 0.2.87 - 1 April 2015
+
+- Remove AOT files from jar again
+
+# 0.2.86 - 1 April 2015
+
+- depend on clojure 1.7.0-alpha6
+- bump math.combinatorics dep to 0.1.1
+
+# 0.2.85 - 1 April 2015
 
 - document defalias is recursive
+- erase 3rd party AOT files from `org.clojure/core.typed` jar
 
 # 0.2.84 - 11 March 2015
 

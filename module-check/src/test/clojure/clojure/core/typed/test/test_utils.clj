@@ -35,18 +35,15 @@
     `(let [expected-ret# ~expected-ret]
        (binding [*ns* *ns*
                  *file* *file*]
-         ; checking (do ~ns-form ~frm) doesn't seem to work too well.
-         ; Don't check the ns form if we don't have extra requires, it's
-         ; much faster.
-         ~(if requires
-            `(t/check-form-info
-               '~ns-form)
-            ns-form)
          (t/check-form-info 
-           '~frm
+           '(do ~ns-form 
+                ~(if provided?
+                   `(t/ann-form ~frm ~syn)
+                   frm))
            :expected-ret expected-ret#
-           :expected '~syn
-           :type-provided? ~provided?)))))
+           ;:expected '~syn
+           ;:type-provided? ~provided?
+           )))))
 
 (defmacro tc-e 
   "Type check an an expression in namespace that :refer's
@@ -165,10 +162,10 @@
   `(equal-types-noparse ~l (binding [*ns* (find-ns '~'clojure.core.typed)] (parse-type (quote ~r)))))
 
 (defmacro tc-t [form]
-  `(let [{delayed-errors# :delayed-errors ret# :ret}
+  `(let [{ex# :ex ret# :ret}
          ~(tc-common* form {})]
-     (if-let [errors# (seq delayed-errors#)]
-       (err/print-errors! errors#)
+     (if ex#
+       (throw ex#)
        ret#)))
 
 (defmacro tc [form]

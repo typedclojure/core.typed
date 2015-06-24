@@ -117,7 +117,7 @@
                       {:env (env-for-error env)})))))
 
 (defn warn [msg]
-  (println (str "WARNING:" msg)))
+  (println (str "WARNING: " msg)))
 
 (defn deprecated-warn
   [msg]
@@ -226,7 +226,7 @@
                                        6)
                       *print-level* (when-not uvs/*verbose-forms*
                                       4)]
-              (println form))
+              (prn form))
             (println)
             (println)
             (flush)))

@@ -2,6 +2,7 @@
 
 (defonce ^:skip-wiki ^:dynamic *current-env* nil)
 (defonce ^:skip-wiki ^:dynamic *current-expr* nil)
+(defonce ^:skip-wiki ^:dynamic *in-check-form* nil)
 
 (defonce ^:dynamic 
   ^{:doc 
@@ -34,7 +35,6 @@
   nil)
 
 (def ^:skip-wiki ^:dynamic *currently-loading* false)
-(defonce ^{:doc "True during type checking."} ^:dynamic *checking* nil)
 (defonce ^{:doc "Internal use only"} ^:skip-wiki ^:dynamic *already-collected* nil)
 (defonce ^{:doc "Internal use only"} ^:skip-wiki ^:dynamic *already-checked* nil)
 (defonce ^{:doc "Internal use only"} ^:skip-wiki ^:dynamic *delayed-errors* nil)

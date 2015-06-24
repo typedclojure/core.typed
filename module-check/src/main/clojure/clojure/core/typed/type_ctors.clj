@@ -6,6 +6,7 @@
             [clojure.core.typed.coerce-utils :as coerce]
             clojure.core.typed.coerce-ann
             [clojure.core.typed.impl-protocols :as p]
+            [clojure.core.typed.profiling :as profile]
             [clojure.core.typed.type-rep :as r :refer [ret-t]]
             [clojure.core.typed.filter-rep :as fr]
             [clojure.core.typed.object-rep :as or]
@@ -1751,16 +1752,20 @@
 (t/ann ^:no-check remove-scopes [t/AnyInteger (t/U Scope r/Type) -> (t/U Scope r/Type)])
 (defn remove-scopes 
   "Unwrap n Scopes"
-  [n sc]
+  [^long n sc]
   {:pre [(con/znat? n)
          (or (zero? n)
              (r/Scope? sc))]
-   :post [(or (r/Scope? %) (r/Type? %))]}
-  (last
-    (take (inc n) (iterate (t/fn [t :- Scope]
-                             (assert (r/Scope? t) "Tried to remove too many Scopes")
-                             (:body t))
-                           sc))))
+   :post [(r/Type? %)]}
+  (loop [n n
+         sc sc]
+    (if (zero? n)
+      (do
+        (assert (r/Type? sc) (str "Did not remove enough scopes" sc))
+        sc)
+      (do
+        (assert (r/Scope? sc) (str "Tried to remove too many Scopes: " sc))
+        (recur (dec n) (:body sc))))))
 
 (t/ann ^:no-check rev-indexed (t/All [x] [(t/Seqable x) -> (t/Seqable '[t/AnyInteger x])]))
 (defn- rev-indexed 
@@ -2322,13 +2327,19 @@
                            :else r/-any))
       (r/HeterogeneousMap? t) (let [pres ((:types t) k)
                                     opt  ((:optional t) k)]
+                                (when (complete-hmap? t)
+                                  (profile/p :check/find-val-has-complete))
+                                (profile/p :check/find-val-type-with-hmap)
                                 (cond
                                   ; normal case, we have the key declared present
-                                  pres pres
+                                  pres (profile/p :check/find-val-type-with-hmap-present
+                                            pres)
 
                                   ; absent key, default
                                   ((:absent-keys t) k)
                                   (do
+                                    (profile/p :check/find-val-type-with-hmap-absent)
+
                                     #_(tc-warning
                                         "Looking up key " (ind/unparse-type k) 
                                         " in heterogeneous map type " (ind/unparse-type t)
@@ -2336,15 +2347,18 @@
                                     default)
 
                                   ; if key is optional the result is the val or the default
-                                  opt (Un opt default)
+                                  opt (profile/p :check/find-val-type-with-hmap-with-optional
+                                           (Un opt default))
 
                                   ; if map is complete, entry must be missing
-                                  (complete-hmap? t) default
+                                  (complete-hmap? t) (profile/p :check/find-val-type-with-hmap-complete-therefore-missing
+                                                          default)
 
                                   :else
                                   (do #_(tc-warning "Looking up key " (ind/unparse-type k)
                                                     " in heterogeneous map type " (ind/unparse-type t)
                                                     " which does not declare the key absent ")
+                                      (profile/p :check/find-val-type-with-hmap-fall-through)
                                       r/-any)))
 
       (r/Record? t) (find-val-type (Record->HMap t) k default)

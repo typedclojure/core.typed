@@ -1,5 +1,7 @@
 (ns clojure.core.typed.check.do
   (:require [clojure.core.typed.utils :as u]
+            [clojure.core.typed.check.utils :as cu]
+            [clojure.core.typed.profiling :as p]
             [clojure.core.typed.filter-rep :as fl]
             [clojure.core.typed.errors :as err]
             [clojure.core.typed.lex-env :as lex]
@@ -38,7 +40,7 @@
                                   (var-env/with-lexical-env env
                                     (check expr
                                            ;propagate expected type only to final expression
-                                           (when (= (inc n) nexprs)
+                                           (when (== (inc n) nexprs)
                                              expected))))
                           res (u/expr-type cexpr)
                           flow (-> res r/ret-flow r/flow-normal)
@@ -48,19 +50,12 @@
                           nenv (if (fl/NoFilter? flow)
                                  env
                                  (update/env+ env [flow] flow-atom))
+                          _ (u/trace-when-let
+                              [ls (seq (cu/find-updated-locals (:l env) (:l nenv)))]
+                              (p/p :check.do/updated-exceptional-control-flow)
+                              (str "Updated local in exceptional control flow (do): " ls))
                           ;_ (prn nenv)
                           ]
-  ;                        _ (when-not @flow-atom 
-  ;                            (binding [; always prefer envs with :line information, even if inaccurate
-  ;                                                  vs/*current-env* (if (:line (:env expr))
-  ;                                                                     (:env expr)
-  ;                                                                     vs/*current-env*)
-  ;                                      vs/*current-expr* expr]
-  ;                              (err/int-error (str "Applying flow filter resulted in local being bottom"
-  ;                                                "\n"
-  ;                                                (with-out-str (print-env* nenv))
-  ;                                                "\nOld: "
-  ;                                                (with-out-str (print-env* env))))))]
                       (if @flow-atom
                         ;reachable
                         [nenv (conj cexprs cexpr)]

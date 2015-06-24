@@ -76,9 +76,6 @@
            (-> body Scope-maker Scope-maker Scope-maker)))))
 
 (deftest remove-scopes-test
-  (is-clj (let [scope (Scope-maker (make-F 'a))]
-        (= (remove-scopes 0 scope)
-           scope)))
   (is-clj (let [body (make-F 'a)]
         (= (remove-scopes 1 (Scope-maker body))
            body))))
@@ -1325,7 +1322,17 @@
 
 (deftest dotimes-test
   (is-tc-e (dotimes [i 100] (inc i)) nil)
-  (is-tc-e (dotimes [i :- Num 100] (inc i)) nil))
+  (is-tc-e (dotimes [i :- Num 100] (inc i)) nil)
+  (is (let [a (atom 0)]
+        (clojure.core.typed/dotimes
+          [i 10]
+          (swap! a inc))
+        (= @a 10)))
+  (is (let [a (atom 0)]
+        (clojure.core.typed/dotimes
+          [i :- Num, 10]
+          (swap! a inc))
+        (= @a 10))))
 
 (deftest records-test
   (is (check-ns 'clojure.core.typed.test.records))
@@ -2668,7 +2675,8 @@
 
 ; just a sanity check so keyword arguments don't accidentally break
 (deftest check-ns-kw-args-test
-  (is (check-ns 'clojure.core.typed.test.interop :collect-only true)))
+  (is (check-ns 'clojure.core.typed.test.interop :collect-only true))
+  (is (check-ns 'clojure.core.typed.test.interop :clean true)))
 
 ;(sub? (clojure.core.typed/All [x] (TFn [[a :variance :covariant]] clojure.core.typed/Any))
 ;      (Rec [m] (TFn [[a :variance :covariant]] m)))
@@ -3615,7 +3623,7 @@
                                   (-FS -bot -top)
                                   -empty))
     (is-tc-err 1 
-               :expected-ret (ret (parse-clj 'Num)
+               :expected-ret (ret (parse-clj `Num)
                                   (-FS -bot -bot)
                                   -empty))
     (testing "checks object"
@@ -4806,6 +4814,93 @@
 
 (deftest CTYP-189-test
   (is-tc-e (for [x :- Int []] :- Int x)))
+
+(deftest CTYP-215-zero?-test
+  ; inlinings
+  (is-tc-e (zero? 1) Boolean)
+  (is-tc-err (zero? 'a) Boolean)
+  (is-tc-e zero? [Number -> Boolean]))
+
+(deftest CTYP-181-prim-cast-test
+  (is-tc-e float [Number -> Float])
+  ;; inlinings
+  (is-tc-e (float 1) Float)
+  (is-tc-err (float 'a) Float)
+  (is-tc-err (let [^Character c \c]
+               (float c))
+             Float)
+
+  (is-tc-e double [Number -> Double])
+  ;; inlinings
+  (is-tc-e (double 1) Double)
+  (is-tc-err (double 'a) Double)
+  (is-tc-err (let [^Character c \c]
+               (double c))
+             Double)
+
+  (is-tc-e int [(U Character Number) -> Integer])
+  ;; inlinings
+  (is-tc-e (int 1) Integer)
+  (is-tc-e (int \c) Integer)
+  (is-tc-err (int 'a) Integer)
+
+  (is-tc-e long [(U Character Number) -> Long])
+  ;; inlinings
+  (is-tc-e (long 1) Long)
+  (is-tc-e (let [^Character c \c]
+             (long c)) 
+           Long)
+  (is-tc-err (long 'a) Long)
+
+  (is-tc-e num [Number -> Number])
+  ;; inlinings
+  (is-tc-e (num 1) Number)
+  (is-tc-err (let [^Character c \c]
+               (num c))
+             Number)
+  (is-tc-err (num 'a) Number)
+
+  (is-tc-e short [(U Character Number) -> Short])
+  ;; inlinings
+  (is-tc-e (short 1) Short)
+  (is-tc-e (let [^Character c \c]
+             (short c))
+           Short)
+  (is-tc-err (short 'a) Short)
+
+  (is-tc-e byte [(U Character Number) -> Byte])
+  (is-tc-e (byte 1) Byte)
+  (is-tc-e (let [^Character c \c]
+             (byte c))
+           Byte)
+  (is-tc-err (byte 'a) Byte)
+
+  (is-tc-e char [(U Character Number) -> Character])
+  (is-tc-e (char 1) Character)
+  (is-tc-e (char \c) Character)
+  (is-tc-err (char 'a) Character)
+  )
+
+(deftest CTYP-170-test
+  (is-tc-e (apply concat [[]])))
+
+(deftest CTYP-200-test
+  (is-tc-e (min 1 2) Int)
+  (is-tc-e (max 1 2) Int)
+  (is-tc-e (#'min 1 2) Int)
+  (is-tc-e (#'max 1 2) Int))
+
+(deftest do-exp-repl-test
+  (is-tc-e (do (require '[clojure.core :as c])
+               (c/map inc []))))
+
+; promote-demote bug with HSet's
+(deftest CTYP-214-test
+  (is-tc-e (atom #{})))
+
+(deftest seq-branch-test
+  (is-tc-e (if (seq [1 2 3]) 1 nil)
+           Num))
 
 ;    (is-tc-e 
 ;      (let [f (fn [{:keys [a] :as m} :- '{:a (U nil Num)}] :- '{:a Num} 
