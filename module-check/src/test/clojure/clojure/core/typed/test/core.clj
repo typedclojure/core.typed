@@ -4815,6 +4815,10 @@
   (is-tc-e (if (seq [1 2 3]) 1 nil)
            Num))
 
+
+(deftest bigint-test
+  (is-tc-e (bigint 1))
+  (is-tc-e (bigint "1")))
 ;    (is-tc-e 
 ;      (let [f (fn [{:keys [a] :as m} :- '{:a (U nil Num)}] :- '{:a Num} 
 ;                {:pre [(number? a)]} 
