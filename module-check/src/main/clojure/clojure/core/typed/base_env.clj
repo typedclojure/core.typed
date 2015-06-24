@@ -453,21 +453,21 @@ clojure.core/disj
 
 clojure.core/disj!
      (All [x]
-         (IFn [(ITransientSet x) Any Any * -> (ITransientSet x)])) 
+         (IFn [(Unique (ITransientSet x)) Any Any * -> (Unique (ITransientSet x))])) 
 
 clojure.core/transient
      (All [x y]
-         (IFn [(Vec x) -> (ITransientVector x)]
-              [(Set x) -> (ITransientSet x)]
-              [(Map x y) -> (ITransientMap x y)]
-              [(Map x y) -> (ATransientMap x y)])) 
+         (IFn [(Vec x) -> (Unique (ITransientVector x))]
+              [(Set x) -> (Unique (ITransientSet x))]
+              [(Map x y) -> (Unique (ITransientMap x y))]
+              [(Map x y) -> (Unique (ATransientMap x y))])) 
 
 clojure.core/persistent!
      (All [x y]
-          (IFn [(ITransientVector x) -> (Vec x)]
-               [(ITransientSet x) -> (Set x)]
-               [(ITransientMap x y) -> (Map x y)]
-               [(ATransientMap x y) -> (Map x y)]))
+          (IFn [(Unique (ITransientVector x)) -> (Vec x)]
+               [(Unique (ITransientSet x)) -> (Set x)]
+               [(Unique (ITransientMap x y)) -> (Map x y)]
+               [(Unique (ATransientMap x y)) -> (Map x y)]))
 
 clojure.core/assoc
      (All [b c d]
@@ -476,8 +476,8 @@ clojure.core/assoc
 
 clojure.core/assoc!
      (All [b c d]
-          (IFn [(ITransientMap b c) b c -> (ITransientMap b c)]
-               [(ITransientVector d) AnyInteger d -> (ITransientVector d)]))
+          (IFn [(Unique (ITransientMap b c)) b c -> (Unique (ITransientMap b c))]
+               [(Unique (ITransientVector d)) AnyInteger d -> (Unique (ITransientVector d))]))
 
 clojure.core/dissoc
      (All [k v]
@@ -485,7 +485,7 @@ clojure.core/dissoc
 
 clojure.core/dissoc!
      (All [k v] 
-          (IFn [(ITransientMap k v) Any * -> (ITransientMap k v)]))
+          (IFn [(Unique (ITransientMap k v)) Any * -> (Unique (ITransientMap k v))]))
 
 
 )
@@ -1028,15 +1028,15 @@ clojure.core/conj
 
 clojure.core/conj!
      (All [x y]
-         (IFn [(ITransientVector x) x x * -> (ITransientVector x)]
-             [(ATransientMap x y)
+         (IFn [(Unique (ITransientVector x)) x x * -> (Unique (ITransientVector x))]
+             [(Unique (ATransientMap x y))
               (U nil (Seqable (IMapEntry x y)) (IMapEntry x y) '[x y])
               (U nil (Seqable (IMapEntry x y)) (IMapEntry x y) '[x y]) *
-              -> (ATransientMap x y)]
-             [(ITransientMap x y)
+              -> (Unique (ATransientMap x y))]
+             [(Unique (ITransientMap x y))
               (U nil (Seqable (IMapEntry x y)) (IMapEntry x y) '[x y])
-              (U nil (Seqable (IMapEntry x y)) (IMapEntry x y) '[x y]) * -> (ITransientMap x y)]
-             [(ITransientSet x) x x * -> (ITransientSet x)]))
+              (U nil (Seqable (IMapEntry x y)) (IMapEntry x y) '[x y]) * -> (Unique (ITransientMap x y))]
+             [(Unique (ITransientSet x)) x x * -> (Unique (ITransientSet x))]))
 
 ; IPersistentCollection [[x :variance :covariant]
 ;                        :conj-fn [conj-fn :kind (TFn [[x :variance :covariant]] (IPersistentCollection x))]
@@ -1220,7 +1220,7 @@ clojure.core/pop (All [x]
 
 clojure.core/pop! (All [x]
                        (IFn
-                         [(ITransientVector x) -> (ITransientVector x)]))
+                         [(Unique (ITransientVector x)) -> (Unique (ITransientVector x))]))
 
 
 
