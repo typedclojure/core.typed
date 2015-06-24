@@ -1,20 +1,22 @@
 (ns ^:skip-wiki clojure.core.typed.ast-utils
   (:require [clojure.core.typed.current-impl :as impl]
             [clojure.core.typed.contract-utils :as con]
-            [clojure.core.typed.coerce-utils :as coerce]))
+            [clojure.core.typed.coerce-utils :as coerce]
+            [clojure.tools.analyzer.passes.jvm.emit-form :as emit-form]))
 
 (alter-meta! *ns* assoc :skip-wiki true)
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; AST ops
 
+(defn emit-typed-form [expr]
+  (emit-form/emit-form expr))
 
 ;AnalysisExpr -> Form
 ;(ann emit-form-fn [Any -> Any])
 (defn emit-form-fn [expr]
   (impl/impl-case
-    :clojure (do (require '[clojure.tools.analyzer.passes.jvm.emit-form])
-                 ((impl/v 'clojure.tools.analyzer.passes.jvm.emit-form/emit-form) expr))
+    :clojure (emit-typed-form expr)
     :cljs (do
             (require '[clojure.core.typed.util-cljs])
             ((impl/v 'clojure.core.typed.util-cljs/emit-form) expr))))
