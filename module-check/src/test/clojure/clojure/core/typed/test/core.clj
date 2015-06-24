@@ -4855,6 +4855,28 @@
              (defmethod f :minus [m] (inc (:minus m)))))
   ;; polymorphic setting
   (is-tc-e (map keyword '[a b c]))
+  ;; with symbols, via keyword
+  (is-tc-e (do 
+             (defalias M (U '{:op 'plus
+                              :plus Int}
+                            '{:op 'minus
+                              :minus Int}))
+             (let [m :- M, {:op 'plus
+                            :plus 1}]
+               (if (-> m :op keyword #{:plus})
+                 (inc (:plus m))
+                 (dec (:minus m))))))
+  ;; with keywords and nil, via keyword
+  (is-tc-e (do 
+             (defalias M (U '{:op ':plus
+                              :plus Int}
+                            '{:op nil
+                              :minus Int}))
+             (let [m :- M, {:op :plus
+                            :plus 1}]
+               (if (-> m :op keyword #{:plus})
+                 (inc (:plus m))
+                 (dec (:minus m))))))
   )
 
 ;    (is-tc-e 
