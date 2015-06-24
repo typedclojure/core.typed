@@ -161,6 +161,20 @@ clojure.core.typed/override-method* [Any Any -> Any]
 clojure.core.typed/typed-deps* [Any -> Any]
 clojure.core.typed/load-if-needed [-> Any]
 clojure.core.typed/*collect-on-eval* Any
+clojure.core.typed/check-form* (IFn [Any -> Any]
+                                    [Any Any -> Any]
+                                    [Any Any Bool -> Any])
+clojure.core.typed/check-form-info [Any & 
+                                    :optional {:expected Any
+                                               :type-provided? Any
+                                               :profile Any
+                                               :file-mapping Any
+                                               :checked-ast Any
+                                               :no-eval Any}
+                                    -> (HMap :mandatory {:ret Any}
+                                             :optional {:out-form Any
+                                                        :result Any
+                                                        :ex Throwable})]
 ; should always be special cased
 ;clojure.core.typed/var>* [Any -> (Var2 Nothing Any)]
 
