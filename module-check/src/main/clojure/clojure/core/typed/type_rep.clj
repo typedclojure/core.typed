@@ -824,6 +824,13 @@
   :methods
   [p/TCType])
 
+(defn make-Not [t]
+  {:pre [(Type? t)]
+   :post [(Type? t)]}
+  (if (NotType? t)
+    t
+    (NotType-maker t)))
+
 (u/ann-record DifferenceType [type :- Type
                               without :- (t/SortedSet Type)])
 (u/def-type DifferenceType [type without]
