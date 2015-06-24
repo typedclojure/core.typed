@@ -3050,11 +3050,14 @@
   )
 
 (deftest apply-hmap-test
+  ;; special case for direct apply
+  (is-tc-e (apply hash-map [:a 1 :b 2])
+           (HMap :mandatory {:a Number
+                             :b Number}
+                 :complete? true))
+  ;; indirect higher-order usages are less precise
   (is-tc-e (apply (inst hash-map Keyword Number) [:a 1 :b 2])
            :expected (Map Keyword Number)))
-;         (HMap :mandatory {:a Number
-;                           :b Number}
-;               :complete? true)))
 
 (deftest HVec-parse-ast-test
   (is (clojure.core.typed.parse-ast/parse-clj `(HVec [Number])))
