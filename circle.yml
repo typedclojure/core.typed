@@ -4,7 +4,7 @@ machine:
 
 test:
   override:
-    - mvn test
+    - mvn test:
       parallel: true
       files:
         - module-check/src/test/**/*.clj
