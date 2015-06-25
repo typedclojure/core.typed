@@ -28,6 +28,10 @@
   (assoc! @m-atom :a 1)
   (assoc! @m-atom :b 2))
 
+(let [a :- (Unique Int), 1]
+  a
+  a)
+
 ; Some more interesting cases 
 
 ; (let [x (transient {})] (if c x x))

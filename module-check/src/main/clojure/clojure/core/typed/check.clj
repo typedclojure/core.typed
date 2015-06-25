@@ -187,6 +187,8 @@
           _ (when-not (var-env/used-var? id)
               (var-env/add-used-var id))
           t (var-env/lookup-Var-nofail (coerce/var->symbol var))]
+      (if (r/Unique? id)
+        (err/tc-delayed-error "Unique var " + id + "used more than once"))
       (if t
         (assoc expr
                u/expr-type (below/maybe-check-below
@@ -216,6 +218,8 @@
                                            " via check-ns or cf")
                                       :form (ast-u/emit-form-fn expr)
                                       :return (r/TCError-maker)))]
+    (if (r/Unique? id)
+      (err/tc-delayed-error "Unique var " + id + "used more than once"))
     (assoc expr
            u/expr-type (binding [vs/*current-expr* expr]
                          (below/maybe-check-below
@@ -1386,6 +1390,11 @@
 
 (add-check-method :local
   [{sym :name :as expr} & [expected]]
+  (if (and 
+        (= false (get-in @lex/*used-locals* [sym]))
+        (r/Unique? sym))
+      (swap! lex/*used-locals* assoc sym true)
+      (swap! lex/*used-locals* assoc sym false))
   (assoc expr
          u/expr-type (local-result/local-result expr sym expected)))
 

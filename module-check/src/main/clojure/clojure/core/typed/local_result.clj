@@ -40,6 +40,8 @@
   {:pre [(con/local-sym? sym)
          ((some-fn nil? r/TCResult?) expected)]
    :post [(r/TCResult? %)]}
+  (if (= true (get-in @lex/*used-locals* [sym]))
+    (err/tc-delayed-error (str sym " is unique, can't use again ")))
   (binding [vs/*current-expr* expr]
     (prs/with-unparse-ns (cu/expr-ns expr)
       (below/maybe-check-below

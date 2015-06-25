@@ -98,7 +98,9 @@
 
 (defn add-used-var [sym]
   (swap! (current-used-vars) conj sym)
-  (swap! lex/*used-locals* assoc sym false)
+  (if (r/Unique? sym)
+    (swap! lex/*used-locals* assoc sym true)
+    (swap! lex/*used-locals* assoc sym false))
   nil)
 
 (defn add-used-once-var [sym]
