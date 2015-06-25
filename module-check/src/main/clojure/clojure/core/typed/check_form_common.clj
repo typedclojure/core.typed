@@ -9,7 +9,8 @@
             [clojure.core.typed.util-vars :as vs]
             [clojure.core.typed.current-impl :as impl]
             [clojure.core.typed.errors :as err]
-            [clojure.core.typed.parse-unparse :as prs])
+            [clojure.core.typed.parse-unparse :as prs]
+            [clojure.core.typed.lex-env :as lex])
   (:import (clojure.lang ExceptionInfo)))
 
 (defn check-form-info
@@ -27,7 +28,8 @@
                   vs/*already-collected* (atom #{})
                   vs/*already-checked* (atom #{})
                   vs/*delayed-errors* (err/-init-delayed-errors)
-                  vs/*analyze-ns-cache* (cache/soft-cache-factory {})]
+                  vs/*analyze-ns-cache* (cache/soft-cache-factory {})
+                  lex/*used-locals* (atom {})]
           (let [terminal-error? (atom nil)
                 expected (or
                            expected-ret

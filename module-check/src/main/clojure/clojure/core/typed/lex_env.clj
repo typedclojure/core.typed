@@ -47,18 +47,11 @@
 (defn lookup-local [sym]
   {:pre [(con/local-sym? sym)]
    :post [((some-fn nil? r/Type? r/Unique?) %)]}
-  (if (and 
-        (= (get-in *used-locals* [:l sym]) true)
-        (r/Unique? (get-in *lexical-env* [:l sym])))
-    (throw (Exception. "variable used twice"))
-    (do
-      (swap! *used-locals* assoc sym true)
-      (get-in *lexical-env* [:l sym]))))
+  (get-in *lexical-env* [:l sym]))
 
 (defn merge-locals [env new]
   {:pre [(PropEnv? env)]
    :post [(PropEnv? %)]}
-  ;(swap! *used-locals* assoc (get-in *used-locals* [:l]) false)
   (-> env
       (update-in [:l] merge new)))
 

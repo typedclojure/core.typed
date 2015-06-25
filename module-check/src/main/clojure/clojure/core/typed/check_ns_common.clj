@@ -10,6 +10,7 @@
             [clojure.core.typed.util-vars :as vs]
             [clojure.core.typed.errors :as err]
             [clojure.core.typed.current-impl :as impl]
+            [clojure.core.typed.lex-env :as lex]
             [clojure.java.io :as io]
             [clojure.core.cache :as cache]
             [clojure.jvm.tools.analyzer :as jta])
@@ -43,6 +44,7 @@
             (binding [vs/*checking* true
                       vs/*delayed-errors* (err/-init-delayed-errors)
                       vs/*already-checked* (atom #{})
+                      lex/*used-locals* (atom {})
                       vs/*trace-checker* trace
                       vs/*analyze-ns-cache* (cache/soft-cache-factory {})
                       ; we only use this if we have exactly one namespace passed

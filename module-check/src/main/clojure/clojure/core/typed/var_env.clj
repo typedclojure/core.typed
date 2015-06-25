@@ -93,14 +93,17 @@
 
 (defn add-nocheck-var [sym]
   (swap! (current-nocheck-var?) conj sym)
+  (swap! lex/*used-locals* assoc sym false)
   nil)
 
 (defn add-used-var [sym]
   (swap! (current-used-vars) conj sym)
+  (swap! lex/*used-locals* assoc sym false)
   nil)
 
 (defn add-used-once-var [sym]
   (swap! (current-used-once-vars) conj sym)
+  (swap! lex/*used-locals* assoc sym true)
   nil)
 
 (defn add-checked-var-def [sym]
