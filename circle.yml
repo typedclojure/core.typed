@@ -5,6 +5,6 @@ machine:
 test:
   override:
     - mvn test:
-      parallel: true
-      files:
-        - module-check/src/test/**/*.clj
+        parallel: true
+        files:
+          - module-check/src/test/**/*.clj
