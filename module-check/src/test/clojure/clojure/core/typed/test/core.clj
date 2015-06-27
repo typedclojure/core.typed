@@ -1128,8 +1128,6 @@
 (deftest pop!-test
   (is-tc-e (pop! (transient [1 2 3])) (clojure.lang.ITransientVector Number)))
 
-
-
 ;; `do` is special at the top level, tc-ignore should expand out to `do`
 (tc-ignore
  (defprotocol some-proto (some-proto-method [_]))
