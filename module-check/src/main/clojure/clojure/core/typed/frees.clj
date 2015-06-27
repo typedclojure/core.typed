@@ -14,7 +14,7 @@
             [clojure.core.typed.name-env :as nmenv]
             [clojure.core.typed.declared-kind-env :as kinds])
   (:import (clojure.core.typed.type_rep NotType DifferenceType Intersection Union FnIntersection Bounds
-                                        DottedPretype Function RClass App TApp
+                                        DottedPretype Function RClass App TApp Unique
                                         PrimitiveArray DataType Protocol TypeFn Poly PolyDots
                                         Mu HeterogeneousVector HeterogeneousList HeterogeneousMap
                                         CountRange Name Value Top TopFunction B F Result AnyValue
@@ -215,6 +215,10 @@
 (add-frees-method [::any-var App]
   [{:keys [rator rands]}]
   (apply combine-frees (mapv frees (cons rator rands))))
+
+(add-frees-method [::any-var Unique]
+  [{:keys [utype]}]
+  (frees utype))
 
 ;FIXME flow error during checking
 (t/tc-ignore

@@ -21,7 +21,7 @@
             [clojure.core.typed.subst]
             [clojure.core.typed.current-impl :as impl :refer [v]]
             [clojure.core.typed :refer [Any Nothing TFn Rec
-                                        Pred U I All IFn
+                                        Pred U I All IFn Unique
                                         HVec HSequential Keyword]
              :as t]))
 

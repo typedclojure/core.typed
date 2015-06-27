@@ -1391,11 +1391,12 @@
 
 (add-check-method :local
   [{sym :name :as expr} & [expected]]
-  (if (and
-        (= false (get-in @lex/*used-locals* [sym]))
-        (r/Unique? (:t (local-result/local-ret sym))))
-      (swap! lex/*used-locals* assoc sym true)
-      (swap! lex/*used-locals* assoc sym false))
+  (when (and 
+          (r/Unique? (:t (local-result/local-ret sym)))
+          (contains? @lex/*all-locals* sym))
+      (reset! lex/*used-locals* (into @lex/*used-locals* #{sym})))
+  (reset! lex/*all-locals* (into @lex/*all-locals* #{sym}))
+
   (assoc expr
          u/expr-type (local-result/local-result expr sym expected)))
 

@@ -29,7 +29,8 @@
                   vs/*already-checked* (atom #{})
                   vs/*delayed-errors* (err/-init-delayed-errors)
                   vs/*analyze-ns-cache* (cache/soft-cache-factory {})
-                  lex/*used-locals* (atom {})]
+                  lex/*used-locals* (atom #{})
+                  lex/*all-locals* (atom #{})]
           (let [terminal-error? (atom nil)
                 expected (or
                            expected-ret
