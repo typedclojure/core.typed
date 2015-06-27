@@ -3,8 +3,6 @@
             [clojure.core.typed.type-rep :as r]
             [clojure.core.typed.type-ctors :as c]
             [clojure.core.typed.filter-rep]
-            [clojure.core.typed.object-rep]
-            [clojure.core.typed.path-rep]
             [clojure.core.typed.frees :as frees]
             [clojure.core.typed :as t]
             [clojure.core.typed.hset-utils :as hset]
@@ -21,14 +19,15 @@
                                         AnyValue TopFunction Scope DissocType AssocType
                                         GetType GTRange)
            (clojure.core.typed.filter_rep TopFilter BotFilter TypeFilter NotTypeFilter AndFilter OrFilter
-                                          ImpFilter)
-           (clojure.core.typed.object_rep NoObject EmptyObject Path)
-           (clojure.core.typed.path_rep KeyPE CountPE ClassPE NthPE)))
+                                          ImpFilter)))
 
 (alter-meta! *ns* assoc :skip-wiki true)
 
 ;FIXME use fold!
 ;TODO automatically check for completeness
+
+;; Note: paths and path elements are currently ignored because they cannot contain variables.
+;; FIXME this should probably consider filters too.
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Variable Elimination
@@ -217,8 +216,8 @@
 
 (promote-demote HSet
   [T V]
-  (let [fixed (mapv promote (:fixed T) (repeat V))
-        h (r/-hset fixed (:complete? T))]
+  (let [fixed (set (mapv promote (:fixed T) (repeat V)))
+        h (r/-hset fixed :complete? (:complete? T))]
     (if (every? (fn [a] 
                   (and (r/Value? a)
                        (hset/valid-fixed? (:val a))))
@@ -374,6 +373,7 @@
         body (c/Mu-body* name T)]
     (c/Mu* name (promote body V))))
 
+;; Note: ignores path elements
 (defmethod promote Function
   [{:keys [dom rng rest drest kws] :as T} V]
   (let [pmt #(promote % V)

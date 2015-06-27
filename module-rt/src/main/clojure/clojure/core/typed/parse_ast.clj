@@ -202,6 +202,7 @@
     Count {:op :CountPE}
     Keys {:op :KeysPE}
     Vals {:op :ValsPE}
+    Keyword {:op :KeywordPE}
     (let [m (when (seq? syn)
               (let [[f & args] syn]
                 (case f
@@ -506,7 +507,7 @@
                        (map first))
         _ (when-not (every? keyword? flat-keys)
             (err/int-error (str "HMap requires keyword arguments, given " (pr-str (first flat-keys))
-                                " in: " (pr-str all))))
+                                #_#_" in: " (pr-str all))))
         _ (let [kf (->> flat-keys
                         multi-frequencies
                         (map first)

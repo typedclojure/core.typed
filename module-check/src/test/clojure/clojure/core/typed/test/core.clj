@@ -1097,7 +1097,7 @@
   (is-tc-e (transient #{}) (clojure.lang.ITransientSet Any))
   (is-tc-e (transient #{1 2}) (clojure.lang.ITransientSet Number))
   (is-tc-e (transient {}) (clojure.lang.ITransientMap Any Any))
-  (is-tc-e (transient (sorted-set 4 3 1 2)) (clojure.lang.ITransientSet Number))
+  ;(is-tc-e (transient (sorted-set 4 3 1 2)) (clojure.lang.ITransientSet Number))
   (is-tc-e (transient (hash-set 1 2 1 2)) (clojure.lang.ITransientSet Number))
   (is-tc-e (transient {:a "a" :b "b" :c "c"}) (clojure.lang.ITransientMap Keyword String))
   (is-tc-e (transient {1 "a" 2 "b"}) (clojure.lang.ATransientMap Number String)))
@@ -1362,7 +1362,17 @@
 
 (deftest dotimes-test
   (is-tc-e (dotimes [i 100] (inc i)) nil)
-  (is-tc-e (dotimes [i :- Num 100] (inc i)) nil))
+  (is-tc-e (dotimes [i :- Num 100] (inc i)) nil)
+  (is (let [a (atom 0)]
+        (clojure.core.typed/dotimes
+          [i 10]
+          (swap! a inc))
+        (= @a 10)))
+  (is (let [a (atom 0)]
+        (clojure.core.typed/dotimes
+          [i :- Num, 10]
+          (swap! a inc))
+        (= @a 10))))
 
 (deftest records-test
   (is (check-ns 'clojure.core.typed.test.records))
@@ -3651,7 +3661,7 @@
                                   (-FS -bot -top)
                                   -empty))
     (is-tc-err 1 
-               :expected-ret (ret (parse-clj 'Num)
+               :expected-ret (ret (parse-clj `Num)
                                   (-FS -bot -bot)
                                   -empty))
     (testing "checks object"
@@ -4754,6 +4764,210 @@
 
 (deftest CTYP-189-test
   (is-tc-e (for [x :- Int []] :- Int x)))
+
+(deftest CTYP-215-zero?-test
+  ; inlinings
+  (is-tc-e (zero? 1) Boolean)
+  (is-tc-err (zero? 'a) Boolean)
+  (is-tc-e zero? [Number -> Boolean]))
+
+(deftest CTYP-181-prim-cast-test
+  (is-tc-e float [Number -> Float])
+  ;; inlinings
+  (is-tc-e (float 1) Float)
+  (is-tc-err (float 'a) Float)
+  (is-tc-err (let [^Character c \c]
+               (float c))
+             Float)
+
+  (is-tc-e double [Number -> Double])
+  ;; inlinings
+  (is-tc-e (double 1) Double)
+  (is-tc-err (double 'a) Double)
+  (is-tc-err (let [^Character c \c]
+               (double c))
+             Double)
+
+  (is-tc-e int [(U Character Number) -> Integer])
+  ;; inlinings
+  (is-tc-e (int 1) Integer)
+  (is-tc-e (int \c) Integer)
+  (is-tc-err (int 'a) Integer)
+
+  (is-tc-e long [(U Character Number) -> Long])
+  ;; inlinings
+  (is-tc-e (long 1) Long)
+  (is-tc-e (let [^Character c \c]
+             (long c)) 
+           Long)
+  (is-tc-err (long 'a) Long)
+
+  (is-tc-e num [Number -> Number])
+  ;; inlinings
+  (is-tc-e (num 1) Number)
+  (is-tc-err (let [^Character c \c]
+               (num c))
+             Number)
+  (is-tc-err (num 'a) Number)
+
+  (is-tc-e short [(U Character Number) -> Short])
+  ;; inlinings
+  (is-tc-e (short 1) Short)
+  (is-tc-e (let [^Character c \c]
+             (short c))
+           Short)
+  (is-tc-err (short 'a) Short)
+
+  (is-tc-e byte [(U Character Number) -> Byte])
+  (is-tc-e (byte 1) Byte)
+  (is-tc-e (let [^Character c \c]
+             (byte c))
+           Byte)
+  (is-tc-err (byte 'a) Byte)
+
+  (is-tc-e char [(U Character Number) -> Character])
+  (is-tc-e (char 1) Character)
+  (is-tc-e (char \c) Character)
+  (is-tc-err (char 'a) Character)
+  )
+
+(deftest CTYP-170-test
+  (is-tc-e (apply concat [[]])))
+
+(deftest CTYP-200-test
+  (is-tc-e (min 1 2) Int)
+  (is-tc-e (max 1 2) Int)
+  (is-tc-e (#'min 1 2) Int)
+  (is-tc-e (#'max 1 2) Int))
+
+(deftest do-exp-repl-test
+  (is-tc-e (do (require '[clojure.core :as c])
+               (c/map inc []))))
+
+; promote-demote bug with HSet's
+(deftest CTYP-214-test
+  (is-tc-e (atom #{})))
+
+(deftest seq-branch-test
+  (is-tc-e (if (seq [1 2 3]) 1 nil)
+           Num))
+
+(deftest quote-string-test
+  (is-tc-e "a" '"a")
+  (is-tc-err "a" '"b")
+  (is-tc-e "a" (Val "a")))
+
+(deftest keyword-pe-test
+  ;; with keywords
+  (is-tc-e (do 
+             (defalias M (U '{:op ':plus
+                              :plus Int}
+                            '{:op ':minus
+                              :minus Int}))
+             (let [m :- M, {:op :plus
+                            :plus 1}]
+               (if (-> m :op #{:plus})
+                 (inc (:plus m))
+                 (dec (:minus m))))))
+  ;; with strings, via keyword
+  (is-tc-e (do 
+             (defalias M (U '{:op '"plus"
+                              :plus Int}
+                            '{:op '"minus"
+                              :minus Int}))
+             (let [m :- M, {:op "plus"
+                            :plus 1}]
+               (if (-> m :op keyword #{:plus})
+                 (inc (:plus m))
+                 (dec (:minus m))))))
+  ;; defmulti dispatch
+  (is-tc-e (do 
+             (defalias M (U '{:op '"plus"
+                              :plus Int}
+                            '{:op '"minus"
+                              :minus Int}))
+             (ann f [M -> Int])
+             (defmulti f (fn [m :- M] (-> m :op keyword)))
+             (defmethod f :plus [m] (inc (:plus m)))
+             (defmethod f :minus [m] (inc (:minus m)))))
+  ;; polymorphic setting
+  (is-tc-e (map keyword '[a b c]))
+  ;; with symbols, via keyword
+  (is-tc-e (do 
+             (defalias M (U '{:op 'plus
+                              :plus Int}
+                            '{:op 'minus
+                              :minus Int}))
+             (let [m :- M, {:op 'plus
+                            :plus 1}]
+               (if (-> m :op keyword #{:plus})
+                 (inc (:plus m))
+                 (dec (:minus m))))))
+  ;; with keywords and nil, via keyword
+  (is-tc-e (do 
+             (defalias M (U '{:op ':plus
+                              :plus Int}
+                            '{:op nil
+                              :minus Int}))
+             (let [m :- M, {:op :plus
+                            :plus 1}]
+               (if (-> m :op keyword #{:plus})
+                 (inc (:plus m))
+                 (dec (:minus m))))))
+  (is-tc-e (do 
+             (defalias M (U '{:op Num
+                              :plus Int}
+                            '{:op Str
+                              :minus Int}))
+             (let [m :- M, {:op 1
+                            :plus 1}]
+               (if (-> m :op keyword not)
+                 (inc (:plus m))
+                 (dec (:minus m))))))
+  )
+
+(deftest keyword-path-type-test
+  (is-tc-e (keyword :a))
+  (is-tc-e (keyword (ann-form :a Kw)))
+  (is-tc-e (let [k (keyword (ann-form :a Kw))]
+             (name k)))
+  (is (=
+       (-val :a)
+       (path-type (-val 'a)
+                  [(KeywordPE-maker)])))
+  (is-tc-e (fn [k :- 'a] :- Kw
+             (let [i (keyword k)]
+               i)))
+  ; need symbol literals as objects
+  ;(is-tc-e (keyword 'a) ':a)
+  (is-tc-e (fn [k]
+             (let [i (keyword k)]
+               i))
+           (IFn ['a -> ':a]
+                ['a/b -> ':a/b]
+                ['"a" -> ':a]
+                ['"a/b" -> ':a/b]
+                [':a -> ':a]
+                [':a/b -> ':a/b]
+                [Sym -> Kw]
+                [Kw -> Kw]
+                [Str -> Kw]
+                [(U Sym Kw Str) -> Kw]
+                [nil -> nil]
+                [Any -> (U nil Kw)]))
+  (is-tc-e (fn [k :- Any] :- Kw
+             (let [i (keyword k)]
+               (assert (keyword? k))
+               i)))
+  (is-tc-e (fn [k :- Any] :- (U Kw Str Sym)
+             (let [i (keyword k)]
+               (assert (keyword? i))
+               k)))
+  (is-tc-err (fn [k :- Any] :- (U Kw Str)
+               (let [i (keyword k)]
+                 (assert (keyword? i))
+                 k)))
+  )
 
 ;    (is-tc-e 
 ;      (let [f (fn [{:keys [a] :as m} :- '{:a (U nil Num)}] :- '{:a Num} 

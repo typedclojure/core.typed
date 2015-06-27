@@ -13,9 +13,14 @@
             [clojure.core.typed.utils :as u]
             [clojure.core.typed.util-vars :as vs]
             [clojure.core.typed.coerce-utils :as coerce]
+            [clojure.core.typed.contract-utils :as con]
             [clojure.core.typed :as T]
             [clojure.core.cache :as cache]
-            [clojure.core :as core]))
+            [clojure.core.typed.special-form :as spec]
+            [clojure.core.typed.errors :as err]
+            [clojure.set :as set]
+            [clojure.core :as core])
+  (:import (clojure.tools.analyzer.jvm ExceptionThrown)))
 
 (alter-meta! *ns* assoc :skip-wiki true)
 
@@ -104,8 +109,116 @@
              (taj/desugar-host-expr form env)))))
       (taj/desugar-host-expr form env))))
 
-(defn analyze1 [form env]
-  (taj/analyze+eval form env {:bindings {#'ta/macroexpand-1 macroexpand-1}}))
+;; Syntax Expected -> ChkAST
+
+(defn unanalyzed-expr [form]
+  {:op :const
+   :type :nil
+   :form form
+   ::unanalyzed true})
+
+(defn special-form? [mform]
+  (and (seq? mform)
+       (= 'do (first mform))
+       (or (= (second mform) spec/special-form)
+           (= (second mform) ::T/special-collect))))
+
+(declare eval-ast)
+(defn analyze+eval
+  "Like analyze but evals the form after the analysis and attaches the
+   returned value in the :result field of the AST node.
+   If evaluating the form will cause an exception to be thrown, the exception
+   will be caught and the :result field will hold an ExceptionThrown instance
+   with the exception in the \"e\" field.
+
+   Useful when analyzing whole files/namespaces.
+  
+  Mandatory keyword arguments
+   :expected Takes :expected option, the expected static type or nil.
+
+  Optional keyword arguments
+   :eval-fn  Takes :eval-fn option that takes an option map and an AST and returns an 
+             evaluated and possibly type-checked AST.
+   :stop-analysis   an atom that, when set to true, will stop the next form from analysing.
+                    This is helpful if in a top-level do and one of the do statements 
+                    has a type error and is not evaluated."
+  ([form] (analyze+eval form (taj/empty-env) {}))
+  ([form env] (analyze+eval form env {}))
+  ([form env {:keys [eval-fn stop-analysis] :or {eval-fn eval-ast} :as opts}]
+   {:pre [(map? env)]}
+     (ta-env/ensure (taj/global-env)
+       (taj/update-ns-map!) 
+       ;(prn "analyze+eval" form *ns* (ns-aliases *ns*))
+       (let [[mform raw-forms] (binding [ta/macroexpand-1 (get-in opts [:bindings #'ta/macroexpand-1] 
+                                                                  ;; use custom macroexpand-1
+                                                                  macroexpand-1)]
+                                 (loop [form form raw-forms []]
+                                   (let [mform (ta/macroexpand-1 form env)]
+                                     (if (= mform form)
+                                       [mform (seq raw-forms)]
+                                       (recur mform (conj raw-forms form))))))]
+         (if (and (seq? mform) (= 'do (first mform)) (next mform)
+                  ;; if this is a typed special form like an ann-form, don't treat like
+                  ;; a top-level do.
+                  (not (special-form? mform)))
+           ;; handle the Gilardi scenario.
+           ;; we don't track exceptional control flow on a top-level do, which
+           ;; probably won't be an issue.
+           (let [[statements ret] (taj/butlast+last (rest mform))
+                 statements-expr (mapv (fn [s] 
+                                         (if (some-> stop-analysis deref)
+                                           (unanalyzed-expr s)
+                                           (analyze+eval s (-> env
+                                                               (taj-utils/ctx :statement)
+                                                               (assoc :ns (ns-name *ns*)))
+                                                         (dissoc opts :expected))))
+                                       statements)
+                 ret-expr (if (some-> stop-analysis deref)
+                            (unanalyzed-expr ret)
+                            ;; NB: in TAJ 0.3.0 :ns doesn't do anything.
+                            ;; later versions rebind *ns*.
+                            (analyze+eval ret (assoc env :ns (ns-name *ns*)) opts))]
+             (-> {:op         :do
+                  :top-level  true
+                  :form       mform
+                  :statements statements-expr
+                  :ret        ret-expr
+                  :children   [:statements :ret]
+                  :env        env
+                  :result     (:result ret-expr)
+                  ;; could be nil if ret is unanalyzed
+                  u/expr-type (u/expr-type ret-expr)
+                  :raw-forms  raw-forms}
+               source-info/source-info))
+           (merge (if (some-> stop-analysis deref)
+                    (unanalyzed-expr mform)
+                    ;; rebinds *ns* during analysis
+                    ;; FIXME unclear which map needs to have *ns*, especially post TAJ 0.3.0
+                    (eval-fn opts (taj/analyze mform (assoc env :ns (ns-name *ns*))
+                                               (-> opts 
+                                                   (dissoc :bindings-atom)
+                                                   (assoc-in [:bindings #'*ns*] *ns*)))))
+                  {:raw-forms raw-forms}))))))
+
+(defn thread-bindings []
+  {#'ta/macroexpand-1 macroexpand-1})
+
+;; bindings is an atom that records any side effects during macroexpansion. Useful
+;; for nREPL middleware.
+(defn analyze1
+  ([form] (analyze1 form (taj/empty-env) {}))
+  ([form env] (analyze1 form env {}))
+  ([form env {:keys [bindings-atom] :as opts}]
+   {:pre [((some-fn nil? con/atom?) bindings-atom)]}
+   (let [old-bindings (or (some-> bindings-atom deref) {})]
+     (with-bindings old-bindings
+       ;(prn "analyze1 namespace" *ns*)
+       (let [ana (analyze+eval form (or env (taj/empty-env))
+                               (merge-with merge opts {:bindings (thread-bindings)}))]
+         ;; only record vars that were already bound
+         (when bindings-atom
+           (reset! bindings-atom (select-keys (get-thread-bindings) (keys old-bindings))))
+         ana)))))
 
 (defn ast-for-form-in-ns
   "Returns an AST node for the form 
@@ -113,20 +226,20 @@
   [nsym form]
   (binding [*ns* (or (find-ns nsym)
                      *ns*)]
-    (analyze1 form (taj/empty-env))))
+    (analyze1 form)))
 
 (def reread-with-tr (comp tr/read readers/indexing-push-back-reader print-str))
 
-(defn ast-for-str
-  "Returns an AST node for the string, using tools.reader."
-  [form-str]
-  (analyze1 (-> form-str readers/indexing-push-back-reader tr/read) (taj/empty-env)))
+;(defn ast-for-str
+;  "Returns an AST node for the string, using tools.reader."
+;  [form-str]
+;  (analyze1 (-> form-str readers/indexing-push-back-reader tr/read) (taj/empty-env)))
 
 (defn ast-for-form
   "Returns an AST node for the form"
-  [form]
-  (analyze1 form (taj/empty-env)))
-
+  ([form] (ast-for-form form {}))
+  ([form opt]
+   (analyze1 form (taj/empty-env) opt)))
 
 (defn ast-for-file
   "Returns a vector of AST nodes contained
@@ -134,7 +247,8 @@
   [p]
   {:pre [(string? p)]}
   (let [pres (io/resource p)
-        _ (assert (instance? java.net.URL pres) (str "Cannot find file: " p))
+        _ (when-not (instance? java.net.URL pres)
+            (err/int-error (str "Cannot find file: " p)))
         file (-> pres io/reader slurp)
         reader (readers/indexing-push-back-reader file 1 p)
         eof  (reify)
@@ -143,7 +257,8 @@
                (loop [asts []]
                  (let [form (tr/read reader false eof)]
                    (if (not= eof form)
-                     (let [a (analyze1 form (taj/empty-env))]
+                     (let [a (analyze1 form (taj/empty-env)
+                                       {:eval-fn eval-ast})]
                        (recur (conj asts a)))
                      asts))))]
     asts))
@@ -156,6 +271,7 @@
           nsym)]
    :post [(vector? %)]}
   (u/p :analyze/ast-for-ns
+       ;(prn "ast-for-ns" nsym)
    (let [nsym (or (when (instance? clojure.lang.Namespace nsym)
                     (ns-name nsym))
                   ; don't call ns-name on symbols in case the namespace
@@ -173,3 +289,16 @@
          (when cache
            (cache/miss cache nsym asts))
          asts)))))
+
+(defn eval-ast [opts ast]
+  ;; based on jvm/analyze+eval
+  ;(let [frm (emit-form/emit-form ast)
+  ;      result (try (eval frm)  ;; eval the emitted form rather than directly the form to avoid double macroexpansion
+  ;                  (catch Exception e
+  ;                    (ExceptionThrown. e)))]
+  ;  (merge ast {:result result})))
+  (let [frm (emit-form/emit-form ast)
+        ;_ (prn "form" frm)
+        result (eval frm)]  ;; eval the emitted form rather than directly the form to avoid double macroexpansion
+    (merge ast {:result result})))
+

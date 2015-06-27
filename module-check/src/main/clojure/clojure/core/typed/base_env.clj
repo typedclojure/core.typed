@@ -25,6 +25,15 @@
                                         HVec HSequential Keyword]
              :as t]))
 
+;; Dev notes
+;; ---------
+;;
+;; To reload these type annotations *without* restarting the repl,
+;; you should reload this file then run `(reset-clojure-envs!)`.
+;;
+;; There is some abuse of interning to get the type resolving correctly
+;; in the annotations. The goal is to simulate we're inside `clojure.core.typed`.
+
 (defn- aset-*-type [t]
   (impl/with-clojure-impl
     (let [arr-t (prs/parse-type `(~'Array ~t))
@@ -174,7 +183,7 @@ clojure.core/add-classpath [(U String java.net.URL) -> nil]
 clojure.core/*1 Any
 clojure.core/*2 Any
 clojure.core/*3 Any
-clojure.core/*e Throwable
+clojure.core/*e (U nil Throwable)
 clojure.core/*agent* (U nil (Agent2 Nothing Any))
 clojure.core/*allow-unresolved-vars* Any
 clojure.core/*assert* Any
@@ -670,8 +679,21 @@ clojure.core/symbol
          [(U nil String) String -> Symbol])
 
 clojure.core/keyword
-     (IFn [(U Keyword Symbol String) -> Keyword]
-         [String String -> Keyword])
+     (IFn [(U Keyword Symbol String) -> Keyword 
+           :object {:id 0 :path [Keyword]}
+           :filters {:then tt
+                     :else ff}]
+          [nil -> nil 
+           :object {:id 0 :path [Keyword]}
+           :filters {:then ff
+                     :else tt}]
+          [Any -> (U nil Keyword) 
+           :object {:id 0 :path [Keyword]}
+           :filters {:then (is (U Keyword Symbol String) 0)
+                     :else (! (U Keyword Symbol String) 0)}]
+          [String String -> Keyword
+           :filters {:then tt
+                     :else ff}])
 
 clojure.core/find-keyword
      (IFn [(U Keyword Symbol String) -> (Option Keyword)]
@@ -697,7 +719,9 @@ clojure.core/vector? (Pred (Vec Any))
 clojure.core/nil? (Pred nil)
 clojure.core/false? (Pred false)
 clojure.core/true? (Pred true)
-clojure.core/zero? (Pred (Value 0))
+clojure.core/zero?  [Number -> Boolean
+                     :filters {:then (is (Value 0) 0)
+                               :else (!  (Value 0) 0)}]
 clojure.core/symbol? (Pred Symbol)
 clojure.core/keyword? (Pred Keyword)
 clojure.core/map? (Pred (Map Any Any))
@@ -811,7 +835,9 @@ clojure.core/type [Any -> Any]
 
 clojure.core/seq (All [x]
                         (IFn 
-                          [(NonEmptyColl x) -> (NonEmptyASeq x)]
+                          [(NonEmptyColl x) -> (NonEmptyASeq x)
+                           :filters {:then tt
+                                     :else ff}]
                           [(Option (Coll x)) -> (Option (NonEmptyASeq x))
                            :filters {:then (& (is NonEmptyCount 0)
                                               (! nil 0))
@@ -1335,19 +1361,18 @@ clojure.core/rseq
        [(clojure.core.typed/Reversible x) -> (Option (NonEmptyASeq x))])
 
 ;coercions
-;TODO maybe these argument type shouldn't be Any
 clojure.core/bigdec [Number -> BigDecimal]
 clojure.core/bigint [Number -> clojure.lang.BigInt]
 clojure.core/biginteger [Number -> java.math.BigInteger]
 clojure.core/boolean [Any -> Boolean]
-clojure.core/byte [Any -> Byte]
-clojure.core/char [Any -> Character]
-clojure.core/double [Any -> Double]
-clojure.core/float [Any -> Float]
-clojure.core/int [Any -> Integer]
-clojure.core/long [Any -> Long]
-clojure.core/num [Any -> Number]
-clojure.core/short [Any -> Short]
+clojure.core/byte [(U Character Number) -> Byte]
+clojure.core/char [(U Character Number) -> Character]
+clojure.core/double [Number -> Double]
+clojure.core/float [Number -> Float]
+clojure.core/int [(U Character Number) -> Integer]
+clojure.core/long [(U Character Number) -> Long]
+clojure.core/num [Number -> Number]
+clojure.core/short [(U Character Number) -> Short]
 
 ;array ctors
 clojure.core/boolean-array (IFn [(U nil Number (Seqable Boolean)) -> (Array boolean)]
@@ -1388,8 +1413,12 @@ clojure.core/>= [Number Number * -> Boolean]
 
 clojure.core/== [Number Number * -> Boolean]
 
-clojure.core/max [Number Number * -> Number]
-clojure.core/min [Number Number * -> Number]
+clojure.core/max (IFn [Long Long * -> Long]
+                      [Double Double * -> Double]
+                      [Number Number * -> Number])
+clojure.core/min (IFn [Long Long * -> Long]
+                      [Double Double * -> Double]
+                      [Number Number * -> Number])
 
 clojure.core/ref (All [x] [x & :optional {:validator (U nil [x -> Any]) :meta (U nil (Map Any Any))
                                           :min-history (U nil AnyInteger)
@@ -1482,6 +1511,9 @@ clojure.core.match/backtrack Exception
 clojure.core/eval [Any -> Any]
 clojure.core/rand-nth (All [x] [(U (Indexed x) (SequentialSeqable x)) -> x])
 
+clojure.pprint/pprint (IFn [Any -> nil]
+                           [Any java.io.Writer -> nil])
+
       )
 (h/var-mappings
   this-ns
@@ -1492,6 +1524,13 @@ clojure.set/difference (All [x] [(Set x) (Set Any) * -> (Set x)])
 clojure.repl/pst (IFn [-> nil]
                       [(U Int Throwable) -> nil]
                       [Throwable Int -> nil])
+clojure.repl/print-doc [Symbol -> Any]
+clojure.repl/find-doc [(U String java.util.regex.Pattern) -> Any]
+clojure.repl/source-fn [Any -> (U nil String)]
+clojure.java.javadoc/javadoc [Object -> Any]
+complete.core/completions
+(IFn [Any -> Any]
+     [Any Any -> Any])
   )
     {'clojure.core/count (count-type)
      'clojure.core/aset-boolean (aset-*-type 'boolean)
@@ -1805,14 +1844,34 @@ clojure.lang.Numbers/lte [Number Number -> Boolean]
 clojure.lang.Numbers/gt [Number Number -> Boolean]
 clojure.lang.Numbers/gte [Number Number -> Boolean]
 
-clojure.lang.Numbers/isZero (Pred (Value 0))
+clojure.lang.Numbers/isZero [Number -> Boolean
+                             :filters {:then (is (Value 0) 0)
+                                       :else (!  (Value 0) 0)}]
 
 clojure.lang.Util/compare [Any Any -> Number]
 
 ; this is overloaded in interesting ways, but this is good enough for destructuring purposes
 clojure.lang.PersistentHashMap/create [(U nil (ISeq Any) java.util.Map (ReadOnlyArray Object)) -> (Map Any Any)]
+
+clojure.lang.RT/floatCast  [Number -> Float]
+clojure.lang.RT/byteCast   [(U Character Number) -> Byte]
+clojure.lang.RT/charCast   [(U Character Number) -> Character]
+clojure.lang.RT/doubleCast [Number -> Double]
+clojure.lang.RT/intCast    [(U Character Number) -> Integer]
+clojure.lang.RT/longCast   [(U Character Number) -> Long]
+clojure.lang.RT/shortCast  [(U Character Number) -> Short]
+
+clojure.lang.RT/uncheckedFloatCast  [Number -> Float]
+clojure.lang.RT/uncheckedByteCast   [(U Character Number) -> Byte]
+clojure.lang.RT/uncheckedCharCast   [(U Character Number) -> Character]
+clojure.lang.RT/uncheckedIntCast    [(U Character Number) -> Integer]
+clojure.lang.RT/uncheckedLongCast   [(U Character Number) -> Long]
+clojure.lang.RT/uncheckedShortCast  [(U Character Number) -> Short]
+
+clojure.lang.Numbers/num   [Number -> Number]
     )
-    {'clojure.lang.RT/count (count-type)}))
+    {'clojure.lang.RT/count (count-type)
+     }))
 
 (comment
   clojure.lang.IFn/invoke (All [r a0 a1 a2 a3 a4 a5 a6 a7 a8 a9 a10 a11 a12 a13 a14 a15 a16 a17 a18 a19 a20 arest]

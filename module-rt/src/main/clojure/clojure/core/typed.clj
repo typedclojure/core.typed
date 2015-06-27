@@ -182,10 +182,15 @@ for checking namespaces, cf for checking individual forms."}
   (@#'core/assert-args
      (vector? bindings) "a vector for its binding"
      (= 2 (count bindings)) "exactly 2 forms in binding vector")
-  (let [i (first bindings)
-        n (second bindings)]
+  (let [[i t? t n] (if (= :- (second bindings))
+                     (let [[i _ t n] bindings]
+                       (assert (== (count bindings) 4) "Bad arguments to dotimes")
+                       [i true t n])
+                     (let [[i n] bindings]
+                       (assert (== (count bindings) 2) "Bad arguments to dotimes")
+                       [i nil nil n]))]
     `(let [n# (long ~n)]
-       (loop [~i :- Int 0]
+       (loop [~i :- ~(if t? t `Int) 0]
          (when (< ~i n#)
            ~@body
            (recur (unchecked-inc ~i)))))))
@@ -1321,12 +1326,10 @@ for checking namespaces, cf for checking individual forms."}
       (tag (+ (tag a long) (tag b long))
            long)"
   [form tag]
-  (if vs/*checking*
-    `(do ~spec/special-form
-         ::tag
-         {:tag '~tag}
-         ~form)
-    form))
+  `(do ~spec/special-form
+       ::tag
+       {:tag '~tag}
+       ~form))
 
 (def ^{:doc "Any is the top type that contains all types."
        :forms '[Any]
@@ -2139,17 +2142,25 @@ for checking namespaces, cf for checking individual forms."}
   Options
   - :expected        Type syntax representing the expected type for this form
                      type-provided? option must be true to utilise the type.
-  - :type-provided?  If true, use the expected type to check the form
+  - :type-provided?  If true, use the expected type to check the form.
   - :profile         Use Timbre to profile the type checker. Timbre must be
                      added as a dependency.
   - :file-mapping    If true, return map provides entry :file-mapping, a hash-map
                      of (Map '{:line Int :column Int :file Str} Str).
   - :checked-ast     Returns the entire AST for the given form as the :checked-ast entry,
                      annotated with the static types inferred after checking.
+                     If a fatal error occurs, mapped to nil.
+  - :no-eval         If true, don't evaluate :out-form. Removes :result return value.
+                     It is highly recommended to evaluate :out-form manually.
   
   Default return map
-  - :delayed-errors  A sequence of delayed errors (ex-info instances)
-  - :ret             TCResult inferred for the current form"
+  - :ret             TCResult inferred for the current form
+  - :out-form        The macroexpanded result of type-checking, if successful. 
+  - :result          The evaluated result of :out-form, unless :no-eval is provided.
+  - :ex              If an exception was thrown during evaluation, this key will be present
+                     with the exception as the value.
+  DEPRECATED
+  - :delayed-errors  A sequence of delayed errors (ex-info instances)"
   [form & opt]
   (load-if-needed)
   (apply (impl/v 'clojure.core.typed.check-form-clj/check-form-info) form opt))

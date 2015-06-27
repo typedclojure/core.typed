@@ -96,6 +96,10 @@
   ;(swap! lex/*used-locals* assoc sym false)
   nil)
 
+(defn remove-nocheck-var [sym]
+  (swap! (current-nocheck-var?) disj sym)
+  nil)
+
 (defn add-used-var [sym]
   (swap! (current-used-vars) conj sym)
   ;(if (r/Unique? sym)

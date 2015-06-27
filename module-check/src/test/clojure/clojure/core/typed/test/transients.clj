@@ -22,9 +22,9 @@
 
 ;(is (clojure.core.typed.type-rep/Unique? 1))
 
-(let [z :- (Unique Int), 1]
-  z
-  z)
+;(let [z :- (Unique Int), 1]
+  ;z
+  ;z)
 
 ;(let [xyz [1 2 3]]
   ;(let [yyz xyz]

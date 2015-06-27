@@ -8,7 +8,6 @@
             [clojure.core.contracts.constraints :as contracts]
             [clojure.repl :as repl]
             [clojure.core.contracts]
-            [clojure.tools.analyzer.passes.jvm.emit-form :as emit-form]
             [clojure.set :as set]
             [clojure.core.typed.current-impl :as impl]
             [clojure.core.typed.profiling :as profiling]
@@ -326,6 +325,7 @@
           ~~'assertmap
           ;the body, wrapped in a profiling macro
           (u/p ~(keyword (str '~mm-name) (str ~'nme))
+               (trace '~(symbol (str '~mm-name) (str ~'nme)))
                ~@~'body)))))
 
 ;; Aliases for profiling stuff
@@ -390,14 +390,42 @@
 (defn tc-warning [& ss]
   (let [env uvs/*current-env*]
     (binding [*out* *err*]
-      (apply println "WARNING: Type Checker: "
-             (str "(" (-> env :ns :name) ":" (:line env) 
+      (apply println "WARNING: "
+             (str "(" (:file env) ":" (:line env) 
                   (when-let [col (:column env)]
                     (str ":" col))
                   ") ")
              ss)
       (flush))))
 
+(defmacro trace [& ss]
+  `(when uvs/*trace-checker*
+     (println 
+       "TRACE: " 
+       " "
+       (:line uvs/*current-env*)
+       ~@ss)
+     (flush)))
+
+(defmacro trace-when [p & ss]
+  `(when uvs/*trace-checker*
+     (when ~p
+       (println 
+         "TRACE: " 
+         " "
+         (:line uvs/*current-env*)
+         ~@ss)
+       (flush))))
+
+(defmacro trace-when-let [p & ss]
+  `(when uvs/*trace-checker*
+     (when-let ~p
+       (println 
+         "TRACE: " 
+         " "
+         (:line uvs/*current-env*)
+         ~@ss)
+       (flush))))
 
 (defn pad-right
   "Returns a sequence of length cnt that is s padded to the right with copies
