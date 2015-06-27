@@ -366,7 +366,7 @@
     (err/int-error (str "Extends takes a vector of types: " (pr-str syn))))
   (c/-extends (doall (map parse-type extends))
               :without (doall (map parse-type without))))
-
+  
 (defn parse-All [[_All_ bnds syn & more :as all]]
   ;(prn "All syntax" all)
   (when-not (not more) 
@@ -382,8 +382,10 @@
 (defn parse-union-type [[u & types]]
   (c/make-Union (doall (map parse-type types))))
 
-(defn parse-unique-type [[u & types]]
-  (c/make-Unique (doall (map parse-type types))))
+(defn parse-unique-type [[u utype & more :as everything]]
+  (when-not (not more)
+    (err/int-error (str "Bad unique syntax: " everything)))
+  (c/make-Unique (parse-type utype)))
 
 (defmethod parse-type-list 'U [syn] 
   (err/deprecated-plain-op 'U)
@@ -1358,11 +1360,9 @@
     :else (unparse-var-symbol-in-ns `t/Nothing)))
 
 (defmethod unparse-type* Unique
-  [{types :types :as unique}]
-  (cond
-    (seq types) (list* (unparse-var-symbol-in-ns `t/Unique)
-                       (doall (map unparse-type types)))
-    :else (unparse-var-symbol-in-ns `t/Nothing)))
+  [{:keys [utype]}]
+  (list (unparse-var-symbol-in-ns `t/Unique)
+        (unparse-type utype)))
 
 (defmethod unparse-type* FnIntersection
   [{types :types}]

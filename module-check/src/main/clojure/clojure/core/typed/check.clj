@@ -99,7 +99,8 @@
             [clojure.core.typed.var-env :as var-env]
             [clojure.pprint :as pprint]
             [clojure.repl :as repl])
-  (:import (clojure.lang IPersistentMap Var Seqable)))
+  (:import (clojure.lang IPersistentMap Var Seqable)
+           (clojure.core.typed.type_rep Unique Union)))
 
 (alter-meta! *ns* assoc :skip-wiki true
              :core.typed {:collect-only true})
@@ -1390,9 +1391,9 @@
 
 (add-check-method :local
   [{sym :name :as expr} & [expected]]
-  (if (and 
+  (if (and
         (= false (get-in @lex/*used-locals* [sym]))
-        (r/Unique? sym))
+        (r/Unique? (:t (local-result/local-ret sym))))
       (swap! lex/*used-locals* assoc sym true)
       (swap! lex/*used-locals* assoc sym false))
   (assoc expr

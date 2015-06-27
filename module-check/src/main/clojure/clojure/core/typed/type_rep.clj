@@ -69,13 +69,10 @@
   :methods
   [p/TCType])
 
-(u/ann-record Unique [types :- (SortedSet Type)])
-(u/def-type Unique [types]
-  "Sorted union of Unique Types"
-  [(set? types)
-   (sorted? types)
-   (every? Type? types)
-   (not-any? Union? types)]
+(u/ann-record Unique [utype :- Type])
+(u/def-type Unique [utype]
+  "Unique Type"
+  [(Type? utype)]
   :methods
   [p/TCType])
 
@@ -88,15 +85,8 @@
 (defn- Un [& types]
   (Union-maker (sorted-type-set types)))
 
-(t/ann UUn [Type * -> Unique])
-(defn- UUn [& types]
-  (Unique-maker (sorted-type-set types)))
-
 (t/ann empty-union Type)
 (def empty-union (Un))
-
-(t/ann empty-unique-union UniqueType)
-(def empty-unique-union (UUn))
 
 (t/ann Bottom [-> Type])
 (defn Bottom []
@@ -180,7 +170,7 @@
   "A named free variable"
   [(symbol? name)]
   :methods
-  [p/TCType p/TCUType])
+  [p/TCType])
 
 (t/ann make-F [t/Sym -> F])
 (defn make-F

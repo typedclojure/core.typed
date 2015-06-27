@@ -146,7 +146,6 @@
           (and 
             (r/Top? t)
             (not (r/Name? s))
-            (not (r/Record? s))
             (not (r/TypeFn? s)))
           (r/Top? t)
           (r/Bottom? s)

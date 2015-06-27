@@ -317,12 +317,8 @@
       (cond
         (and 
           (r/Top? T)
-          (not (r/Name? S)))
-        (and
-          (not (r/Record? S))
+          (not (r/Name? S))
           (not (r/TypeFn? S)))
-        
-        (r/Top? T)
         (cr/empty-cset X Y)
 
         ;IMPORTANT: handle frees first

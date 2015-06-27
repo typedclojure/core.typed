@@ -8,7 +8,7 @@
             [clojure.core.typed.free-ops :as free-ops]
             [clojure.core.typed.path-rep])
   (:import (clojure.core.typed.type_rep NotType DifferenceType Intersection Union FnIntersection Bounds
-                                        DottedPretype Function RClass JSNominal App TApp
+                                        DottedPretype Function RClass JSNominal App TApp Unique
                                         PrimitiveArray DataType Protocol TypeFn Poly PolyDots
                                         Mu HeterogeneousVector HeterogeneousList HeterogeneousMap
                                         CountRange Name Value Top TopFunction B F Result
@@ -91,6 +91,11 @@
                          (-> ty
                            (update-in [:rator] type-rec)
                            (update-in [:rands] #(mapv type-rec %)))))
+
+(add-default-fold-case Unique
+                       (fn [ty _]
+                         (-> ty
+                             (update-in [:utype] type-rec))))
 
 (add-default-fold-case TApp
                        (fn [ty _]

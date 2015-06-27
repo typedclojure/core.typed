@@ -14,7 +14,8 @@
             [clojure.core.typed.path-rep :as pr]
             [clojure.core.typed.check.utils :as cu]
             [clojure.core.typed.debug :refer [dbg]]
-            [clojure.core.typed.path-type :as path-type]))
+            [clojure.core.typed.path-type :as path-type]
+            [clojure.core.typed.utils :as u]))
 
 (defn local-ret [sym]
   {:pre [(symbol? sym)]
@@ -41,7 +42,7 @@
          ((some-fn nil? r/TCResult?) expected)]
    :post [(r/TCResult? %)]}
   (if (= true (get-in @lex/*used-locals* [sym]))
-    (err/tc-delayed-error (str sym " is unique, can't use again ")))
+    (err/tc-delayed-error (str (:t (local-ret sym)) " is unique, can't use again ")))
   (binding [vs/*current-expr* expr]
     (prs/with-unparse-ns (cu/expr-ns expr)
       (below/maybe-check-below

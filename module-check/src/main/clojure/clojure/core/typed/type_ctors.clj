@@ -53,7 +53,6 @@
   (with-meta (gensym s) {:original-name s}))
 
 (declare Un make-Union fully-resolve-type fully-resolve-non-rec-type)
-(declare UUn make-Unique fully-resolve-type fully-resolve-non-rec-type)
 
 (t/ann ^:no-check make-Union [(t/U nil (t/Seqable r/Type)) -> r/Type])
 (defn make-Union
@@ -67,18 +66,12 @@
                        (concat (mapcat :types unions)
                                non-unions))))))
 
-;(t/ann ^:no-check make-Unique [(t/U nil (t/Seqable r/Type)) -> r/Unique])
+(t/ann ^:no-check make-Unique [r/Type -> r/Unique])
 (defn make-Unique
   "Make unique types"
-  [args]
-  (cond
-    (= 1 (count args)) (first args)
-    :else
-    (let [{unique true non-unique false} (group-by r/Unique? args)]
-      (r/Unique-maker (r/sorted-type-set
-                            (concat (mapcat :types unique)
-                                    non-unique))))))
-       
+  [arg]
+  (r/Unique-maker arg))
+
 (t/ann bottom r/Type)
 (def ^:private bottom (make-Union []))
 
