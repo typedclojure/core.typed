@@ -143,8 +143,8 @@
             (contains? A [s t]))
           (= s t)
           ; FIXME TypeFn's probably are not between Top/Bottom
-          (and 
-            (r/Top? t)
+          (and
+            (r/Unique? t)
             (not (r/Name? s))
             (not (r/TypeFn? s)))
           (r/Top? t)

@@ -316,7 +316,7 @@
     (binding [*cs-current-seen* (conj *cs-current-seen* [S T])]
       (cond
         (and 
-          (r/Top? T)
+          (r/Unique? T)
           (not (r/Name? S))
           (not (r/TypeFn? S)))
         (cr/empty-cset X Y)

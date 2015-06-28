@@ -9,7 +9,7 @@
             [clojure.set :as set]
             [clojure.core.typed.impl-protocols :as p])
   (:import (clojure.core.typed.type_rep NotType Intersection Union FnIntersection Bounds
-                                        DottedPretype Function RClass App TApp
+                                        DottedPretype Function RClass App TApp Unique
                                         PrimitiveArray DataType Protocol TypeFn Poly PolyDots
                                         Mu HeterogeneousVector HeterogeneousList HeterogeneousMap
                                         CountRange Name Value Top TopFunction B F Result AnyValue
@@ -286,6 +286,11 @@
   [T V]
   (-> T
     (update-in [:body] #(promote % V))))
+
+(promote-demote Unique
+  [T V]
+  (-> T
+    (update-in [:utype] #(promote % V))))
 
 (promote-demote TApp
   [T V]
