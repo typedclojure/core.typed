@@ -4931,6 +4931,25 @@
                  k)))
   )
 
+(deftest multi-rest-arg-test
+  (is-tc-e (do
+             (ann m [Kw Any * -> Any])
+             (defmulti m 
+               (fn [k & args]
+                 :a))
+             (defmethod m :a
+               [k & args]
+               k)))
+  (is-tc-e (do
+             (ann m [Kw & :optional {:foo Num} :-> Any])
+             (defmulti m 
+               (ann-form
+                 (fn [k & {:keys [foo]}])
+                 [Kw & :optional {:foo Num} :-> Any]))
+             (defmethod m :a
+               [k & {:keys [foo]}]
+               foo))))
+
 ;    (is-tc-e 
 ;      (let [f (fn [{:keys [a] :as m} :- '{:a (U nil Num)}] :- '{:a Num} 
 ;                {:pre [(number? a)]} 
