@@ -743,7 +743,10 @@ clojure.string/triml [String -> String]
 clojure.test/function? [Any -> Boolean]
 clojure.test/assert-any [Any Any -> Any]
 clojure.test/do-report [Any -> Any]
-clojure.test/run-tests [(U Nil Namespace *) -> Map]
+clojure.test/run-tests [(U nil Namespace ) -> Map]
+clojure.test/succesful? [Any -> Boolean]
+clojure.test/compose-fixtures [Fn Fn -> Fn]
+
 
 clojure.core/interpose (All [x] (IFn [x (Option (Seqable x)) -> (ASeq x)]))
 clojure.core/interleave (All [x] [(Option (Seqable x)) (Option (Seqable x)) (Option (Seqable x)) * -> (ASeq x)])
