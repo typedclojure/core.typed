@@ -10,9 +10,11 @@
                  [org.clojure/core.async "0.1.303.0-886421-alpha"]
                  [org.clojure/tools.trace "0.7.5" :exclusions [org.clojure/clojure]]
                  ; CLJS fireplace REPL
-                 [com.cemerick/piggieback "0.1.3" :exclusions [org.clojure/tools.reader org.clojure/clojurescript]]
+                 [com.cemerick/piggieback "0.1.3" :exclusions [org.clojure/tools.reader
+                                                               org.clojure/clojurescript]]
                  ^:source-dep 
-                 [org.clojure/jvm.tools.analyzer "0.6.1" :exclusions [org.clojure/clojure org.clojure/clojurescript]]
+                 [org.clojure/jvm.tools.analyzer "0.6.1" :exclusions [org.clojure/clojure 
+                                                                      org.clojure/clojurescript]]
                  ^:source-dep 
                  [org.clojure/tools.analyzer.jvm "0.3.0" :exclusions [org.ow2.asm/asm-all]]
                  ^:source-dep 
@@ -36,7 +38,7 @@
                                     clojure.core.typed.repl/wrap-clj-repl]}
 
   :plugins [[lein-typed "0.3.1"]
-            #_[thomasa/mranderson "0.4.4-ambrosebs-SNAPSHOT"]]
+            [thomasa/mranderson "0.4.4-ambrosebs-SNAPSHOT"]]
   :core.typed {:check [clojure.core.typed.test.records]
                :check-cljs []}
 

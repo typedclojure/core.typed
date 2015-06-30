@@ -11,7 +11,7 @@
             [clojure.string :as s]
             [clojure.core.typed.deps.clojure.core.memoize :refer [lru]])
   (:import (clojure.lang RT Symbol Var)
-           (org.objectweb.asm Type)))
+           (clojure.core.typed.deps.org.objectweb.asm Type)))
 
 (defn ^:private type-reflect
   [typeref & options]
