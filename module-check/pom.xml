@@ -75,23 +75,29 @@
         </configuration>
       </plugin>
       <plugin>
-        <artifactId>maven-assembly-plugin</artifactId>
+        <artifactId>maven-jar-plugin</artifactId>
         <version>2.4</version>
         <executions>
-          <!-- FIXME this causes a maven warning by overwriting the jar -->
-          <!--<execution>
+          <execution>
             <id>default-jar</id>
             <phase>package</phase>
             <goals>
-              <goal>single</goal>
+              <goal>jar</goal>
             </goals>
             <configuration>
-              <appendAssemblyId>false</appendAssemblyId>
-              <descriptors>
-                <descriptor>src/assembly/filter-aot.xml</descriptor>
-              </descriptors>
+              <includes>
+                <include>**/*.clj</include>
+                <include>clojure/core/typed/**</include>
+                <include>cljs/core/typed/**</include>
+              </includes>
             </configuration>
-          </execution>-->
+          </execution>
+        </executions>
+      </plugin>
+      <plugin>
+        <artifactId>maven-assembly-plugin</artifactId>
+        <version>2.4</version>
+        <executions>
           <execution>
             <id>core-typed-slim-jar</id>
             <phase>package</phase>
@@ -107,52 +113,6 @@
           </execution>
         </executions>
       </plugin>
-      <!--<plugin>
-        <groupId>org.codehaus.mojo</groupId>
-        <artifactId>truezip-maven-plugin</artifactId>
-        <version>1.1</version>
-        <executions>
-          <execution>
-            <id>remove-3rd-party-AOT</id>
-            <goals>
-              <goal>remove</goal>
-            </goals>
-            <phase>package</phase>
-            <configuration>
-              <fileset>
-                <directory>target/core.typed-${project.version}.jar</directory>
-                <includes>
-                  <include>clojure/core/async</include>
-                  <include>clojure/core/async*</include>
-                  <include>clojure/jvm</include>
-                  <include>clojure/jvm*</include>
-                  <include>cljs/*$*</include>
-                  <include>cljs/*__*</include>
-                  <include>cljs/source_map</include>
-                  <include>cljs/source_map*</include>
-                  <include>cljs/jvm</include>
-                  <include>cljs/tagged_literals</include>
-                  <include>cljs/js_deps</include>
-                  <include>clojure/core/cache</include>
-                  <include>clojure/core/cache*</include>
-                  <include>clojure/core/memoize</include>
-                  <include>clojure/core/memoize*</include>
-                  <include>clojure/tools</include>
-                  <include>clojure/tools*</include>
-                  <include>clojure/data</include>
-                  <include>clojure/data*</include>
-                  <include>clojure/math</include>
-                  <include>clojure/math*</include>
-                  <include>clojure/core/contracts</include>
-                  <include>clojure/core/contracts*</include>
-                  <include>clojure/core/unify</include>
-                  <include>clojure/core/unify*</include>
-                </includes>
-              </fileset>
-            </configuration>
-          </execution>
-        </executions>
-      </plugin>-->
     </plugins>
   </build>
 
@@ -162,6 +122,7 @@
       <artifactId>core.typed.rt</artifactId>
       <version>0.3.4-SNAPSHOT</version>
     </dependency>
+    <!-- included as nested dependencies in clojure.core.typed.deps -->
     <!--<dependency>
       <groupId>org.clojure</groupId>
       <artifactId>jvm.tools.analyzer</artifactId>

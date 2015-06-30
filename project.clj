@@ -29,14 +29,14 @@
                  [org.clojure/core.cache "0.6.4"]
                  ]
   ;; for tools.reader 0.9.2
-  :aot [clojure.tools.reader.impl.ExceptionInfo]
+  :aot [clojure.core.typed.deps.clojure.tools.reader.impl.ExceptionInfo]
 
   ; fireplace repl middleware
   :repl-options {:nrepl-middleware [#_cemerick.piggieback/wrap-cljs-repl
                                     clojure.core.typed.repl/wrap-clj-repl]}
 
   :plugins [[lein-typed "0.3.1"]
-            [thomasa/mranderson "0.4.4-ambrosebs-SNAPSHOT"]]
+            #_[thomasa/mranderson "0.4.4-ambrosebs-SNAPSHOT"]]
   :core.typed {:check [clojure.core.typed.test.records]
                :check-cljs []}
 
@@ -45,6 +45,7 @@
   :repositories {"sonatype-oss-public" "https://oss.sonatype.org/content/groups/public/"}
 
   :source-paths ["module-check/src/main/clojure"
+                 "module-check/src/main/java"
                  "module-check/src/main/cljs"
                  "module-rt/src/main/clojure"
                  "module-rt/src/main/cljs"
