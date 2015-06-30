@@ -12,9 +12,6 @@
 (deftest assert-any-test
   (is-tc-e   (assert-any "Hi" (= 4(+ 2 2) )) Any
              :requires [[clojure.test :refer [assert-any]]]))
-         
-(deftest is-test
-  (is-tc-e ( is (= 4 (+ 2 2))) Boolean))
 
 
 
