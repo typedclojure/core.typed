@@ -16,6 +16,11 @@
 (deftest do-report-test
   (is-tc-e  (do-report 1)  t/Any
              :requires [[clojure.test :refer [do-report]]]))
+           
+(deftest runTest-test
+  (is-tc-e  #(run-tests 'clojure.core.typed.test.abc) (Map Any Any)
+             :requires [[clojure.test :refer [run-tests]]]))     
+      
 
 
 
