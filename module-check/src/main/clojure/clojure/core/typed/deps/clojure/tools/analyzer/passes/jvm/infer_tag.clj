@@ -11,9 +11,10 @@
             [clojure.core.typed.deps.clojure.tools.analyzer.jvm.utils :as u]
             [clojure.core.typed.deps.clojure.tools.analyzer.env :as env]
             [clojure.set :refer [rename-keys]]
+            [clojure.core.typed.deps.clojure.tools.analyzer.passes.trim :refer [trim]]
             [clojure.core.typed.deps.clojure.tools.analyzer.passes.jvm
              [annotate-tag :refer [annotate-tag]]
-             [annotate-methods :refer [annotate-methods]]
+             [annotate-host-info :refer [annotate-host-info]]
              [analyze-host-expr :refer [analyze-host-expr]]
              [fix-case-test :refer [fix-case-test]]]))
 
@@ -37,7 +38,7 @@
 
 (defmethod -infer-tag :var
   [{:keys [var form] :as ast}]
-  (let [{:keys [tag arglists]} (meta var)
+  (let [{:keys [tag arglists]} (:meta ast)
         arglists (if (= 'quote (first arglists))
                    (second arglists)
                    arglists)
@@ -226,7 +227,7 @@
           tag (or (:tag (meta arglist))
                   (:return-tag fn)
                   (and (= :var (:op fn))
-                       (:tag (meta (:var fn)))))]
+                       (:tag (:meta fn))))]
       (merge ast
              (when tag
                {:tag     tag
@@ -268,7 +269,7 @@
   Passes opts:
   * :infer-tag/level  If :global, infer-tag will perform Var tag
                       inference"
-  {:pass-info {:walk :post :depends #{#'annotate-tag #'annotate-methods #'fix-case-test #'analyze-host-expr}}}
+  {:pass-info {:walk :post :depends #{#'annotate-tag #'annotate-host-info #'fix-case-test #'analyze-host-expr} :after #{#'trim}}}
   [{:keys [tag form] :as ast}]
   (let [tag (or tag (:tag (meta form)))
         ast (-infer-tag ast)]
@@ -277,10 +278,3 @@
              {:tag tag})
            (when-let [o-tag (:o-tag ast)]
              {:o-tag o-tag}))))
-
-(defn ensure-tag
-  {:pass-info {:walk :any :depends #{#'infer-tag}}}
-  [{:keys [o-tag tag] :as ast}]
-  (assoc ast
-    :tag   (or tag Object)
-    :o-tag (or o-tag Object)))

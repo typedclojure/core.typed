@@ -18,7 +18,7 @@
   (let [expr (-emit-form ast opts)]
     (if-let [m (and (instance? clojure.lang.IObj expr)
                     (meta form))]
-      (with-meta expr (merge (meta expr) m))
+      (with-meta expr (merge m (meta expr)))
       expr)))
 
 (defn emit-form
@@ -50,8 +50,8 @@
 
 (defmethod -emit-form :host-field
   [{:keys [target field]} opts]
-  (list (symbol (str ".-" (name field)))
-        (-emit-form* target opts)))
+  (list '. (-emit-form* target opts)
+        (symbol (str "-" (name field)))))
 
 (defmethod -emit-form :host-interop
   [{:keys [target m-or-f]} opts]

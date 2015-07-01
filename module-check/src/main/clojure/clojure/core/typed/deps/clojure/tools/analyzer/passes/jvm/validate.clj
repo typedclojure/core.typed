@@ -11,9 +11,10 @@
             [clojure.core.typed.deps.clojure.tools.analyzer.env :as env]
             [clojure.core.typed.deps.clojure.tools.analyzer.passes.cleanup :refer [cleanup]]
             [clojure.core.typed.deps.clojure.tools.analyzer.passes.jvm
+             [validate-recur :refer [validate-recur]]
              [infer-tag :refer [infer-tag]]
              [analyze-host-expr :refer [analyze-host-expr]]]
-            [clojure.core.typed.deps.clojure.tools.analyzer.utils :refer [arglist-for-arity source-info resolve-var resolve-ns]]
+            [clojure.core.typed.deps.clojure.tools.analyzer.utils :refer [arglist-for-arity source-info resolve-sym resolve-ns merge']]
             [clojure.core.typed.deps.clojure.tools.analyzer.jvm.utils :as u :refer [tag-match? try-best-match]])
   (:import (clojure.lang IFn ExceptionInfo)))
 
@@ -58,25 +59,30 @@
   [{:keys [args] :as ast}]
   (if (:validated? ast)
     ast
-    (let [^Class class (-> ast :class :val)
-          c-name (symbol (.getName class))
-          argc (count args)
-          tags (mapv :tag args)]
-      (let [[ctor & rest] (->> (filter #(= (count (:parameter-types %)) argc)
+    (if-not (= :class (-> ast :class :type))
+      (throw (ex-info (str "Unable to resolve classname: " (:form (:class ast)))
+                      (merge {:class (:form (:class ast))
+                              :ast   ast}
+                             (source-info (:env ast)))))
+      (let [^Class class (-> ast :class :val)
+            c-name (symbol (.getName class))
+            argc (count args)
+            tags (mapv :tag args)]
+        (let [[ctor & rest] (->> (filter #(= (count (:parameter-types %)) argc)
                                        (u/members class c-name))
                                (try-best-match tags))]
-        (if ctor
-          (if (empty? rest)
-            (let [arg-tags (mapv u/maybe-class (:parameter-types ctor))
-                  args (mapv (fn [arg tag] (assoc arg :tag tag)) args arg-tags)]
-              (assoc ast
-                :args       args
-                :validated? true))
-            ast)
-          (throw (ex-info (str "no ctor found for ctor of class: " class " and given signature")
-                          (merge {:class class
-                                  :args  (mapv (fn [a] (prewalk a cleanup)) args)}
-                                 (source-info (:env ast))))))))))
+          (if ctor
+            (if (empty? rest)
+              (let [arg-tags (mapv u/maybe-class (:parameter-types ctor))
+                    args (mapv (fn [arg tag] (assoc arg :tag tag)) args arg-tags)]
+                (assoc ast
+                  :args       args
+                  :validated? true))
+              ast)
+            (throw (ex-info (str "no ctor found for ctor of class: " class " and given signature")
+                            (merge {:class class
+                                    :args  (mapv (fn [a] (prewalk a cleanup)) args)}
+                                   (source-info (:env ast)))))))))))
 
 (defn validate-call [{:keys [class instance method args tag env op] :as ast}]
   (let [argc (count args)
@@ -94,15 +100,15 @@
                    arg-tags (mapv u/maybe-class (:parameter-types m))
                    args (mapv (fn [arg tag] (assoc arg :tag tag)) args arg-tags)
                    class (u/maybe-class (:declaring-class m))]
-               (merge ast
-                      {:method     (:name m)
-                       :validated? true
-                       :class      class
-                       :o-tag      ret-tag
-                       :tag        (or tag ret-tag)
-                       :args       args}
-                      (if instance?
-                        {:instance (assoc instance :tag class)})))
+               (merge' ast
+                       {:method     (:name m)
+                        :validated? true
+                        :class      class
+                        :o-tag      ret-tag
+                        :tag        (or tag ret-tag)
+                        :args       args}
+                       (if instance?
+                         {:instance (assoc instance :tag class)})))
              (if all-ret-equals?
                (let [ret-tag (:return-type m)]
                  (assoc ast
@@ -152,7 +158,7 @@
   [{:keys [^String class validated? env form] :as ast}]
   (if-not validated?
     (let [class-sym (-> class (subs (inc (.lastIndexOf class "."))) symbol)
-          sym-val (resolve-var class-sym env)]
+          sym-val (resolve-sym class-sym env)]
       (if (and (class? sym-val) (not= (.getName ^Class sym-val) class)) ;; allow deftype redef
         (throw (ex-info (str class-sym " already refers to: " sym-val
                              " in namespace: " (:ns env))
@@ -166,16 +172,23 @@
 
 (defmethod -validate :def
   [ast]
-  (when-let [tag (-> ast :name meta :tag)]
-    (let [c (u/maybe-class tag)
-          s (if (symbol? tag) (name tag) tag)]
-      (when-not (and c (not (or (u/specials s) (u/special-arrays s))))
-        (if-let [handle (-> (env/deref-env) :passes-opts :validate/wrong-tag-handler)]
-          (handle nil ast)
-          (throw (ex-info (str "Wrong tag: " (eval tag) " in def: " (:name ast))
-                          (merge {:ast      (prewalk ast cleanup)}
-                                 (source-info (:env ast)))))))))
-  ast)
+  (when-not (var? (:var ast))
+    (throw (ex-info (str "Cannot def " (:name ast) " as it refers to the class "
+                         (.getName ^Class (:var ast)))
+                    (merge {:ast      (prewalk ast cleanup)}
+                           (source-info (:env ast))))))
+  (merge
+   ast
+   (when-let [tag (-> ast :name meta :tag)]
+     (when (and (symbol? tag) (or (u/specials (str tag)) (u/special-arrays (str tag))))
+       ;; we cannot validate all tags since :tag might contain a function call that returns
+       ;; a valid tag at runtime, however if tag is one of u/specials or u/special-arrays
+       ;; we know that it's a wrong tag as it's going to be evaluated as a clojure.core function
+       (if-let [handle (-> (env/deref-env) :passes-opts :validate/wrong-tag-handler)]
+         (handle :name/tag ast)
+         (throw (ex-info (str "Wrong tag: " (eval tag) " in def: " (:name ast))
+                         (merge {:ast      (prewalk ast cleanup)}
+                                (source-info (:env ast))))))))))
 
 (defmethod -validate :invoke
   [{:keys [args env fn form] :as ast}]
@@ -235,8 +248,10 @@
    * :validate/wrong-tag-handler
       If bound to a function, will invoke that function instead of
       throwing on invalid tag.
-      The function takes the tag key and the AST and must return
-      a map of tag key -> valid tag value (or nil)
+      The function takes the tag key (or :name/tag if the node is :def and
+      the wrong tag is the one on the :name field meta) and the originating
+      AST node and must return a map (or nil) that will be merged into the AST,
+      possibly shadowing the wrong tag with Object or nil.
    * :validate/unresolvable-symbol-handler
       If bound to a function, will invoke that function instead of
       throwing on unresolvable symbol.
@@ -245,14 +260,8 @@
       AST node which can be either a :maybe-class or a :maybe-host-form,
       those nodes are documented in the tools.analyzer quickref.
       The function must return a valid tools.analyzer.jvm AST node."
-  {:pass-info {:walk :post :depends #{#'infer-tag #'analyze-host-expr}}}
+  {:pass-info {:walk :post :depends #{#'infer-tag #'analyze-host-expr #'validate-recur}}}
   [{:keys [tag form env] :as ast}]
-  (when-let [t (:tag (meta form))]
-    (when-not (u/maybe-class t)
-      (throw (ex-info (str "Class not found: " t)
-                      (merge {:class    t
-                              :ast      (prewalk ast cleanup)}
-                             (source-info env))))))
   (let [ast (merge (-validate ast)
                    (when tag
                      {:tag tag}))]

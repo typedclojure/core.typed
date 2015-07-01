@@ -8,7 +8,7 @@
 
 (ns clojure.core.typed.deps.clojure.tools.analyzer.passes.jvm.analyze-host-expr
   (:require [clojure.core.typed.deps.clojure.tools.analyzer :as ana]
-            [clojure.core.typed.deps.clojure.tools.analyzer.utils :refer [ctx source-info resolve-var]]
+            [clojure.core.typed.deps.clojure.tools.analyzer.utils :refer [ctx source-info merge']]
             [clojure.core.typed.deps.clojure.tools.analyzer.jvm.utils :refer :all]))
 
 (defn maybe-static-field [[_ class sym]]
@@ -142,36 +142,51 @@
 (defn analyze-host-expr
   "Performing some reflection, transforms :host-interop/:host-call/:host-field
    nodes in either: :static-field, :static-call, :instance-call, :instance-field
-   or :host-interop nodes.
+   or :host-interop nodes, and a :var or :maybe-class node in a :const :class node,
+   if necessary (class literals shadow Vars).
 
-   A :host-interop node represents either an instance-field or a no-arg instance-method."
+   A :host-interop node represents either an instance-field or a no-arg instance-method. "
   {:pass-info {:walk :post :depends #{}}}
   [{:keys [op target form tag env class] :as ast}]
-  (if (#{:host-interop :host-call :host-field :maybe-class} op)
-    (let [class? (and (= :const (:op target))
+  (case op
+    (:host-interop :host-call :host-field)
+    (let [target (if-let [the-class (and (= :local (:op target))
+                                         (maybe-class-literal (:form target)))]
+                   (merge target
+                          (assoc (ana/analyze-const the-class env :class)
+                            :tag   Class
+                            :o-tag Class))
+                   target)
+          class? (and (= :const (:op target))
                       (= :class (:type target))
                       (:form target))
           target-type (if class? :static :instance)]
-      (merge (dissoc ast :assignable? :target :args :children)
-             (case op
+      (merge' (dissoc ast :assignable? :target :args :children)
+              (case op
 
-               :host-call
-               (analyze-host-call target-type (:method ast)
-                                  (:args ast) target class? env)
+                :host-call
+                (analyze-host-call target-type (:method ast)
+                                   (:args ast) target class? env)
 
-               :host-field
-               (analyze-host-field target-type (:field ast)
-                                   target (or class? (:tag target)) env)
+                :host-field
+                (analyze-host-field target-type (:field ast)
+                                    target (or class? (:tag target)) env)
 
-               :maybe-class
-               (when-let [the-class (or (maybe-class class)
-                                        (maybe-class (resolve-var class env)))]
-                 (assoc (ana/-analyze :const the-class env :class)
-                   :tag   Class
-                   :o-tag Class
-                   :form  form))
-               (-analyze-host-expr target-type (:m-or-f ast)
-                                   target class? env))
-             (when tag
-               {:tag tag})))
+                :host-interop
+                (-analyze-host-expr target-type (:m-or-f ast)
+                                    target class? env))
+              (when tag
+                {:tag tag})))
+    :var
+    (if-let [the-class (and (not (namespace form))
+                            (pos? (.indexOf (str form) "."))
+                            (maybe-class-literal form))]
+      (assoc (ana/analyze-const the-class env :class) :form form)
+      ast)
+
+    :maybe-class
+    (if-let [the-class (maybe-class-literal class)]
+      (assoc (ana/analyze-const the-class env :class) :form form)
+      ast)
+
     ast))
