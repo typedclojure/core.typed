@@ -31,7 +31,10 @@
                  [org.clojure/core.cache "0.6.4"]
                  ]
   ;; for tools.reader 0.9.2
-  :aot [clojure.core.typed.deps.clojure.tools.reader.impl.ExceptionInfo]
+  :aot [clojure.core.typed.deps.clojure.tools.reader.impl.ExceptionInfo
+        ;; for asm-all
+        #_clojure.core.typed.deps.org.objectweb.asm.Type
+        #_clojure.core.typed.deps.org.objectweb.asm.Opcodes]
 
   ; fireplace repl middleware
   :repl-options {:nrepl-middleware [#_cemerick.piggieback/wrap-cljs-repl

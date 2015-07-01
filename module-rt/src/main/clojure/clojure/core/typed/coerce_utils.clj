@@ -40,10 +40,13 @@
     (symbol (str (ns-name ns))
             (str (.sym var)))))
 
-(defn ctor-Class->symbol 
-  "Returns a symbol representing this constructor's Class, removing any compiler stubs."
-  [cls]
-  (Class->symbol cls))
+(defn class-ast-node->symbol 
+  "Returns Class instance represented by AST node. Both :new and :catch
+  have a :class child node."
+  [{:keys [class] :as m}]
+  {:pre [(map? m)]
+   :post [(class? %)]}
+  (Class->symbol class))
 
 (defn ns->file [nsym]
   {:pre [(symbol? nsym)]

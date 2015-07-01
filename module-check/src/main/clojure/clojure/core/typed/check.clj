@@ -1521,7 +1521,7 @@
                                         (fo/-not-filter-at inst-of (r/ret-o expr-tr))))
                          expected))))
 
-(defmulti new-special (fn [{:keys [class] :as expr} & [expected]] (coerce/ctor-Class->symbol class)))
+(defmulti new-special (fn [{:keys [class] :as expr} & [expected]] (coerce/class-ast-node->symbol class)))
 (u/add-defmethod-generator new-special)
 
 (add-new-special-method 'clojure.lang.MultiFn
@@ -1580,7 +1580,7 @@
         :else
         (let [inst-types *inst-ctor-types*
               cls (ast-u/new-op-class expr)
-              clssym (coerce/ctor-Class->symbol cls)
+              clssym (coerce/class-ast-node->symbol cls)
               cargs (mapv check args)
               ctor-fn (or (@ctor-override/CONSTRUCTOR-OVERRIDE-ENV clssym)
                           (and (dt-env/get-datatype clssym)
