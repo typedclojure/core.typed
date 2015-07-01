@@ -20,7 +20,10 @@
 (deftest runTest-test
   (is-tc-e  #(run-tests 'clojure.core.typed.test.abc) (Map Any Any)
              :requires [[clojure.test :refer [run-tests]]]))     
-      
+
+(deftest successful?-test
+  (is-tc-e  (successful? 1) Boolean
+             :requires [[clojure.test :refer [successful?]]]))
 
 
 
