@@ -76,7 +76,7 @@
 
 (defmethod -emit-form :catch
   [{:keys [class local body]} opts]
-  `(catch ~(class->sym class) ~(-emit-form* local opts)
+  `(catch ~(class->sym (-> class :val)) ~(-emit-form* local opts)
      ~(-emit-form* body opts)))
 
 (defmethod -emit-form :deftype
