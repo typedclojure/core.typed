@@ -4,9 +4,11 @@
             [clojure.core.typed.deps.clojure.tools.analyzer.env :as ta-env]
             [clojure.core.typed.deps.clojure.tools.analyzer.jvm :as taj]
             [clojure.core.typed.deps.clojure.tools.analyzer.utils :as ta-utils]
+            [clojure.core.typed.deps.clojure.tools.analyzer.passes :as passes]
             [clojure.core.typed.deps.clojure.tools.analyzer.passes.source-info :as source-info]
             [clojure.core.typed.deps.clojure.tools.analyzer.passes.cleanup :as cleanup]
             [clojure.core.typed.deps.clojure.tools.analyzer.passes.jvm.emit-form :as emit-form]
+            [clojure.core.typed.deps.clojure.tools.analyzer.passes.trim :as trim]
             [clojure.core.typed.deps.clojure.tools.reader :as tr]
             [clojure.core.typed.deps.clojure.tools.reader.reader-types :as readers]
             [clojure.java.io :as io]
@@ -204,8 +206,21 @@
                                                    (assoc-in [:bindings #'*ns*] *ns*)))))
                   {:raw-forms raw-forms}))))))
 
+(def typed-passes
+  (disj taj/default-passes
+        ;; conflicts with current approach of special typed forms implemented
+        ;; as `do` nodes with constants.
+        #'trim/trim))
+
+(def typed-schedule
+  (passes/schedule typed-passes))
+
+(defn run-passes [ast]
+  (typed-schedule ast))
+
 (defn thread-bindings []
-  {#'ta/macroexpand-1 macroexpand-1})
+  {#'ta/macroexpand-1 macroexpand-1
+   #'taj/run-passes run-passes})
 
 ;; bindings is an atom that records any side effects during macroexpansion. Useful
 ;; for nREPL middleware.
