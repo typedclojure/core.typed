@@ -73,7 +73,7 @@
       (let [[op & args] form]
         (if (taj/specials op)
           form
-          (let [v (ta-utils/resolve-var op env)
+          (let [v (ta-utils/resolve-sym op env)
                 m (meta v)
                 ;_ (prn "op" (meta op)  m)
                 local? (-> env :locals (get op))
