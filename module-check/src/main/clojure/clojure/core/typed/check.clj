@@ -527,9 +527,24 @@
   [expr & [expected]]
   (check (assoc expr :op :invoke)))
 
+;; TODO refactor into own file
+(defn protocol-invoke [check-fn {:keys [protocol-fn target args] :as expr} expected]
+  (u/p :check/protocol-invoke
+  (let [cprotocol-fn (check-fn protocol-fn)
+        ctarget (check-fn target)
+        cargs (mapv check-fn args)
+        ftype (u/expr-type cprotocol-fn)
+        argtys (map u/expr-type (concat [ctarget] cargs))
+        actual (funapp/check-funapp cprotocol-fn (concat [ctarget] cargs) ftype argtys expected)]
+    (assoc expr
+           :target ctarget
+           :protocol-fn cprotocol-fn
+           :args cargs
+           u/expr-type actual))))
+
 (add-check-method :protocol-invoke ; protocol methods
   [expr & [expected]]
-  (check (assoc expr :op :invoke)))
+  (protocol-invoke check expr expected))
 
 ;binding
 ;FIXME use `check-normal-def`
