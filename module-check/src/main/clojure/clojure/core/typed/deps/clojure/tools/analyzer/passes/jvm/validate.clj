@@ -10,6 +10,9 @@
   (:require [clojure.core.typed.deps.clojure.tools.analyzer.ast :refer [prewalk]]
             [clojure.core.typed.deps.clojure.tools.analyzer.env :as env]
             [clojure.core.typed.deps.clojure.tools.analyzer.passes.cleanup :refer [cleanup]]
+            [clojure.core.typed.deps.clojure.tools.analyzer.passes.jvm
+             [infer-tag :refer [infer-tag]]
+             [analyze-host-expr :refer [analyze-host-expr]]]
             [clojure.core.typed.deps.clojure.tools.analyzer.utils :refer [arglist-for-arity source-info resolve-var resolve-ns]]
             [clojure.core.typed.deps.clojure.tools.analyzer.jvm.utils :as u :refer [tag-match? try-best-match]])
   (:import (clojure.lang IFn ExceptionInfo)))
@@ -242,6 +245,7 @@
       AST node which can be either a :maybe-class or a :maybe-host-form,
       those nodes are documented in the tools.analyzer quickref.
       The function must return a valid tools.analyzer.jvm AST node."
+  {:pass-info {:walk :post :depends #{#'infer-tag #'analyze-host-expr}}}
   [{:keys [tag form env] :as ast}]
   (when-let [t (:tag (meta form))]
     (when-not (u/maybe-class t)

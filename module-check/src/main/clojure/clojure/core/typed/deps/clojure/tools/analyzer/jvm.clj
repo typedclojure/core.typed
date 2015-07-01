@@ -15,9 +15,10 @@
              :rename {analyze -analyze}]
 
             [clojure.core.typed.deps.clojure.tools.analyzer
-             [utils :refer [ctx resolve-var -source-info resolve-ns obj? dissoc-env butlast+last]]
+             [utils :refer [ctx resolve-var -source-info resolve-ns obj? dissoc-env butlast+last mmerge]]
              [ast :refer [walk prewalk postwalk]]
-             [env :as env :refer [*env*]]]
+             [env :as env :refer [*env*]]
+             [passes :refer [schedule]]]
 
             [clojure.core.typed.deps.clojure.tools.analyzer.jvm.utils :refer :all :as u :exclude [box specials]]
 
@@ -27,26 +28,17 @@
              [elide-meta :refer [elide-meta elides]]
              [warn-earmuff :refer [warn-earmuff]]
              [collect-closed-overs :refer [collect-closed-overs]]
-             [add-binding-atom :refer [add-binding-atom]]
              [uniquify :refer [uniquify-locals]]]
 
             [clojure.core.typed.deps.clojure.tools.analyzer.passes.jvm
              [box :refer [box]]
              [collect :refer [collect]]
              [constant-lifter :refer [constant-lift]]
-             [annotate-branch :refer [annotate-branch]]
-             [annotate-loops :refer [annotate-loops]]
-             [annotate-methods :refer [annotate-methods]]
-             [annotate-class-id :refer [annotate-class-id]]
-             [annotate-internal-name :refer [annotate-internal-name]]
-             [fix-case-test :refer [fix-case-test]]
              [clear-locals :refer [clear-locals]]
              [classify-invoke :refer [classify-invoke]]
              [validate :refer [validate]]
-             [infer-tag :refer [infer-tag ensure-tag]]
-             [annotate-tag :refer [annotate-tag]]
+             [infer-tag :refer [infer-tag]]
              [validate-loop-locals :refer [validate-loop-locals]]
-             [analyze-host-expr :refer [analyze-host-expr]]
              [warn-on-reflection :refer [warn-on-reflection]]
              [emit-form :refer [emit-form]]]
 
@@ -402,79 +394,45 @@
   (let [etype (if (= etype :default) Throwable etype)] ;; catch-all
     (ana/-parse `(catch ~etype ~ename ~@body) env)))
 
+(def default-passes
+  "Set of passes that will be run by default on the AST by #'run-passes"
+  #{#'warn-on-reflection
+    #'warn-earmuff
+
+    #'uniquify-locals
+
+    #'source-info
+    #'elide-meta
+    #'constant-lift
+
+    #'clear-locals
+    #'collect-closed-overs
+    #'collect
+
+    #'box
+
+    #'validate-loop-locals
+    #'validate
+    #'infer-tag
+
+    #'classify-invoke})
+
+(def scheduled-default-passes
+  (schedule default-passes))
+
 (defn ^:dynamic run-passes
-  "Applies the following passes in the correct order to the AST:
-   * uniquify
-   * add-binding-atom
-   * source-info
-   * elide-meta
-   * warn-earmuff
-   * collect-closed-overs
-   * jvm.collect
-   * jvm.box
-   * jvm.constant-lifter
-   * jvm.annotate-branch
-   * jvm.annotate-loops
-   * jvm.annotate-class-id
-   * jvm.annotate-internal-name
-   * jvm.annotate-methods
-   * jvm.fix-case-test
-   * jvm.clear-locals
-   * jvm.classify-invoke
-   * jvm.validate
-   * jvm.infer-tag
-   * jvm.annotate-tag
-   * jvm.validate-loop-locals
-   * jvm.analyze-host-expr"
+  "Function that will be invoked on the AST tree immediately after it has been constructed,
+   by default set-ups and runs the default passes declared in #'default-passes"
   [ast]
-  (-> ast
+  (scheduled-default-passes ast))
 
-    uniquify-locals
-    add-binding-atom
-
-    (prewalk (fn [ast]
-               (-> ast
-                 warn-earmuff
-                 source-info
-                 elide-meta
-                 annotate-methods
-                 fix-case-test
-                 annotate-class-id
-                 annotate-internal-name)))
-
-    ((fn analyze [ast]
-       (postwalk ast
-                 (fn [ast]
-                   (-> ast
-                     analyze-host-expr
-                     constant-lift
-                     annotate-tag
-                     infer-tag
-                     validate
-                     classify-invoke
-                     (validate-loop-locals analyze))))))
-
-    (prewalk (fn [ast]
-               (-> ast
-                 box
-                 warn-on-reflection
-                 annotate-loops  ;; needed for clear-locals to safely clear locals in a loop
-                 annotate-branch ;; needed for clear-locals
-                 ensure-tag)))
-
-    ((collect {:what       #{:constants
-                             :callsites}
-               :where      #{:deftype :reify :fn}
-               :top-level? false}))
-
-    ;; needs to be run in a separate pass to avoid collecting
-    ;; constants/callsites in :loop
-    (collect-closed-overs {:what  #{:closed-overs}
-                           :where #{:deftype :reify :fn :loop :try}
-                           :top-level? false})
-
-    ;; needs to be run after collect-closed-overs
-    clear-locals))
+(def default-passes-opts
+  "Default :passes-opts for `analyze`"
+  {:collect/what                    #{:constants :callsites}
+   :collect/where                   #{:deftype :reify :fn}
+   :collect/top-level?              false
+   :collect-closed-overs/where      #{:deftype :reify :fn :loop :try}
+   :collect-closed-overs/top-level? false})
 
 (defn analyze
   "Returns an AST for the form that's compatible with what tools.emitter.jvm requires.
@@ -483,7 +441,8 @@
    tools.analyzer.jvm/{macroexpand-1,create-var,parse} and analyzes the form.
 
    If provided, opts should be a map of options to analyze, currently the only valid
-   options are :bindings and :passes-opts.
+   options are :bindings and :passes-opts (if not provided, :passes-opts defaults to the
+   value of `default-passes-opts`).
    If provided, :bindings should be a map of Var->value pairs that will be merged into the
    default bindings for tools.analyzer, useful to provide custom extension points.
    If provided, :passes-opts should be a map of pass-name-kw->pass-config-map pairs that
@@ -506,8 +465,8 @@
                                                                 elides)}
                            (:bindings opts))
        (env/ensure (global-env)
-         (env/with-env (swap! env/*env* merge
-                              {:passes-opts (:passes-opts opts)})
+         (env/with-env (swap! env/*env* mmerge
+                              {:passes-opts (or (:passes-opts opts) default-passes-opts)})
            (run-passes (-analyze form env)))))))
 
 (deftype ExceptionThrown [e])
@@ -555,9 +514,8 @@
                  result (try (eval frm) ;; eval the emitted form rather than directly the form to avoid double macroexpansion
                              (catch Exception e
                                (ExceptionThrown. e)))]
-             (merge a
-                    {:result    result
-                     :raw-forms raw-forms})))))))
+             (merge a {:result    result
+                       :raw-forms raw-forms})))))))
 
 (defn analyze'
   "Like `analyze` but runs cleanup on the AST"
