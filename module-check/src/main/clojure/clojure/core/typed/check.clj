@@ -501,6 +501,11 @@
                                expected)))
         :else :default))))
 
+(add-check-method :prim-invoke
+  [expr & [expected]]
+  (assoc (check (assoc expr :op :invoke))
+         :op :prim-invoke))
+
 (add-check-method :keyword-invoke
   [{kw :keyword :keys [target] :as expr} & [expected]]
   {:pre [(and (#{:const} (:op kw))
