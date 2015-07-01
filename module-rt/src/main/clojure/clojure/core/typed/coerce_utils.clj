@@ -40,14 +40,6 @@
     (symbol (str (ns-name ns))
             (str (.sym var)))))
 
-(defn class-ast-node->symbol 
-  "Returns Class instance represented by AST node. Both :new and :catch
-  have a :class child node."
-  [{:keys [class] :as m}]
-  {:pre [(map? m)]
-   :post [(class? %)]}
-  (Class->symbol class))
-
 (defn ns->file [nsym]
   {:pre [(symbol? nsym)]
    :post [(string? %)]}
