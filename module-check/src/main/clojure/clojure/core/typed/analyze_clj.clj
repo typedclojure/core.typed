@@ -3,7 +3,7 @@
   (:require [clojure.core.typed.deps.clojure.tools.analyzer :as ta]
             [clojure.core.typed.deps.clojure.tools.analyzer.env :as ta-env]
             [clojure.core.typed.deps.clojure.tools.analyzer.jvm :as taj]
-            [clojure.core.typed.deps.clojure.tools.analyzer.utils :as taj-utils]
+            [clojure.core.typed.deps.clojure.tools.analyzer.utils :as ta-utils]
             [clojure.core.typed.deps.clojure.tools.analyzer.passes.source-info :as source-info]
             [clojure.core.typed.deps.clojure.tools.analyzer.passes.cleanup :as cleanup]
             [clojure.core.typed.deps.clojure.tools.analyzer.passes.jvm.emit-form :as emit-form]
@@ -73,7 +73,7 @@
       (let [[op & args] form]
         (if (taj/specials op)
           form
-          (let [v (taj-utils/resolve-var op env)
+          (let [v (ta-utils/resolve-var op env)
                 m (meta v)
                 ;_ (prn "op" (meta op)  m)
                 local? (-> env :locals (get op))
@@ -89,14 +89,14 @@
              macro?
              (let [res (apply (typed-macros v v) form (:locals env) (rest form))] ; (m &form &env & args)
                (taj/update-ns-map!)
-               (if (taj-utils/obj? res)
+               (if (ta-utils/obj? res)
                  (vary-meta res merge (meta form))
                  res))
 
              inline?
              (let [res (apply inline? args)]
                (taj/update-ns-map!)
-               (if (taj-utils/obj? res)
+               (if (ta-utils/obj? res)
                  (vary-meta res merge
                             (and t {:tag t})
                             ; we want the top-most inlining op
@@ -164,12 +164,12 @@
            ;; handle the Gilardi scenario.
            ;; we don't track exceptional control flow on a top-level do, which
            ;; probably won't be an issue.
-           (let [[statements ret] (taj/butlast+last (rest mform))
+           (let [[statements ret] (ta-utils/butlast+last (rest mform))
                  statements-expr (mapv (fn [s] 
                                          (if (some-> stop-analysis deref)
                                            (unanalyzed-expr s)
                                            (analyze+eval s (-> env
-                                                               (taj-utils/ctx :statement)
+                                                               (ta-utils/ctx :statement)
                                                                (assoc :ns (ns-name *ns*)))
                                                          (dissoc opts :expected))))
                                        statements)

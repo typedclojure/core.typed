@@ -7,7 +7,9 @@
 ;;   You must not remove this notice, or any other, from this software.
 
 (ns clojure.core.typed.deps.clojure.tools.analyzer.passes.jvm.emit-form
-  (:require [clojure.core.typed.deps.clojure.tools.analyzer.passes.emit-form :as default]))
+  (:require [clojure.core.typed.deps.clojure.tools.analyzer.passes
+             [emit-form :as default]
+             [uniquify :refer [uniquify-locals]]]))
 
 (defmulti -emit-form (fn [{:keys [op]} _] op))
 
@@ -25,6 +27,7 @@
     * :hygienic
     * :qualified-vars (DEPRECATED, use :qualified-symbols instead)
     * :qualified-symbols"
+  {:pass-info {:walk :none :depends #{#'uniquify-locals} :compiler true}}
   ([ast] (emit-form ast #{}))
   ([ast opts]
      (binding [default/-emit-form* -emit-form*]
@@ -32,6 +35,7 @@
 
 (defn emit-hygienic-form
   "Return an hygienic form represented by the given AST"
+  {:pass-info {:walk :none :depends #{#'uniquify-locals} :compiler true}}
   [ast]
   (binding [default/-emit-form* -emit-form*]
     (-emit-form* ast #{:hygienic})))
@@ -129,14 +133,15 @@
     ~@(mapv #(-emit-form* % opts) args)))
 
 (defmethod -emit-form :protocol-invoke
-  [{:keys [fn args]} opts]
-  `(~(-emit-form* fn opts)
+  [{:keys [protocol-fn target args]} opts]
+  `(~(-emit-form* protocol-fn opts)
+    ~(-emit-form* target opts)
     ~@(mapv #(-emit-form* % opts) args)))
 
 (defmethod -emit-form :keyword-invoke
-  [{:keys [fn args]} opts]
-  `(~(-emit-form* fn opts)
-    ~@(mapv #(-emit-form* % opts) args)))
+  [{:keys [target keyword]} opts]
+  (list (-emit-form* keyword opts)
+        (-emit-form* target opts)))
 
 (defmethod -emit-form :instance?
   [{:keys [class target]} opts]
