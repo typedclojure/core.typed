@@ -15,23 +15,24 @@
              :rename {analyze -analyze}]
 
             [clojure.core.typed.deps.clojure.tools.analyzer
-             [utils :refer [ctx resolve-var -source-info resolve-ns obj? dissoc-env]]
+             [utils :refer [ctx resolve-var -source-info resolve-ns obj? dissoc-env butlast+last]]
              [ast :refer [walk prewalk postwalk]]
              [env :as env :refer [*env*]]]
 
-            [clojure.core.typed.deps.clojure.tools.analyzer.jvm.utils :refer :all :exclude [box specials]]
+            [clojure.core.typed.deps.clojure.tools.analyzer.jvm.utils :refer :all :as u :exclude [box specials]]
 
             [clojure.core.typed.deps.clojure.tools.analyzer.passes
              [source-info :refer [source-info]]
              [cleanup :refer [cleanup]]
              [elide-meta :refer [elide-meta elides]]
              [warn-earmuff :refer [warn-earmuff]]
-             [collect :refer [collect collect-closed-overs]]
+             [collect-closed-overs :refer [collect-closed-overs]]
              [add-binding-atom :refer [add-binding-atom]]
              [uniquify :refer [uniquify-locals]]]
 
             [clojure.core.typed.deps.clojure.tools.analyzer.passes.jvm
              [box :refer [box]]
+             [collect :refer [collect]]
              [constant-lifter :refer [constant-lift]]
              [annotate-branch :refer [annotate-branch]]
              [annotate-loops :refer [annotate-loops]]
@@ -178,14 +179,33 @@
                 (desugar-host-expr form env)))))
          (desugar-host-expr form env)))))
 
+(defn qualify-argvec [arglist]
+  (letfn [(fix-tag [x] (vary-meta x merge
+                                  (when-let [t (:tag (meta x))]
+                                    {:tag (if (or (string? t)
+                                                  (u/specials (str t))
+                                                  (u/special-arrays (str t)))
+                                            t
+                                            (if-let [c (maybe-class t)]
+                                              (let [new-t (-> c .getName symbol)]
+                                                (if (= new-t t)
+                                                  t
+                                                  (with-meta new-t {::qualified? true})))
+                                              t))})))]
+    (with-meta (mapv fix-tag arglist)
+      (meta (fix-tag arglist)))))
+
 (defn create-var
   "Creates a Var for sym and returns it.
    The Var gets interned in the env namespace."
   [sym {:keys [ns]}]
   (or (find-var (symbol (str ns) (name sym)))
       (intern ns (vary-meta sym merge
-                            (let [{:keys [inline inline-arities]} (meta sym)]
+                            (let [{:keys [inline inline-arities arglists]} (meta sym)]
                               (merge {}
+                                     (when arglists
+                                       {:arglists (seq (for [arglist arglists]
+                                                         (qualify-argvec arglist)))})
                                      (when inline
                                        {:inline (eval inline)})
                                      (when inline-arities
@@ -386,11 +406,11 @@
   "Applies the following passes in the correct order to the AST:
    * uniquify
    * add-binding-atom
-   * cleanup
    * source-info
    * elide-meta
    * warn-earmuff
-   * collect
+   * collect-closed-overs
+   * jvm.collect
    * jvm.box
    * jvm.constant-lifter
    * jvm.annotate-branch
@@ -426,12 +446,12 @@
        (postwalk ast
                  (fn [ast]
                    (-> ast
-                     annotate-tag
                      analyze-host-expr
+                     constant-lift
+                     annotate-tag
                      infer-tag
                      validate
                      classify-invoke
-                     constant-lift ;; needs to be run after validate so that :maybe-class is turned into a :const
                      (validate-loop-locals analyze))))))
 
     (prewalk (fn [ast]
@@ -460,13 +480,14 @@
   "Returns an AST for the form that's compatible with what tools.emitter.jvm requires.
 
    Binds tools.analyzer/{macroexpand-1,create-var,parse} to
-   tools.analyzer.jvm/{macroexpand-1,create-var,parse} and calls
-   tools.analyzer/analyzer on form.
+   tools.analyzer.jvm/{macroexpand-1,create-var,parse} and analyzes the form.
 
-   If provided, opts should be a map of options to analyze, currently the only valid option
-   is :bindings.
+   If provided, opts should be a map of options to analyze, currently the only valid
+   options are :bindings and :passes-opts.
    If provided, :bindings should be a map of Var->value pairs that will be merged into the
    default bindings for tools.analyzer, useful to provide custom extension points.
+   If provided, :passes-opts should be a map of pass-name-kw->pass-config-map pairs that
+   can be used to configure the behaviour of each pass.
 
    E.g.
    (analyze form env {:bindings  {#'ana/macroexpand-1 my-mexpand-1}})
@@ -485,20 +506,11 @@
                                                                 elides)}
                            (:bindings opts))
        (env/ensure (global-env)
-         (run-passes (-analyze form env))))))
+         (env/with-env (swap! env/*env* merge
+                              {:passes-opts (:passes-opts opts)})
+           (run-passes (-analyze form env)))))))
 
 (deftype ExceptionThrown [e])
-
-(defn butlast+last
-  "Returns same value as (juxt butlast last), but slightly more
-efficient since it only traverses the input sequence s once, not
-twice."
-  [s]
-  (loop [butlast (transient [])
-         s s]
-    (if-let [xs (next s)]
-      (recur (conj! butlast (first s)) xs)
-      [(seq (persistent! butlast)) (first s)])))
 
 (defn analyze+eval
   "Like analyze but evals the form after the analysis and attaches the
@@ -571,7 +583,7 @@ twice."
       (assert res (str "Can't find " ns " in classpath"))
       (let [filename (source-path res)
             path (res-path res)]
-        (when-not (get-in *env* [::analyzed-clj path])
+        (when-not (get-in (env/deref-env) [::analyzed-clj path])
           (binding [*ns* *ns*]
             (with-open [rdr (io/reader res)]
               (let [pbr (readers/indexing-push-back-reader

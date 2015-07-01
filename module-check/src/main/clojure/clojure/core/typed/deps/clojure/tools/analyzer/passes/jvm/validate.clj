@@ -8,6 +8,7 @@
 
 (ns clojure.core.typed.deps.clojure.tools.analyzer.passes.jvm.validate
   (:require [clojure.core.typed.deps.clojure.tools.analyzer.ast :refer [prewalk]]
+            [clojure.core.typed.deps.clojure.tools.analyzer.env :as env]
             [clojure.core.typed.deps.clojure.tools.analyzer.passes.cleanup :refer [cleanup]]
             [clojure.core.typed.deps.clojure.tools.analyzer.utils :refer [arglist-for-arity source-info resolve-var resolve-ns]]
             [clojure.core.typed.deps.clojure.tools.analyzer.jvm.utils :as u :refer [tag-match? try-best-match]])
@@ -17,34 +18,29 @@
 
 (defmethod -validate :maybe-class
   [{:keys [class env] :as ast}]
-  (if (not (.contains (str class) "."))
-    (throw (ex-info (str "Could not resolve var: " class)
-                    (merge {:var class}
-                           (source-info env))))
+  (if-let [handle (-> (env/deref-env) :passes-opts :validate/unresolvable-symbol-handler)]
+    (handle nil class ast)
+    (if (not (.contains (str class) "."))
+      (throw (ex-info (str "Could not resolve var: " class)
+                      (merge {:var class}
+                             (source-info env))))
 
-    (throw (ex-info (str "Class not found: " class)
-                    (merge {:class class}
-                           (source-info env))))))
+      (throw (ex-info (str "Class not found: " class)
+                      (merge {:class class}
+                             (source-info env)))))))
 
 (defmethod -validate :maybe-host-form
-  [{:keys [class field form env]}]
-  (if (resolve-ns class env)
-    (throw (ex-info (str "No such var: " class)
-                    (merge {:form form}
-                           (source-info env))))
-    (throw (ex-info (str "No such namespace: " class)
-                    (merge {:ns   class
-                            :form form}
-                           (source-info env))))))
-
-(defn validate-class
-  [{:keys [class form env] :as ast}]
-  (if-let [the-class (u/maybe-class class)]
-    (assoc ast :class the-class)
-    (throw (ex-info (str "Class not found: " class)
-                    (merge {:class      class
-                            :form       form}
-                           (source-info env))))))
+  [{:keys [class field form env] :as ast}]
+  (if-let [handle (-> (env/deref-env) :passes-opts :validate/unresolvable-symbol-handler)]
+    (handle class field ast)
+    (if (resolve-ns class env)
+      (throw (ex-info (str "No such var: " class)
+                      (merge {:form form}
+                             (source-info env))))
+      (throw (ex-info (str "No such namespace: " class)
+                      (merge {:ns   class
+                              :form form}
+                             (source-info env)))))))
 
 (defmethod -validate :set!
   [{:keys [target form env] :as ast}]
@@ -171,15 +167,11 @@
     (let [c (u/maybe-class tag)
           s (if (symbol? tag) (name tag) tag)]
       (when-not (and c (not (or (u/specials s) (u/special-arrays s))))
-        (throw (ex-info (str "Wrong tag: " (eval tag) " in def: " (:name ast))
-                        (merge {:ast      (prewalk ast cleanup)}
-                               (source-info (:env ast))))))))
-
-  #_(let [init (:init ast)]
-      (when-let [tag (:tag init)]
-        (alter-meta! var assoc :tag tag))
-      (when-let [arglists (:arglists init)]
-        (alter-meta! var assoc :arg-lists arglists)))
+        (if-let [handle (-> (env/deref-env) :passes-opts :validate/wrong-tag-handler)]
+          (handle nil ast)
+          (throw (ex-info (str "Wrong tag: " (eval tag) " in def: " (:name ast))
+                          (merge {:ast      (prewalk ast cleanup)}
+                                 (source-info (:env ast)))))))))
   ast)
 
 (defmethod -validate :invoke
@@ -192,10 +184,11 @@
                              (source-info env)))))
     (if (and (:arglists fn)
              (not (arglist-for-arity fn argc)))
-      (assoc ast :maybe-mismatch-arity true)
-      #_(throw (ex-info (str "No matching arity found for function: " (:name fn))
+      (if (-> (env/deref-env) :passes-opts :validate/throw-on-arity-mismatch)
+        (throw (ex-info (str "No matching arity found for function: " (:name fn))
                         {:arity (count args)
                          :fn    fn}))
+        (assoc ast :maybe-arity-mismatch true))
       ast)))
 
 (defn validate-interfaces [{:keys [env form interfaces]}]
@@ -221,15 +214,34 @@
   (let [tag (ast t)]
     (if-let [the-class (u/maybe-class tag)]
       {t the-class}
-      (throw (ex-info (str "Class not found: " tag)
-                      (merge {:class    tag
-                              :ast      (prewalk ast cleanup)}
-                             (source-info env)))))))
+      (if-let [handle (-> (env/deref-env) :passes-opts :validate/wrong-tag-handler)]
+        (handle t ast)
+        (throw (ex-info (str "Class not found: " tag)
+                        (merge {:class    tag
+                                :ast      (prewalk ast cleanup)}
+                               (source-info env))))))))
 
 (defn validate
   "Validate tags, classes, method calls.
    Throws exceptions when invalid forms are encountered, replaces
-   class symbols with class objects."
+   class symbols with class objects.
+
+   Passes opts:
+   * :validate/throw-on-arity-mismatch
+      If true, validate will throw on potential arity mismatch
+   * :validate/wrong-tag-handler
+      If bound to a function, will invoke that function instead of
+      throwing on invalid tag.
+      The function takes the tag key and the AST and must return
+      a map of tag key -> valid tag value (or nil)
+   * :validate/unresolvable-symbol-handler
+      If bound to a function, will invoke that function instead of
+      throwing on unresolvable symbol.
+      The function takes three arguments: the namespace (possibly nil)
+      and name part of the symbol, as symbols and the originating
+      AST node which can be either a :maybe-class or a :maybe-host-form,
+      those nodes are documented in the tools.analyzer quickref.
+      The function must return a valid tools.analyzer.jvm AST node."
   [{:keys [tag form env] :as ast}]
   (when-let [t (:tag (meta form))]
     (when-not (u/maybe-class t)

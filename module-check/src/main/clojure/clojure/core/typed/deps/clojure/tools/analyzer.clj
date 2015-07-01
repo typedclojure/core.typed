@@ -368,7 +368,7 @@
 (defn valid-binding-symbol? [s]
   (and (symbol? s)
        (not (namespace s))
-       (not (.contains (name s) "."))))
+       (not (contains? (set (name s)) \.))))
 
 (defmethod -parse 'try
   [[_ & body :as form] env]
@@ -544,7 +544,7 @@
                          :as env}]
   (when-let [error-msg
              (cond
-              (not (= :ctx/return context))
+              (not (isa? context :ctx/return))
               "Can only recur from tail position"
 
               no-recur
@@ -630,7 +630,7 @@
       :body        body
       :children    [:params :body]}
      (when local
-       {:local (dissoc local :env)}))))
+       {:local (dissoc-env local)}))))
 
 (defmethod -parse 'fn*
   [[op & args :as form] env]
