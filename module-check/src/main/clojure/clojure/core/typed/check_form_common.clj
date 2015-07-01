@@ -75,8 +75,9 @@
   (assert (not (and expected-ret type-provided?)))
   (p/profile-if profile
     (reset-caches/reset-caches)
-    (binding [lex/*all-locals* (atom #{})
-              lex/*used-locals* (atom #{})
+    (binding [lex/*unique-locals* (atom #{})
+              lex/*then-locals* (atom #{})
+              lex/*else-locals* (atom #{})
               vs/*already-collected* (atom #{})
               vs/*already-checked* (atom #{})
               vs/*delayed-errors* (err/-init-delayed-errors)

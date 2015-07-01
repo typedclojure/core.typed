@@ -11,7 +11,8 @@
             [clojure.core.typed.util-vars :as vs]
             [clojure.core.typed.var-env :as var-env]
             [clojure.core.typed.errors :as err]
-            [clojure.core.typed.check-below :as below]))
+            [clojure.core.typed.check-below :as below]
+            [clojure.set :as set]))
 
 ;[TCResult Expr Expr (Option Type) -> TCResult]
 (defn check-if [check-fn expr ctest thn els expected]
@@ -68,7 +69,8 @@
             ;                                    (set (:props env-els)))))
             ;_ (prn idsym"env+: new-els-props" (map unparse-filter new-els-props))
             cthen
-            (binding [vs/*current-expr* thn]
+            (binding [vs/*current-expr* thn
+                      lex/*unique-locals* (atom #{})]
               (var-env/with-lexical-env env-thn
                 (tc thn @flag+)))
 
@@ -76,7 +78,8 @@
             (u/expr-type cthen)
 
             celse
-            (binding [vs/*current-expr* els]
+            (binding [vs/*current-expr* els
+                      lex/*unique-locals* (atom #{})]
               (var-env/with-lexical-env env-els
                 (tc els @flag-)))
 
@@ -150,6 +153,7 @@
                 (if expected (below/check-below (r/ret us fs3 os3 flow3) expected) (r/ret us fs3 os3 flow3))
                 :else (err/int-error "Something happened"))
               _ (assert (r/TCResult? if-ret))]
+          (reset! lex/*unique-locals* (set/union @lex/*then-locals* @lex/*else-locals*))
           (assoc expr
                  :test ctest
                  :then cthen

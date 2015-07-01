@@ -179,6 +179,7 @@
   [{:keys [items] :as expr} & [expected]]
   {:post [(-> % u/expr-type r/TCResult?)
           (vector? (:items %))]}
+  ;(err/tc-delayed-error (str (:items (vec/check-vector check expr expected)) " IS THE VALUE I WANT: "))
   (vec/check-vector check expr expected))
 
 (add-check-method :var
@@ -1402,10 +1403,12 @@
   [{sym :name :as expr} & [expected]]
   (when (and 
           (r/Unique? (:t (local-result/local-ret sym)))
-          (contains? @lex/*all-locals* sym))
-      (reset! lex/*used-locals* (into @lex/*used-locals* #{sym})))
-  (reset! lex/*all-locals* (into @lex/*all-locals* #{sym}))
-
+          (contains? @lex/*unique-locals* sym))
+    (err/tc-delayed-error (str "Unique value used more than once")))
+  (when (r/Unique? (:t (local-result/local-ret sym)))
+    (reset! lex/*unique-locals* (into @lex/*unique-locals* #{sym}))
+    (reset! lex/*then-locals* (into @lex/*then-locals* #{sym}))
+    (reset! lex/*else-locals* (into @lex/*else-locals* #{sym})))
   (assoc expr
          u/expr-type (local-result/local-result expr sym expected)))
 
