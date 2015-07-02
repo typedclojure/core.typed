@@ -1,8 +1,7 @@
 (ns clojure.core.typed.test.testnew
   (:require  [clojure.core.typed :as t] 
              [clojure.test :refer :all]                
-             [clojure.core.typed.test.test-utils :refer :all]
-             [clojure.core.typed.test.destructure]))
+             [clojure.core.typed.test.test-utils :refer :all]))
 
 (deftest function?-test
   (is-tc-e   (function? function?) Boolean
@@ -47,7 +46,7 @@
              :requires [[clojure.test :refer [test-ns]]]))
             
 (deftest run-tests-test
-  	(is-tc-e (run-tests 'clojure.core.typed.test.destructure) (Map Any Any)
+  	(is-tc-e (run-tests) (Map Any Any)
              :requires [[clojure.test :refer [run-tests]]])
-	(is-tc-err (run-tests 'clojure.core.typed.test.destructure) String
+	(is-tc-err (run-tests) String
              :requires [[clojure.test :refer [run-tests]]]))
