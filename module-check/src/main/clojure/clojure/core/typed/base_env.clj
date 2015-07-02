@@ -770,7 +770,7 @@ clojure.test/run-all-tests [java.util.regex.Pattern * -> (Map Any Any)]
 clojure.test/successful? [Any -> Boolean]
 clojure.test/compose-fixtures [Any Any -> Any]
 clojure.test/testing-vars-str [Any -> String]
-clojure.test/testing-contexts-str [ -> String]
+clojure.test/testing-contexts-str [String]
 clojure.test/test-ns [Symbol -> (Map Any Any)]
 
 
