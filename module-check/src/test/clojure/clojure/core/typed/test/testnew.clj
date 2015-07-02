@@ -14,7 +14,7 @@
              :requires [[clojure.test :refer [assert-any]]]))
            
 (deftest do-report-test
-  (is-tc-e  (do-report 1)  t/Any
+  (is-tc-e  (do-report 1)  Any
              :requires [[clojure.test :refer [do-report]]]))
            
 (deftest runTest-test
