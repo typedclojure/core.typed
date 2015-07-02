@@ -4931,6 +4931,10 @@
                  k)))
   )
 
+(deftest rewrite-reflecting-field-test
+  (is-tc-e (fn [a] (.getParent a))
+           [java.io.File -> Any]))
+
 ;    (is-tc-e 
 ;      (let [f (fn [{:keys [a] :as m} :- '{:a (U nil Num)}] :- '{:a Num} 
 ;                {:pre [(number? a)]} 
