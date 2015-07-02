@@ -2,7 +2,7 @@
   (:require  [clojure.core.typed :as t] 
              [clojure.test :refer :all]                
              [clojure.core.typed.test.test-utils :refer :all]
-             [clojure.core.typed.test.destructable]))
+             [clojure.core.typed.test.destructure]))
 
 (deftest function?-test
   (is-tc-e   (function? function?) Boolean
@@ -19,16 +19,12 @@
              :requires [[clojure.test :refer [do-report]]]))
             
 (deftest run-tests-test
-  	(is-tc-e #(run-tests) (Map Any Any)
-             :requires [[clojure.test :refer [run-tests]]])
-	(is-tc-err #(run-tests) String
+  	(is-tc-e (defn a [] (run-tests)) (Map Any Any)
              :requires [[clojure.test :refer [run-tests]]]))
         
 (deftest run-all-tests-test
-  	(is-tc-e #(run-all-tests) (Map Any Any)
+  	(is-tc-e (defn a [] (run-all-tests)) (Map Any Any)
              :requires [[clojure.test :refer [run-all-tests]]])
-	(is-tc-err #(run-all-tests) String
-             :requires [[clojure.test :refer [run-all-tests]]]))
             
 (deftest successful?-test
   (is-tc-e  (successful? 1) Boolean
@@ -53,9 +49,7 @@
              :requires [[clojure.test :refer [testing-contexts-str]]]))
 
 (deftest test-ns-test
-  	(is-tc-e #(test-ns 'clojure.core.typed.test.destructable) (Map Any Any)
-             :requires [[clojure.test :refer [test-ns]]])
-	  (is-tc-err #(test-ns 'clojure.core.typed.test.destructable) String
+  	(is-tc-e (defn a [] (test-ns 'clojure.core.typed.test.destructure)) (Map Any Any)
              :requires [[clojure.test :refer [test-ns]]]))
             
 
