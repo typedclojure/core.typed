@@ -1,5 +1,5 @@
 (ns ^:skip-wiki clojure.core.typed.analyze-clj
-  (:refer-clojure :exclude [macroexpand-1])
+  (:refer-clojure :exclude [macroexpand-1 get-method])
   (:require [clojure.core.typed.deps.clojure.tools.analyzer :as ta]
             [clojure.core.typed.deps.clojure.tools.analyzer.env :as ta-env]
             [clojure.core.typed.deps.clojure.tools.analyzer.jvm :as taj]
@@ -11,7 +11,9 @@
             [clojure.core.typed.deps.clojure.tools.analyzer.passes.trim :as trim]
             [clojure.core.typed.deps.clojure.tools.reader :as tr]
             [clojure.core.typed.deps.clojure.tools.reader.reader-types :as readers]
+            [clojure.core.typed.deps.clojure.tools.analyzer.passes.jvm.validate :as validate]
             [clojure.java.io :as io]
+            [clojure.reflect :as reflect]
             [clojure.core.typed.utils :as u]
             [clojure.core.typed.util-vars :as vs]
             [clojure.core.typed.coerce-utils :as coerce]
@@ -21,6 +23,7 @@
             [clojure.core.typed.special-form :as spec]
             [clojure.core.typed.errors :as err]
             [clojure.set :as set]
+            [clojure.string :as str]
             [clojure.core :as core])
   (:import (clojure.core.typed.deps.clojure.tools.analyzer.jvm ExceptionThrown)))
 
@@ -206,14 +209,101 @@
                                                    (assoc-in [:bindings #'*ns*] *ns*)))))
                   {:raw-forms raw-forms}))))))
 
+;; reflect-validated from eastwood
+;========================
+(defmulti reflect-validated 
+  {:pass-info {:walk :any :depends #{#'validate/validate}}}
+  :op)
+
+(defn arg-type-str [arg-types]
+  (str/join ", "
+            (map #(if (nil? %) "nil" (.getName ^Class %)) arg-types)))
+
+(defn get-ctor [ast]
+  (let [cls (:val (:class ast))
+        arg-type-vec (mapv :tag (:args ast))
+        arg-type-arr (into-array Class arg-type-vec)]
+;;    (println (format "dbgx: get-ctor cls=%s arg-types=%s"
+;;                     cls (arg-type-str arg-type-vec)))
+    (try
+      (.getConstructor ^Class cls arg-type-arr)
+      (catch NoSuchMethodException e
+        (try
+          (.getDeclaredConstructor ^Class cls arg-type-arr)
+          (catch NoSuchMethodException e
+            {:class cls, :arg-types arg-type-vec}))))))
+
+(defn get-field [ast]
+  (let [cls (:class ast)
+        fld-name (name (:field ast))]
+    (try
+      (.getField ^Class cls fld-name)
+      (catch NoSuchFieldException e
+        (try
+          (.getDeclaredField ^Class cls fld-name)
+          (catch NoSuchFieldException e
+            {:class cls, :field-name fld-name}))))))
+
+(defn get-method [ast]
+  (let [cls (:class ast)
+        method-name (name (:method ast))
+        arg-type-vec (mapv :tag (:args ast))
+        arg-type-arr (into-array Class arg-type-vec)]
+;;    (println (format "dbgx: get-method cls=%s method=%s arg-types=%s"
+;;                     cls method-name (arg-type-str arg-type-vec)))
+    (when (some nil? arg-type-vec)
+      (println (format "Error: Bad arg-type nil for method named %s for class %s, full arg type list (%s).  ast pprinted below for debugging tools.analyzer:"
+                       method-name
+                       (.getName ^Class cls)
+                       (arg-type-str arg-type-vec)))
+      #_(util/pprint-ast-node ast))
+    (try
+      (.getMethod ^Class cls method-name arg-type-arr)
+      (catch NoSuchMethodException e
+        (try
+          (.getDeclaredMethod ^Class cls method-name arg-type-arr)
+          (catch NoSuchMethodException e
+            {:class cls, :method-name method-name,
+             :arg-types arg-type-vec}))))))
+
+
+(defn void-method? [^java.lang.reflect.Method m]
+  (let [ret-val (.getGenericReturnType m)]
+    (= ret-val Void/TYPE)))
+
+(defmethod reflect-validated :default [ast] ast)
+
+(defmethod reflect-validated :new [ast]
+  (if (:validated? ast)
+    (assoc ast :reflected-ctor (@#'reflect/constructor->map (get-ctor ast)))
+    ast))
+
+(defmethod reflect-validated :instance-field [ast]
+  (assoc ast :reflected-field (@#'reflect/field->map (get-field ast))))
+
+(defmethod reflect-validated :instance-call [ast]
+  (if (:validated? ast)
+    (assoc ast :reflected-method (@#'reflect/method->map (get-method ast)))
+    ast))
+
+(defmethod reflect-validated :static-field [ast]
+  (assoc ast :reflected-field (@#'reflect/field->map (get-field ast))))
+
+(defmethod reflect-validated :static-call [ast]
+  (if (:validated? ast)
+    (assoc ast :reflected-method (@#'reflect/method->map (get-method ast)))
+    ast))
+;========================
+
 (def typed-passes
-  (disj taj/default-passes
-        ;; conflicts with current approach of special typed forms implemented
-        ;; as `do` nodes with constants.
-        #'trim/trim))
+  (-> taj/default-passes
+      ;(conj #'reflect-validated)
+      ;; conflicts with current approach of special typed forms implemented
+      ;; as `do` nodes with constants.
+      (disj #'trim/trim)))
 
 (def typed-schedule
-  (passes/schedule typed-passes))
+  (passes/schedule typed-passes #_{:debug? true}))
 
 (defn run-passes [ast]
   (typed-schedule ast))
