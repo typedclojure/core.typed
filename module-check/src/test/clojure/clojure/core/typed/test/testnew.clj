@@ -24,6 +24,23 @@
 (deftest successful?-test
   (is-tc-e  (successful? 1) Boolean
              :requires [[clojure.test :refer [successful?]]]))
+           
+(deftest testing-vars-str-test
+  	(is-tc-e (testing-vars-str 1 )  String
+             :requires [[clojure.test :refer [testing-vars-str]]])
+	  (is-tc-err (testing-vars-str 1 ) (Map Any Any)
+             :requires [[clojure.test :refer [testing-vars-str]]]))
+           
+(deftest testing-contexts-str-test
+  	(is-tc-e (testing-contexts-str)  String
+             :requires [[clojure.test :refer [testing-contexts-str]]])
+	  (is-tc-err (testing-contexts-str) (Map Any Any)
+             :requires [[clojure.test :refer [testing-contexts-str]]])
+	  (is-tc-err (testing-contexts-str 1)  String
+             :requires [[clojure.test :refer [testing-contexts-str]]]))
 
-
-
+(deftest test-ns-test
+  	(is-tc-e (test-ns 'clojure.core.typed.test.abc) (Map Any Any)
+             :requires [[clojure.test :refer [test-ns]]])
+	  (is-tc-err (test-ns 'clojure.core.typed.test.abc) String
+             :requires [[clojure.test :refer [test-ns]]]))
