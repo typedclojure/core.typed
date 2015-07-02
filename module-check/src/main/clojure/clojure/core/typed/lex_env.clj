@@ -11,7 +11,7 @@
 (def prop-set? (con/set-c? fr/Filter?))
 (def alias-env? (con/hash-c? con/local-sym? obj/RObject?))
 
-(defonce ^:dynamic *unique-locals* (atom #{} :validator (con/set-c? (every-pred symbol? namespace))))
+(defonce ^:dynamic *used-unique-locals* (atom #{} :validator (con/set-c? (every-pred symbol? namespace))))
 (defonce ^:dynamic *then-locals* (atom #{} :validator (con/set-c? (every-pred symbol? namespace))))
 (defonce ^:dynamic *else-locals* (atom #{} :validator (con/set-c? (every-pred symbol? namespace))))
 
