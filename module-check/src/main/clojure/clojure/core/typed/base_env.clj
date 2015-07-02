@@ -747,6 +747,7 @@ clojure.test/run-tests [Namespace * -> (Map Any Any)]
 clojure.test/succesful? [Any -> Boolean]
 clojure.test/compose-fixtures [Fn Fn -> Fn]
 clojure.test/testing-vars-str [Any -> String]
+clojure.test/testing-contexts-str [ -> String]
 
 
 clojure.core/interpose (All [x] (IFn [x (Option (Seqable x)) -> (ASeq x)]))
