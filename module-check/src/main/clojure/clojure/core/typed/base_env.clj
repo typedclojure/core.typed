@@ -762,6 +762,16 @@ clojure.string/trim [String -> String]
 clojure.string/trimr [String -> String]
 clojure.string/triml [String -> String]
 
+clojure.test/function? [Any -> Boolean]
+clojure.test/assert-any [Any Any -> Any]
+clojure.test/do-report [Any -> Any]
+clojure.test/run-tests [Symbol * -> (Map Any Any)]
+clojure.test/run-all-tests [java.util.regex.Pattern * -> (Map Any Any)]
+clojure.test/succesful? [Any -> Boolean]
+clojure.test/compose-fixtures [Any Any -> Any]
+clojure.test/testing-vars-str [Any -> String]
+clojure.test/testing-contexts-str [ -> String]
+clojure.test/test-ns [Symbol -> (Map Any Any)]
 
 
 clojure.core/interpose (All [x] (IFn [x (Option (Seqable x)) -> (ASeq x)]))
