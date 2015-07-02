@@ -1306,7 +1306,7 @@
         (inc a)))))
 
 (deftest for-test
-  (is-tc-e (check-ns 'clojure.core.typed.test.for))
+  (is (check-ns 'clojure.core.typed.test.for))
   (is-tc-e
     (for
       [a :- (U nil Number), [1 nil 2 3]
@@ -4805,6 +4805,131 @@
 (deftest do-exp-repl-test
   (is-tc-e (do (require '[clojure.core :as c])
                (c/map inc []))))
+
+; promote-demote bug with HSet's
+(deftest CTYP-214-test
+  (is-tc-e (atom #{})))
+
+(deftest seq-branch-test
+  (is-tc-e (if (seq [1 2 3]) 1 nil)
+           Num))
+
+(deftest quote-string-test
+  (is-tc-e "a" '"a")
+  (is-tc-err "a" '"b")
+  (is-tc-e "a" (Val "a")))
+
+(deftest keyword-pe-test
+  ;; with keywords
+  (is-tc-e (do 
+             (defalias M (U '{:op ':plus
+                              :plus Int}
+                            '{:op ':minus
+                              :minus Int}))
+             (let [m :- M, {:op :plus
+                            :plus 1}]
+               (if (-> m :op #{:plus})
+                 (inc (:plus m))
+                 (dec (:minus m))))))
+  ;; with strings, via keyword
+  (is-tc-e (do 
+             (defalias M (U '{:op '"plus"
+                              :plus Int}
+                            '{:op '"minus"
+                              :minus Int}))
+             (let [m :- M, {:op "plus"
+                            :plus 1}]
+               (if (-> m :op keyword #{:plus})
+                 (inc (:plus m))
+                 (dec (:minus m))))))
+  ;; defmulti dispatch
+  (is-tc-e (do 
+             (defalias M (U '{:op '"plus"
+                              :plus Int}
+                            '{:op '"minus"
+                              :minus Int}))
+             (ann f [M -> Int])
+             (defmulti f (fn [m :- M] (-> m :op keyword)))
+             (defmethod f :plus [m] (inc (:plus m)))
+             (defmethod f :minus [m] (inc (:minus m)))))
+  ;; polymorphic setting
+  (is-tc-e (map keyword '[a b c]))
+  ;; with symbols, via keyword
+  (is-tc-e (do 
+             (defalias M (U '{:op 'plus
+                              :plus Int}
+                            '{:op 'minus
+                              :minus Int}))
+             (let [m :- M, {:op 'plus
+                            :plus 1}]
+               (if (-> m :op keyword #{:plus})
+                 (inc (:plus m))
+                 (dec (:minus m))))))
+  ;; with keywords and nil, via keyword
+  (is-tc-e (do 
+             (defalias M (U '{:op ':plus
+                              :plus Int}
+                            '{:op nil
+                              :minus Int}))
+             (let [m :- M, {:op :plus
+                            :plus 1}]
+               (if (-> m :op keyword #{:plus})
+                 (inc (:plus m))
+                 (dec (:minus m))))))
+  (is-tc-e (do 
+             (defalias M (U '{:op Num
+                              :plus Int}
+                            '{:op Str
+                              :minus Int}))
+             (let [m :- M, {:op 1
+                            :plus 1}]
+               (if (-> m :op keyword not)
+                 (inc (:plus m))
+                 (dec (:minus m))))))
+  )
+
+(deftest keyword-path-type-test
+  (is-tc-e (keyword :a))
+  (is-tc-e (keyword (ann-form :a Kw)))
+  (is-tc-e (let [k (keyword (ann-form :a Kw))]
+             (name k)))
+  (is (=
+       (-val :a)
+       (path-type (-val 'a)
+                  [(KeywordPE-maker)])))
+  (is-tc-e (fn [k :- 'a] :- Kw
+             (let [i (keyword k)]
+               i)))
+  ; need symbol literals as objects
+  ;(is-tc-e (keyword 'a) ':a)
+  (is-tc-e (fn [k]
+             (let [i (keyword k)]
+               i))
+           (IFn ['a -> ':a]
+                ['a/b -> ':a/b]
+                ['"a" -> ':a]
+                ['"a/b" -> ':a/b]
+                [':a -> ':a]
+                [':a/b -> ':a/b]
+                [Sym -> Kw]
+                [Kw -> Kw]
+                [Str -> Kw]
+                [(U Sym Kw Str) -> Kw]
+                [nil -> nil]
+                [Any -> (U nil Kw)]))
+  (is-tc-e (fn [k :- Any] :- Kw
+             (let [i (keyword k)]
+               (assert (keyword? k))
+               i)))
+  (is-tc-e (fn [k :- Any] :- (U Kw Str Sym)
+             (let [i (keyword k)]
+               (assert (keyword? i))
+               k)))
+  (is-tc-err (fn [k :- Any] :- (U Kw Str)
+               (let [i (keyword k)]
+                 (assert (keyword? i))
+                 k)))
+  )
 
 ;    (is-tc-e 
 ;      (let [f (fn [{:keys [a] :as m} :- '{:a (U nil Num)}] :- '{:a Num} 

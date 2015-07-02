@@ -142,12 +142,14 @@
 
 (u/add-defmethod-generator check)
 
-(defn check-expr [expr & [expected]]
+(defn check-expr [{:keys [env] :as expr} & [expected]]
   (when vs/*trace-checker*
-    (println "Checking line:" (-> expr :env :line))
+    (println "Checking line:" (:line env))
     (flush))
   (u/p :check/check-expr
-    (check expr expected)))
+    (binding [vs/*current-env* (if (:line env) env vs/*current-env*)
+              vs/*current-expr* expr]
+      (check expr expected))))
 
 (add-check-method :const [expr & [expected]] 
   (value/check-value expr expected))
@@ -243,9 +245,12 @@
 (defmulti static-method-special (fn [expr & args]
                                   {:post [((some-fn nil? symbol?) %)]}
                                   (cu/MethodExpr->qualsym expr)))
+(u/add-defmethod-generator static-method-special)
+
 (defmulti instance-method-special (fn [expr & args]
                                     {:post [((some-fn nil? symbol?) %)]}
                                     (cu/MethodExpr->qualsym expr)))
+(u/add-defmethod-generator instance-method-special)
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Keyword lookups
@@ -451,7 +456,7 @@
       (invoke/normal-invoke check expr fexpr args expected
                      :cargs cargs))))
 
-(defmethod static-method-special 'clojure.lang.RT/get
+(add-static-method-special-method 'clojure.lang.RT/get
   [{:keys [args] :as expr} & [expected]]
   {:pre [args]
    :post [(-> % u/expr-type r/TCResult?)]}
@@ -463,7 +468,7 @@
                                   :cargs cargs))))
 
 ;FIXME should be the same as (apply hash-map ..) in invoke-apply
-(defmethod static-method-special 'clojure.lang.PersistentHashMap/create
+(add-static-method-special-method 'clojure.lang.PersistentHashMap/create
   [{:keys [args] :as expr} & [expected]]
   {:post [(or (#{:default} %)
               (and (-> % u/expr-type r/TCResult?)
@@ -496,35 +501,46 @@
                                expected)))
         :else :default))))
 
-;; FIXME when updating tools.analyzer past 0.5.0, update :keyword-invoke fields
+(add-check-method :prim-invoke
+  [expr & [expected]]
+  (assoc (check (assoc expr :op :invoke))
+         :op :prim-invoke))
+
 (add-check-method :keyword-invoke
-  [{kw :fn :keys [args] :as expr} & [expected]]
+  [{kw :keyword :keys [target] :as expr} & [expected]]
   {:pre [(and (#{:const} (:op kw))
-              (keyword? (:val kw)))
-         (#{1 2} (count args))]
-   :post [(r/TCResult? (u/expr-type %))
-          (vector? (:args %))]}
+              (keyword? (:val kw)))]
+   :post [(r/TCResult? (u/expr-type %))]}
   (let [ckw (check kw)
-        cargs (mapv check args)]
+        ctarget (check target)]
     (assoc expr
-           :fn ckw
-           :args cargs
+           :keyword ckw
+           :target ctarget
            u/expr-type (invoke-kw/invoke-keyword
                          expr
                          (u/expr-type ckw)
-                         (u/expr-type (first cargs))
-                         (when (#{2} (count cargs))
-                           (u/expr-type (second cargs)))
+                         (u/expr-type ctarget)
+                         nil
                          expected))))
 
-; Will this play nicely with file mapping?
-(add-check-method :prim-invoke ; protocol methods
-  [expr & [expected]]
-  (check (assoc expr :op :invoke)))
+;; TODO refactor into own file
+(defn protocol-invoke [check-fn {:keys [protocol-fn target args] :as expr} expected]
+  (u/p :check/protocol-invoke
+  (let [cprotocol-fn (check-fn protocol-fn)
+        ctarget (check-fn target)
+        cargs (mapv check-fn args)
+        ftype (u/expr-type cprotocol-fn)
+        argtys (map u/expr-type (concat [ctarget] cargs))
+        actual (funapp/check-funapp cprotocol-fn (concat [ctarget] cargs) ftype argtys expected)]
+    (assoc expr
+           :target ctarget
+           :protocol-fn cprotocol-fn
+           :args cargs
+           u/expr-type actual))))
 
 (add-check-method :protocol-invoke ; protocol methods
   [expr & [expected]]
-  (check (assoc expr :op :invoke)))
+  (protocol-invoke check expr expected))
 
 ;binding
 ;FIXME use `check-normal-def`
@@ -673,7 +689,7 @@
                u/expr-type (equiv/tc-equiv := (map u/expr-type cargs) expected)))))
 
 ;identical
-(defmethod static-method-special 'clojure.lang.Util/identical
+(add-static-method-special-method 'clojure.lang.Util/identical
   [{:keys [args] :as expr} & [expected]]
   {:post [(vector? (:args %))
           (-> % u/expr-type r/TCResult?)]}
@@ -683,7 +699,7 @@
            u/expr-type (equiv/tc-equiv := (map u/expr-type cargs) expected))))
 
 ;equiv
-(defmethod static-method-special 'clojure.lang.Util/equiv
+(add-static-method-special-method 'clojure.lang.Util/equiv
   [{:keys [args] :as expr} & [expected]]
   (let [cargs (mapv check args)]
     (assoc expr
@@ -1009,7 +1025,7 @@
 
 
 ;nth
-(defmethod static-method-special 'clojure.lang.RT/nth
+(add-static-method-special-method 'clojure.lang.RT/nth
   [{:keys [args] :as expr} & [expected]]
   {:post [(-> % u/expr-type r/TCResult?)]}
   (let [cargs (mapv check args)
@@ -1207,7 +1223,7 @@
                              expected))))))
 
 ; FIXME this needs a line number from somewhere!
-(defmethod instance-method-special 'clojure.lang.MultiFn/addMethod
+(add-instance-method-special-method 'clojure.lang.MultiFn/addMethod
   [{[dispatch-val-expr method-expr :as args] :args target :instance :keys [env] :as expr} & [expected]]
   (when-not (= 2 (count args))
     (err/int-error "Wrong arguments to clojure.lang.MultiFn/addMethod"))
@@ -1227,7 +1243,8 @@
       (or (and (ns-opts/warn-on-unannotated-vars? (cu/expr-ns expr))
                (not (var-env/lookup-Var-nofail mmsym)))
           (not (var-env/check-var? mmsym)))
-      (do (u/tc-warning (str "Not checking defmethod" mmsym "with dispatch value" (ast-u/emit-form-fn dispatch-val-expr)))
+      (do (u/tc-warning (str "Not checking defmethod " mmsym " with dispatch value" (ast-u/emit-form-fn dispatch-val-expr)))
+          (p/p :check/skip-MultiFn-addMethod)
           ret-expr)
       :else
       (let [_ (assert (#{:var} (:op target)))
@@ -1255,8 +1272,8 @@
                    :args cargs)))))))
 
 (add-invoke-special-method :default [& args] :default)
-(defmethod static-method-special :default [& args] :default)
-(defmethod instance-method-special :default [& args] :default)
+(add-static-method-special-method :default [& args] :default)
+(add-instance-method-special-method :default [& args] :default)
 
 
 ;TODO attach new :args etc.
@@ -1412,6 +1429,8 @@
   [expr & [expected]]
   {:post [(-> % u/expr-type r/TCResult?)]}
   #_(prn "static-method")
+  (u/trace 
+    "static Call: " (:method expr))
   (let [spec (static-method-special expr expected)]
     (if (not= :default spec)
       spec
@@ -1436,7 +1455,9 @@
       (assert field)
       (assoc expr
              u/expr-type (below/maybe-check-below
-                           (r/ret (cu/Field->Type field))
+                           (r/ret 
+                             (p/p :check-static-field/calling-Field->Type
+                                  (cu/Field->Type field)))
                            expected)))))
 
 (add-check-method :instance-field
@@ -1486,7 +1507,8 @@
                        override
                        ; if not a datatype field, convert as normal
                        (if field
-                         (cu/Field->Type field)
+                         (p/p :check-instance-field/calling-Field->Type
+                           (cu/Field->Type field))
                          (err/tc-delayed-error (str "Instance field " fsym " needs type hints")
                                              :form (ast-u/emit-form-fn expr)
                                              :return (r/TCError-maker))))] 
@@ -1510,10 +1532,14 @@
                                         (fo/-not-filter-at inst-of (r/ret-o expr-tr))))
                          expected))))
 
-(defmulti new-special (fn [{:keys [class] :as expr} & [expected]] (coerce/ctor-Class->symbol class)))
+(defmulti new-special (fn [expr & [expected]]
+                        {:post [(symbol? %)]}
+                        (-> expr
+                            ast-u/new-op-class
+                            coerce/Class->symbol)))
+(u/add-defmethod-generator new-special)
 
-
-(defmethod new-special 'clojure.lang.MultiFn
+(add-new-special-method 'clojure.lang.MultiFn
   [{[nme-expr dispatch-expr default-expr hierarchy-expr :as args] :args :as expr} & [expected]]
   (when-not expected
     (err/int-error "clojure.lang.MultiFn constructor requires an expected type"))
@@ -1569,7 +1595,7 @@
         :else
         (let [inst-types *inst-ctor-types*
               cls (ast-u/new-op-class expr)
-              clssym (coerce/ctor-Class->symbol cls)
+              clssym (coerce/Class->symbol cls)
               cargs (mapv check args)
               ctor-fn (or (@ctor-override/CONSTRUCTOR-OVERRIDE-ENV clssym)
                           (and (dt-env/get-datatype clssym)
@@ -1665,10 +1691,11 @@
         ;ignore macro definitions and declare
         (or (.isMacro ^Var var)
             (not init-provided))
-        (assoc expr
-               u/expr-type (below/maybe-check-below
-                             (r/ret (c/RClass-of Var [(r/Bottom) r/-any]))
-                             expected))
+        (p/p :check/ignored-typed-defmacro
+          (assoc expr
+                 u/expr-type (below/maybe-check-below
+                               (r/ret (c/RClass-of Var [(r/Bottom) r/-any]))
+                               expected)))
 
         :else (def/check-normal-def check expr expected)))))
 

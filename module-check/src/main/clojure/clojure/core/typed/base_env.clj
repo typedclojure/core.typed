@@ -23,6 +23,15 @@
                                         HVec HSequential Keyword]
              :as t]))
 
+;; Dev notes
+;; ---------
+;;
+;; To reload these type annotations *without* restarting the repl,
+;; you should reload this file then run `(reset-clojure-envs!)`.
+;;
+;; There is some abuse of interning to get the type resolving correctly
+;; in the annotations. The goal is to simulate we're inside `clojure.core.typed`.
+
 (defn- aset-*-type [t]
   (impl/with-clojure-impl
     (let [arr-t (prs/parse-type `(~'Array ~t))
@@ -120,7 +129,7 @@ clojure.java.io/IOFactory
 (delay-and-cache-env ^:private init-var-env
   (reset-alias-env!)
   (merge
-   (common/parse-clj-ann-map common/common-var-annotations)
+   (common/parse-clj-ann-map @common/common-var-annotations)
    (h/var-mappings
      this-ns
 
@@ -639,8 +648,21 @@ clojure.core/symbol
          [(U nil String) String -> Symbol])
 
 clojure.core/keyword
-     (IFn [(U Keyword Symbol String) -> Keyword]
-         [String String -> Keyword])
+     (IFn [(U Keyword Symbol String) -> Keyword 
+           :object {:id 0 :path [Keyword]}
+           :filters {:then tt
+                     :else ff}]
+          [nil -> nil 
+           :object {:id 0 :path [Keyword]}
+           :filters {:then ff
+                     :else tt}]
+          [Any -> (U nil Keyword) 
+           :object {:id 0 :path [Keyword]}
+           :filters {:then (is (U Keyword Symbol String) 0)
+                     :else (! (U Keyword Symbol String) 0)}]
+          [String String -> Keyword
+           :filters {:then tt
+                     :else ff}])
 
 clojure.core/find-keyword
      (IFn [(U Keyword Symbol String) -> (Option Keyword)]
@@ -792,7 +814,9 @@ clojure.core/type [Any -> Any]
 
 clojure.core/seq (All [x]
                         (IFn 
-                          [(NonEmptyColl x) -> (NonEmptyASeq x)]
+                          [(NonEmptyColl x) -> (NonEmptyASeq x)
+                           :filters {:then tt
+                                     :else ff}]
                           [(Option (Coll x)) -> (Option (NonEmptyASeq x))
                            :filters {:then (& (is NonEmptyCount 0)
                                               (! nil 0))
@@ -1448,6 +1472,9 @@ clojure.core.match/backtrack Exception
 clojure.core/eval [Any -> Any]
 clojure.core/rand-nth (All [x] [(U (Indexed x) (SequentialSeqable x)) -> x])
 
+clojure.pprint/pprint (IFn [Any -> nil]
+                           [Any java.io.Writer -> nil])
+
       )
 (h/var-mappings
   this-ns
@@ -1458,6 +1485,13 @@ clojure.set/difference (All [x] [(Set x) (Set Any) * -> (Set x)])
 clojure.repl/pst (IFn [-> nil]
                       [(U Int Throwable) -> nil]
                       [Throwable Int -> nil])
+clojure.repl/print-doc [Symbol -> Any]
+clojure.repl/find-doc [(U String java.util.regex.Pattern) -> Any]
+clojure.repl/source-fn [Any -> (U nil String)]
+clojure.java.javadoc/javadoc [Object -> Any]
+complete.core/completions
+(IFn [Any -> Any]
+     [Any Any -> Any])
   )
     {'clojure.core/count (count-type)
      'clojure.core/aset-boolean (aset-*-type 'boolean)

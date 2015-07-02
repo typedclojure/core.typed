@@ -5,10 +5,9 @@
             [clojure.core.typed.impl-protocols :as ps]
             [clojure.core.typed.ast-utils :as au]
             [clojure.core.typed.errors :as err]
-            [clojure.core.contracts.constraints :as contracts]
+            [clojure.core.typed.deps.clojure.core.contracts.constraints :as contracts]
             [clojure.repl :as repl]
-            [clojure.core.contracts]
-            [clojure.tools.analyzer.passes.jvm.emit-form :as emit-form]
+            [clojure.core.typed.deps.clojure.core.contracts]
             [clojure.set :as set]
             [clojure.core.typed.current-impl :as impl]
             [clojure.core.typed.profiling :as profiling]
@@ -58,7 +57,7 @@
 ;        positional-factory-name (symbol (str "->" name))
 ;        map-arrow-factory-name (symbol (str "map->" name))
 ;        pred-arg (gensym)
-;        chk `(clojure.core.contracts/contract
+;        chk `(clojure.core.typed.deps.clojure.core.contracts/contract
 ;                ~(symbol (str "chk-" name))
 ;                ~inv-description
 ;                [{:keys ~fields :as m#}]
@@ -68,9 +67,9 @@
 ;       (defn ~(symbol (str name \?)) [~pred-arg]
 ;         (instance? ~name ~pred-arg))
 ;
-;       ~(@#'clojure.core.contracts.constraints/build-positional-factory name classname fields invariants chk)
+;       ~(@#'clojure.core.typed.deps.clojure.core.contracts.constraints/build-positional-factory name classname fields invariants chk)
 ;
-;       (clojure.core.contracts.constraints/defconstrainedfn ~map-arrow-factory-name
+;       (clojure.core.typed.deps.clojure.core.contracts.constraints/defconstrainedfn ~map-arrow-factory-name
 ;         ([{:keys ~fields :as m#}]
 ;            ~invariants
 ;            (with-meta
@@ -326,6 +325,7 @@
           ~~'assertmap
           ;the body, wrapped in a profiling macro
           (u/p ~(keyword (str '~mm-name) (str ~'nme))
+               (trace '~(symbol (str '~mm-name) (str ~'nme)))
                ~@~'body)))))
 
 ;; Aliases for profiling stuff
@@ -390,14 +390,42 @@
 (defn tc-warning [& ss]
   (let [env uvs/*current-env*]
     (binding [*out* *err*]
-      (apply println "WARNING: Type Checker: "
-             (str "(" (-> env :ns :name) ":" (:line env) 
+      (apply println "WARNING: "
+             (str "(" (:file env) ":" (:line env) 
                   (when-let [col (:column env)]
                     (str ":" col))
                   ") ")
              ss)
       (flush))))
 
+(defmacro trace [& ss]
+  `(when uvs/*trace-checker*
+     (println 
+       "TRACE: " 
+       " "
+       (:line uvs/*current-env*)
+       ~@ss)
+     (flush)))
+
+(defmacro trace-when [p & ss]
+  `(when uvs/*trace-checker*
+     (when ~p
+       (println 
+         "TRACE: " 
+         " "
+         (:line uvs/*current-env*)
+         ~@ss)
+       (flush))))
+
+(defmacro trace-when-let [p & ss]
+  `(when uvs/*trace-checker*
+     (when-let ~p
+       (println 
+         "TRACE: " 
+         " "
+         (:line uvs/*current-env*)
+         ~@ss)
+       (flush))))
 
 (defn pad-right
   "Returns a sequence of length cnt that is s padded to the right with copies

@@ -13,8 +13,8 @@
 ;(ann emit-form-fn [Any -> Any])
 (defn emit-form-fn [expr]
   (impl/impl-case
-    :clojure (do (require '[clojure.tools.analyzer.passes.jvm.emit-form])
-                 ((impl/v 'clojure.tools.analyzer.passes.jvm.emit-form/emit-form) expr))
+    :clojure (do (require '[clojure.core.typed.deps.clojure.tools.analyzer.passes.jvm.emit-form])
+                 ((impl/v 'clojure.core.typed.deps.clojure.tools.analyzer.passes.jvm.emit-form/emit-form) expr))
     :cljs (do
             (require '[clojure.core.typed.util-cljs])
             ((impl/v 'clojure.core.typed.util-cljs/emit-form) expr))))
@@ -159,24 +159,13 @@
 (defn new-op-class [expr]
   {:pre [(#{:new} (:op expr))]
    :post [(class? %)]}
-  (or ; tools.analyzer 0.3.x
-      (let [cls (:class expr)]
-        (when (class? cls)
-          cls))
-      ; future tools.analyzer
-      (let [{:keys [val]} (:class expr)]
-        val)))
+  (-> expr :class :val))
 
 (defn catch-op-class [expr]
   {:pre [(#{:catch} (:op expr))]
    :post [(class? %)]}
-  (or ; tools.analyzer 0.3.x
-      (let [cls (:class expr)]
-        (when (class? cls)
-          cls))
-      ; future tools.analyzer
-      (let [{:keys [val]} (:class expr)]
-        val)))
+  ; future tools.analyzer
+  (-> expr :class :val))
 
 (def deftype-method? (fn [m]
                        (impl/impl-case

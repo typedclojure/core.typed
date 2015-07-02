@@ -6,9 +6,11 @@
             [clojure.core.typed.path-rep :as pr]
             [clojure.core.typed.type-ctors :as c]
             [clojure.core.typed.contract-utils :as con]
+            [clojure.core.typed.subtype :as sub]
             [clojure.core.typed :as t]
             #_[clojure.core.typed.debug :refer [dbg]]
-            [clojure.core.typed.errors :as err]))
+            [clojure.core.typed.errors :as err])
+  (:import (clojure.lang Keyword Symbol)))
 
 (t/tc-ignore
 (alter-meta! *ns* assoc :skip-wiki true)
@@ -87,6 +89,26 @@
                (:rest t)
                r/-any)
            (next ps)))
+
+       (pe/KeywordPE? (first ps))
+       (path-type
+         (cond
+           ;; We know exactly what `keyword` yields if given a singleton type.
+           ;; Feeding back into `keyword` gives us exactly what we want.
+           (and (r/Value? t)
+                ((some-fn symbol? string? keyword? nil? number?) (:val t))) 
+           (r/-val (keyword (:val t)))
+
+           ;; `keyword` applied to keywords, symbols, and strings return keywords.
+           (sub/subtype? t
+                         (c/Un (c/RClass-of Keyword)
+                               (c/RClass-of Symbol)
+                               (c/RClass-of String)))
+           (c/RClass-of Keyword)
+
+           ;; Bottom out with most general return value for `keyword`.
+           :else (c/Un r/-nil (c/RClass-of Keyword)))
+         (next ps))
 
        :else (err/int-error (str "Bad call to path-type: " (pr-str t) ", " (pr-str ps)))
        ))))

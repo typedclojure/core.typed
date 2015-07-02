@@ -6,6 +6,7 @@
             [clojure.core.typed.coerce-utils :as coerce]
             clojure.core.typed.coerce-ann
             [clojure.core.typed.impl-protocols :as p]
+            [clojure.core.typed.profiling :as profile]
             [clojure.core.typed.type-rep :as r :refer [ret-t]]
             [clojure.core.typed.filter-rep :as fr]
             [clojure.core.typed.object-rep :as or]
@@ -22,11 +23,11 @@
             [clojure.core.typed.indirect-ops :as ind]
             clojure.core.typed.indirect-ann
             [clojure.core.typed :as t]
-            [clojure.math.combinatorics :as comb]
+            [clojure.core.typed.deps.clojure.math.combinatorics :as comb]
             [clojure.set :as set]
             [clojure.reflect :as reflect]
             [clojure.repl :as repl]
-            [clojure.core.cache :as cache])
+            [clojure.core.typed.deps.clojure.core.cache :as cache])
   (:import (clojure.core.typed.type_rep HeterogeneousMap Poly TypeFn PolyDots TApp App Value
                                         Union Intersection F Function Mu B KwArgs KwArgsSeq RClass
                                         Bounds Name Scope CountRange Intersection DataType Extends
@@ -2285,13 +2286,19 @@
                            :else r/-any))
       (r/HeterogeneousMap? t) (let [pres ((:types t) k)
                                     opt  ((:optional t) k)]
+                                (when (complete-hmap? t)
+                                  (profile/p :check/find-val-has-complete))
+                                (profile/p :check/find-val-type-with-hmap)
                                 (cond
                                   ; normal case, we have the key declared present
-                                  pres pres
+                                  pres (profile/p :check/find-val-type-with-hmap-present
+                                            pres)
 
                                   ; absent key, default
                                   ((:absent-keys t) k)
                                   (do
+                                    (profile/p :check/find-val-type-with-hmap-absent)
+
                                     #_(tc-warning
                                         "Looking up key " (ind/unparse-type k) 
                                         " in heterogeneous map type " (ind/unparse-type t)
@@ -2299,15 +2306,18 @@
                                     default)
 
                                   ; if key is optional the result is the val or the default
-                                  opt (Un opt default)
+                                  opt (profile/p :check/find-val-type-with-hmap-with-optional
+                                           (Un opt default))
 
                                   ; if map is complete, entry must be missing
-                                  (complete-hmap? t) default
+                                  (complete-hmap? t) (profile/p :check/find-val-type-with-hmap-complete-therefore-missing
+                                                          default)
 
                                   :else
                                   (do #_(tc-warning "Looking up key " (ind/unparse-type k)
                                                     " in heterogeneous map type " (ind/unparse-type t)
                                                     " which does not declare the key absent ")
+                                      (profile/p :check/find-val-type-with-hmap-fall-through)
                                       r/-any)))
 
       (r/Record? t) (find-val-type (Record->HMap t) k default)

@@ -4,7 +4,7 @@
             [clojure.core.typed.contract-utils :as con]
             [clojure.core.typed.utils :as u]
             [clojure.core.typed.reset-caches :as reset-caches]
-            [clojure.core.cache :as cache]
+            [clojure.core.typed.deps.clojure.core.cache :as cache]
             [clojure.core.typed.file-mapping :as file-map]
             [clojure.core.typed.type-rep :as r]
             [clojure.core.typed.util-vars :as vs]
@@ -77,7 +77,8 @@
     (binding [vs/*already-collected* (atom #{})
               vs/*already-checked* (atom #{})
               vs/*delayed-errors* (err/-init-delayed-errors)
-              vs/*analyze-ns-cache* (cache/soft-cache-factory {})]
+              vs/*analyze-ns-cache* (cache/soft-cache-factory {})
+              vs/*in-check-form* true]
       (let [expected (or
                        expected-ret
                        (when type-provided?

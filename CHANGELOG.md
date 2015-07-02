@@ -1,3 +1,32 @@
+# 0.3.0 - 25 June 2015
+
+- Breaking change:
+  - all `check-ns` operations now avoid rechecking transitive dependencies.
+    To explicitly recheck dependencies use the `:clean` keyword parameter.
+
+- Fix [CTYP-214](http://dev.clojure.org/jira/browse/CTYP-214)
+- support quoted type syntax with string literals
+  - '"a" == (Val "a")
+- `clojure.core/keyword` annotation is now more permissive.
+- add `keyword` path element
+  - see `keyword-pe-test` for new idioms
+
+# 0.3.0-alpha5 - 2 June 2015
+
+- restore original ns in nREPL eval 
+
+# 0.3.0-alpha4 - 31 May 2015
+
+- support .cljc files in `load`
+- warn if :no-check is being removed from a var
+- annotate
+  - clojure.repl/print-doc
+  - complete.core annotations
+
+# 0.3.0-alpha3 - 30 May 2015
+
+- REPL tweaks
+
 # 0.3.0-alpha2 - 29 May 2015
 
 - support :load-file nREPL packets
