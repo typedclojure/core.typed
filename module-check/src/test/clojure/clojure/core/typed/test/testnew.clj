@@ -22,6 +22,12 @@
              :requires [[clojure.test :refer [run-tests]]])
 	(is-tc-err (run-tests) String
              :requires [[clojure.test :refer [run-tests]]]))
+        
+(deftest run-all-tests-test
+  	(is-tc-e (run-all-tests) (Map Any Any)
+             :requires [[clojure.test :refer [run-all-tests]]])
+	(is-tc-err (run-all-tests) String
+             :requires [[clojure.test :refer [run-all-tests]]]))
             
 (deftest successful?-test
   (is-tc-e  (successful? 1) Boolean
