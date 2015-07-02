@@ -1,56 +1,115 @@
 (ns clojure.core.typed.test.transients
   (:require [clojure.core.typed :refer :all]
+            [clojure.core.typed.test.test-utils :refer :all]
             [clojure.test :refer :all])
   (:import (clojure.lang ITransientMap ITransientVector ITransientSet
                          ITransientAssociative ATransientSet)))
 
-;(let [x :- (ITransientVector Number), (transient [1])]
-  ;(conj! x 1)
-  ;(conj! x 2)
-  ;(conj! x "a"))
+(deftest basic-tests
+  (is-tc-err (let [x (transient [])]
+              (conj! x 1)
+              (conj! x 2)
+              (conj! x "a")))
+  (is-tc-err (let [x (transient {})]
+               (do
+                 (println x)
+                 (println x))))
+  (is-tc-err (let [x (transient {})]
+               (do 
+                 x
+                 x)))
+  (is-tc-err (let [x (transient {:a 1})]
+               (assoc! x :b 2)
+               (assoc! x :c 3)))
+  (is-tc-err (let [x (transient [1 2 3])]
+               [x x]))
+  (is-tc-err (let [x (transient [1 2 3])]
+               (let [y x]
+                 [y y])))
+  (is-tc-e (let [x (transient [])]
+             x))
+  (is-tc-err (let [xyz (transient [1 2 3])]
+             (let [yyz xyz]
+               xyz)))
+  (is-tc-err (let [x (transient [1 2 3])]
+               (let [y 0]
+                 (conj! x 1))
+               (conj! x 2))))
 
-;(let [x :- (ITransientVector Number), (transient [1 2 3])]
-  ;[x x])
+(deftest if-tests
+  (is-tc-err (let [x (transient {})]
+              (do
+                x
+                 (if (< 1 2)
+                   x
+                   x))))
+  (is-tc-err (let [x (transient {})]
+              (if (< 1 2)
+                x
+                x)
+              x))
+  (is-tc-e (let [x (transient {})]
+             (if (< 1 2)
+               (if (< 1 2) x x)
+               x)))
+  (is-tc-err (let [x (transient {})]
+             (when true
+               x
+               x)
+             x))
+  (is-tc-err (let [x (transient {})]
+              (if (< 1 2)
+                [x x]
+                x)))
+  (is-tc-e (let [x (transient {})]
+             (if false
+               [x x]
+               x)))
+  (is-tc-err (let [x (transient {})]
+              (if (< 1 2)
+                [x x]
+                [x x])))
+  (is-tc-err (let [x (transient {})]
+              (if true
+                x
+                [x x])
+              x))
+  (is-tc-err (let [x (transient {})]
+              (do
+                x
+                (if true
+                  x
+                  x)
+                x))))
 
-;(let [x (transient {:a 1})]
-  ;(assoc! x :b 2)
-  ;(assoc! x :c 3))
 
-;(let [x :- (ITransientVector Number), (transient [1 2 3])]
-  ;(let [y x]
-    ;[y y]))
+  
+;(let [t (transient [])]
+  ;(dotimes [i 10]
+    ;(conj! t i))
+  ;(persistent! t))
 
-;(is (clojure.core.typed.type-rep/Unique? 1))
+;(persistent!
+  ;(reduce (fn [t i] (assoc! t i i))
+          ;(transient {})
+          ;(range 10)))
 
-;(let [z :- (Unique Int), 1]
-  ;z
-  ;z)
 
-;(let [xyz [1 2 3]]
-  ;(let [yyz xyz]
-    ;xyz))
-
-;(defn trial [aki :- Number]
-  ;(+ aki aki))
-
-;(let [x 1]
-  ;x
+;(let [x [1 2 (transient [1 2 3])]]
   ;x)
 
-;(let [x :- (ITransientVector Number), (transient [1 2 3])]
-  ;(let [y 0]
-    ;(conj! x 1))
-  ;(conj! x 2)
 
-;(let [m-atom :- (Atom1 (ITransientMap Keyword Number)), (atom (transient {}))]
+;(let [m-atom (atom (transient {}))]
   ;(assoc! @m-atom :a 1)
   ;(assoc! @m-atom :b 2))
 
+;(let [x [1 "a" (transient {})]]
+  ;x
+  ;x)
 
-;(let [abc 1]
-  ;abc)
 
-  ; Some more interesting cases 
+; Some more interesting cases 
+
 
 ; (let [x (transient {})] (if c x x))
 ; (let [x (transient {})] (if c x x) x)
@@ -59,3 +118,13 @@
 ; (let [x (transient {}) f [(fn [] x) g f]] (first g) g)
 ; (let [x (transient {}) f [1 (fn [] x)]] (first f) (first f))
 
+;(defn vrange2 [n :- Number]
+  ;(loop [i :- Number, 0 
+         ;v (transient [])]
+    ;(if (< i n)
+      ;(recur (inc i) (conj! v i))
+      ;(persistent! v))))
+
+;(let [t (transient {})]
+  ;(dotimes [i 10]
+    ;(assoc! t i i)))
