@@ -1446,7 +1446,7 @@
                            :target ctarget
                            u/expr-type (cu/error-ret expected))))]
     ;; try to rewrite, otherwise error on reflection
-    (if vs/*in-check-form*
+    (if (cu/should-rewrite?)
       (let [nexpr (let [e (assoc expr :target (add-type-hints ctarget))]
                     (if cargs
                       (assoc e :args (mapv add-type-hints cargs))
@@ -1673,12 +1673,12 @@
           (cond
             (:validated? expr) (check-validated expr)
 
-            vs/*in-check-form* (let [rexpr (try-resolve-reflection (assoc expr :args (mapv add-type-hints cargs)))]
-                                 ;; rexpr can only be :new
-                                 (case (:op rexpr)
-                                   (:new) (if (:validated? rexpr)
-                                            (check-validated rexpr)
-                                            (give-up rexpr))))
+            (cu/should-rewrite?) (let [rexpr (try-resolve-reflection (assoc expr :args (mapv add-type-hints cargs)))]
+                                   ;; rexpr can only be :new
+                                   (case (:op rexpr)
+                                     (:new) (if (:validated? rexpr)
+                                              (check-validated rexpr)
+                                              (give-up rexpr))))
             :else (give-up expr)))))))
 
 (add-check-method :throw

@@ -508,3 +508,6 @@
   (cond
     (r/RClass? t) (r/RClass->Class t)))
 
+(defn should-rewrite? []
+  (and vs/*in-check-form*
+       vs/*can-rewrite*))

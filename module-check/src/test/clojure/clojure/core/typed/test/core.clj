@@ -4955,6 +4955,11 @@
   (is-tc-e (fn [a]
              (java.io.File. a))
            [Str -> Any])
+  (is-tc-e (let [[a] [(str "a")]]
+             (java.io.File. a)))
+  (is-tc-e (java.io.File. (first [(str "a")])))
+  (is-tc-err (let [[a] [(long 1)]]
+               (java.io.File. a)))
   (is-tc-e (fn [a]
              (java.io.File. a))
            [Str -> java.io.File]))
