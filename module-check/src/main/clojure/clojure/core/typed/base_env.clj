@@ -743,7 +743,7 @@ clojure.string/triml [String -> String]
 clojure.test/function? [Any -> Boolean]
 clojure.test/assert-any [Any Any -> Any]
 clojure.test/do-report [Any -> Any]
-clojure.test/run-tests [(U nil Namespace ) -> (Map Any Any)]
+clojure.test/run-tests [(U nil Namespace * ) -> (Map Any Any)]
 clojure.test/succesful? [Any -> Boolean]
 clojure.test/compose-fixtures [Fn Fn -> Fn]
 
