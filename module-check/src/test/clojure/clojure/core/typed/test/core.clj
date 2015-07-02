@@ -1507,11 +1507,14 @@
   (is-tc-e (java.io.File. "a"))
   (is-tc-e (let [a (or "a" "b")]
              (java.io.File. a)))
+  (is-tc-e
+    (fn [& {:keys [path] :or {path "foo"}}]
+      (java.io.File. path))
+    [& :optional {:path String} -> java.io.File])
   (is-tc-err
     (fn [& {:keys [path] :or {path "foo"}}]
-      (print-env "a")
       (java.io.File. path))
-    [& :optional {:path String} -> java.io.File]))
+    [& :optional {:path Int} -> java.io.File]))
 
 ;(fn> [a :- (U (Extends Number :without [(IPerVec clojure.core.typed/Any)])
 ;              (Extends (IPV clojure.core.typed/Any) :without [Number])
