@@ -17,9 +17,19 @@
   (is-tc-e  (do-report 1)  Any
              :requires [[clojure.test :refer [do-report]]]))
             
+(deftest run-tests-test
+  	(is-tc-e (run-tests) (Map Any Any)
+             :requires [[clojure.test :refer [run-tests]]])
+	(is-tc-err (run-tests) String
+             :requires [[clojure.test :refer [run-tests]]]))
+            
 (deftest successful?-test
   (is-tc-e  (successful? 1) Boolean
              :requires [[clojure.test :refer [successful?]]]))
+            
+(deftest compose-fixtures-test
+  	(is-tc-e (compose-fixtures (defn a [](+ 2 1)) (defn c [](+ 1 2) ) ) Any
+             :requires [[clojure.test :refer [compose-fixtures]]]))
            
 (deftest testing-vars-str-test
   	(is-tc-e (testing-vars-str 1 )  String
@@ -41,8 +51,4 @@
 	  (is-tc-err (test-ns 'clojure.core.typed.test.abc) String
              :requires [[clojure.test :refer [test-ns]]]))
             
-(deftest run-tests-test
-  	(is-tc-e (run-tests) (Map Any Any)
-             :requires [[clojure.test :refer [run-tests]]])
-	(is-tc-err (run-tests) String
-             :requires [[clojure.test :refer [run-tests]]]))
+
