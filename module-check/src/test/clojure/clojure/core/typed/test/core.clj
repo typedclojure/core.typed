@@ -4931,11 +4931,30 @@
                  k)))
   )
 
-(deftest rewrite-reflecting-field-test
+(deftest rewrite-reflecting-method-test
+  (is-tc-err (fn [a] (.getParent a)))
   (is-tc-e (fn [^java.io.File a] (.getParent a))
            [java.io.File -> Any])
   (is-tc-e (fn [a] (.getParent a))
+           [java.io.File -> Any])
+  (is-tc-e (fn [a] (.getParent a))
+           [java.io.File -> (U nil Str)])
+  (is-tc-e (fn [a] 
+             {:pre [(instance? java.io.File a)]}
+             (.getParent a)))
+  (is-tc-e (fn [a] (.getParent a))
            [java.io.File -> Any]))
+
+(deftest rewrite-reflecting-ctor-test
+  (is-tc-err (java.io.File. 1))
+  (is-tc-err (fn [a]
+               (java.io.File. a)))
+  (is-tc-e (fn [a]
+             (java.io.File. a))
+           [Str -> Any])
+  (is-tc-e (fn [a]
+             (java.io.File. a))
+           [Str -> java.io.File]))
 
 ;    (is-tc-e 
 ;      (let [f (fn [{:keys [a] :as m} :- '{:a (U nil Num)}] :- '{:a Num} 

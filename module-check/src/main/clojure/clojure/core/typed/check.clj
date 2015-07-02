@@ -1422,6 +1422,11 @@
              :tag cls)
       expr)))
 
+(defn try-resolve-reflection [ast]
+  (-> ast
+      ana-host/analyze-host-expr
+      validate/validate))
+
 (add-check-method :host-interop
   [{:keys [m-or-f target args] :as expr} & [expected]]
   {:post [(-> % u/expr-type r/TCResult?)]}
@@ -1447,15 +1452,13 @@
                       (assoc e :args (mapv add-type-hints cargs))
                       e))
             ;_ (prn (-> nexpr :target ((juxt :o-tag :tag))))
-            rewrite (-> nexpr
-                        ana-host/analyze-host-expr
-                        validate/validate)]
+            rewrite (try-resolve-reflection nexpr)]
         ;(prn "rewrite" (:op rewrite))
         (case (:op rewrite)
           (:static-call :instance-call) (method/check-invoke-method check rewrite expected
                                                                     :ctarget ctarget
                                                                     :cargs cargs)
-          ;; TODO field/constructor cases
+          ;; TODO field cases
           (give-up)))
       (give-up))))
 
@@ -1622,41 +1625,61 @@
           (-> % u/expr-type r/TCResult?)]}
   (binding [vs/*current-expr* expr
             vs/*current-env* env]
-    (let [ctor (cu/NewExpr->Ctor expr)
-          spec (new-special expr expected)]
+    (let [spec (new-special expr expected)]
       (cond
         (not= cu/not-special spec) spec
         :else
         (let [inst-types *inst-ctor-types*
-              cls (ast-u/new-op-class expr)
-              clssym (coerce/Class->symbol cls)
-              cargs (mapv check args)
-              ctor-fn (or (@ctor-override/CONSTRUCTOR-OVERRIDE-ENV clssym)
-                          (and (dt-env/get-datatype clssym)
-                               (cu/DataType-ctor-type clssym))
-                          (when ctor
-                            (cu/Constructor->Function ctor)))]
-          (if-not ctor-fn
-            (err/tc-delayed-error (str "Unresolved constructor invocation " 
-                                     (type-hints/suggest-type-hints 
-                                       nil 
-                                       nil 
-                                       (map (comp r/ret-t u/expr-type) cargs)
-                                       :constructor-call clssym)
-                                     ".\n\nHint: add type hints")
-                                :form (ast-u/emit-form-fn expr)
-                                :return (assoc expr
-                                               :args cargs
-                                               u/expr-type (cu/error-ret expected)))
-            (let [ctor-fn (if inst-types
-                            (inst/manual-inst ctor-fn inst-types)
-                            ctor-fn)
-                  ifn (r/ret ctor-fn)
-                  ;_ (prn "Expected constructor" (prs/unparse-type (r/ret-t ifn)))
-                  res-type (funapp/check-funapp expr args ifn (map u/expr-type cargs) expected)]
-              (assoc expr
-                     :args cargs
-                     u/expr-type res-type))))))))
+              cargs (binding [*inst-ctor-types* nil]
+                      (mapv check args))
+              give-up (fn [expr]
+                        (let [clssym (-> expr
+                                         ast-u/new-op-class 
+                                         coerce/Class->symbol)]
+                          (err/tc-delayed-error (str "Unresolved constructor invocation " 
+                                                     (type-hints/suggest-type-hints 
+                                                       nil 
+                                                       nil 
+                                                       (map (comp r/ret-t u/expr-type) cargs)
+                                                       :constructor-call clssym)
+                                                     ".\n\nHint: add type hints")
+                                                :form (ast-u/emit-form-fn expr)
+                                                :return (assoc expr
+                                                               :args cargs
+                                                               u/expr-type (cu/error-ret expected)))))
+              ctor-fn (fn [expr]
+                        (when (:validated? expr)
+                          (let [clssym (-> expr
+                                           ast-u/new-op-class 
+                                           coerce/Class->symbol)]
+                            (or (@ctor-override/CONSTRUCTOR-OVERRIDE-ENV clssym)
+                                (and (dt-env/get-datatype clssym)
+                                     (cu/DataType-ctor-type clssym))
+                                (when-let [ctor (cu/NewExpr->Ctor expr)]
+                                  (cu/Constructor->Function ctor))))))
+              check-validated (fn [expr]
+                                ;(prn "found validation")
+                                (let [ifn (-> (if inst-types
+                                                (inst/manual-inst (ctor-fn expr) inst-types)
+                                                (ctor-fn expr))
+                                              r/ret)
+                                      ;_ (prn "Expected constructor" (prs/unparse-type (r/ret-t ifn)))
+                                      res-type (funapp/check-funapp expr cargs ifn (map u/expr-type cargs) expected)]
+                                  (assoc expr
+                                         :args cargs
+                                         u/expr-type res-type)))]
+          ;(prn "validated?" (:validated? expr))
+          ;; try to rewrite, otherwise error on reflection
+          (cond
+            (:validated? expr) (check-validated expr)
+
+            vs/*in-check-form* (let [rexpr (try-resolve-reflection (assoc expr :args (mapv add-type-hints cargs)))]
+                                 ;; rexpr can only be :new
+                                 (case (:op rexpr)
+                                   (:new) (if (:validated? rexpr)
+                                            (check-validated rexpr)
+                                            (give-up rexpr))))
+            :else (give-up expr)))))))
 
 (add-check-method :throw
   [{:keys [exception] :as expr} & [expected]]
