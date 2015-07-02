@@ -24,7 +24,7 @@
         
 (deftest run-all-tests-test
   	(is-tc-e (defn a [] (run-all-tests)) (Map Any Any)
-             :requires [[clojure.test :refer [run-all-tests]]])
+             :requires [[clojure.test :refer [run-all-tests]]]))
             
 (deftest successful?-test
   (is-tc-e  (successful? 1) Boolean
