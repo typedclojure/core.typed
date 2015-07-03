@@ -31,7 +31,7 @@
              :requires [[clojure.test :refer [successful?]]]))
             
 (deftest compose-fixtures-test
-  	(is-tc-e (compose-fixtures (defn a [](+ 2 1)) (defn c [](+ 1 2) ) ) Any
+  	(is-tc-e (compose-fixtures (fn a [](+ 2 1)) (fn c [](+ 1 2) ) ) Any
              :requires [[clojure.test :refer [compose-fixtures]]]))
            
 (deftest testing-vars-str-test
