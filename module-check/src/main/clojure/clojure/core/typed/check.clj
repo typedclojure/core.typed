@@ -1413,13 +1413,31 @@
   (assoc expr
          u/expr-type (local-result/local-result expr sym expected)))
 
+;; from clojure.tools.analyzer.passes.jvm.emit-form
+(defn class->sym [class]
+  (if (symbol? class)
+    class
+    (symbol (.getName ^Class class))))
+
+;; from clojure.tools.analyzer.utils
+(defn obj?
+  "Returns true if x implements IObj"
+  [x]
+  (instance? clojure.lang.IObj x))
+
 (defn add-type-hints [expr]
   (let [{:keys [t]} (u/expr-type expr)
         cls (cu/Type->Class t)]
     (if cls
-      (assoc expr 
-             :o-tag cls
-             :tag cls)
+      (-> expr
+          (assoc 
+            :o-tag cls
+            :tag cls)
+          (update-in [:form] 
+                     (fn [f]
+                       (if (obj? f)
+                         (vary-meta f assoc :tag (class->sym cls))
+                         f))))
       expr)))
 
 (defn try-resolve-reflection [ast]
@@ -1447,17 +1465,23 @@
                            u/expr-type (cu/error-ret expected))))]
     ;; try to rewrite, otherwise error on reflection
     (if (cu/should-rewrite?)
-      (let [nexpr (let [e (assoc expr :target (add-type-hints ctarget))]
+      (let [ctarget (add-type-hints ctarget)
+            cargs (mapv add-type-hints cargs)
+            nexpr (let [e (assoc expr :target ctarget)]
                     (if cargs
-                      (assoc e :args (mapv add-type-hints cargs))
+                      (assoc e :args cargs)
                       e))
             ;_ (prn (-> nexpr :target ((juxt :o-tag :tag))))
             rewrite (try-resolve-reflection nexpr)]
         ;(prn "rewrite" (:op rewrite))
         (case (:op rewrite)
-          (:static-call :instance-call) (method/check-invoke-method check rewrite expected
-                                                                    :ctarget ctarget
-                                                                    :cargs cargs)
+          (:static-call :instance-call) 
+          (let [e (method/check-invoke-method check rewrite expected
+                                              :ctarget ctarget
+                                              :cargs cargs)]
+            (binding [*print-meta* true]
+              (prn (clojure.core.typed.deps.clojure.tools.analyzer.passes.jvm.emit-form/emit-form e)))
+            e)
           ;; TODO field cases
           (give-up)))
       (give-up))))
