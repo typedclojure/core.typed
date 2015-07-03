@@ -773,6 +773,11 @@ clojure.test/testing-vars-str [Any -> String]
 clojure.test/testing-contexts-str [-> String]
 clojure.test/test-ns [Symbol -> (Map Any Any)]
 
+clojure.test.tap/print-tap-plan [Any -> Any]
+clojure.test.tap/print-tap-diagnostic [String -> Any]
+clojure.test.tap/print-tap-pass [Any -> Any]
+clojure.test.tap/print-tap-fail [Any -> Any]
+
 
 clojure.core/interpose (All [x] (IFn [x (Option (Seqable x)) -> (ASeq x)]))
 clojure.core/interleave (All [x] [(Option (Seqable x)) (Option (Seqable x)) (Option (Seqable x)) * -> (ASeq x)])
