@@ -19,13 +19,13 @@
              :requires [[clojure.test :refer [do-report]]]))
             
 (deftest run-tests-test
-  	(is-tc-e (defn a [] (run-tests)) (Map Any Any)
+  	(is-tc-e #(run-tests) (Var1 [-> (t/Map t/Any t/Any)])
              :requires [[clojure.test :refer [run-tests]]])
         (is-tc-err (run-tests) String
              :requires [[clojure.test :refer [run-tests]]]))
             
 (deftest run-all-tests-test
-  	(is-tc-e (defn a [] (run-all-tests)) (Map Any Any)
+  	(is-tc-e #(run-all-tests) (Var1 [-> (t/Map t/Any t/Any)])
              :requires [[clojure.test :refer [run-all-tests]]])
         (is-tc-err (run-all-tests) String
              :requires [[clojure.test :refer [run-all-tests]]]))
@@ -53,7 +53,7 @@
              :requires [[clojure.test :refer [testing-contexts-str]]]))
 
 (deftest test-ns-test
-  	(is-tc-e (defn a [] (test-ns 'clojure.core.typed.test.destructure)) (Map Any Any)
+  	(is-tc-e (test-ns 'clojure.core.typed.test.destructure) (Var1 [-> (t/Map t/Any t/Any)])
              :requires [[clojure.test :refer [test-ns]]]))
             
 
