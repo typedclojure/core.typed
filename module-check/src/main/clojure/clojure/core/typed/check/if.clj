@@ -68,9 +68,13 @@
             ;                                    (set (:props lex/*lexical-env*))
             ;                                    (set (:props env-els)))))
             ;_ (prn idsym"env+: new-els-props" (map unparse-filter new-els-props))
+            
+            then-locals (atom @lex/*used-unique-locals*)
+            else-locals (atom @lex/*used-unique-locals*)
+
             cthen
             (binding [vs/*current-expr* thn
-                      lex/*then-locals* (atom #{})]
+                      lex/*used-unique-locals* then-locals]
               (var-env/with-lexical-env env-thn
                 (tc thn @flag+)))
 
@@ -79,7 +83,8 @@
 
             celse
             (binding [vs/*current-expr* els
-                      lex/*else-locals* (atom #{})]
+                      lex/*used-unique-locals* else-locals]
+                      
               (var-env/with-lexical-env env-els
                 (tc els @flag-)))
 
@@ -154,7 +159,7 @@
                 (if expected (below/check-below (r/ret us fs3 os3 flow3) expected) (r/ret us fs3 os3 flow3))
                 :else (err/int-error "Something happened"))
               _ (assert (r/TCResult? if-ret))]
-          (reset! lex/*used-unique-locals* (set/union @lex/*then-locals* @lex/*else-locals*))
+          (swap! lex/*used-unique-locals* set/union @then-locals @else-locals)
           (assoc expr
                  :test ctest
                  :then cthen

@@ -1403,15 +1403,10 @@
   [{sym :name :as expr} & [expected]]
   (when (and 
           (r/Unique? (:t (local-result/local-ret sym)))
-          (or 
-            (contains? @lex/*then-locals* sym)
-            (contains? @lex/*else-locals* sym))
           (contains? @lex/*used-unique-locals* sym))
     (err/tc-delayed-error (str "Unique value used more than once")))
   (when (r/Unique? (:t (local-result/local-ret sym)))
-    (reset! lex/*used-unique-locals* (into @lex/*used-unique-locals* #{sym}))
-    (reset! lex/*then-locals* (into @lex/*then-locals* #{sym}))
-    (reset! lex/*else-locals* (into @lex/*else-locals* #{sym})))
+    (reset! lex/*used-unique-locals* (into @lex/*used-unique-locals* #{sym})))
   (assoc expr
          u/expr-type (local-result/local-result expr sym expected)))
 
