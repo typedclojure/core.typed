@@ -778,9 +778,9 @@ clojure.test.tap/print-tap-diagnostic [String -> Any]
 clojure.test.tap/print-tap-pass [Any -> Any]
 clojure.test.tap/print-tap-fail [Any -> Any]
 
-clojure.java.javadoc/add-local-javadoc [Any -> List]
-clojure.java.javadoc/add-remote-javadoc [String Any -> clojure.lang.PersistentTreeMap]
-clojure.java.javadoc/javadoc [Any -> Boolean]
+clojure.java.javadoc/add-local-javadoc [Any -> (List Any)]
+clojure.java.javadoc/add-remote-javadoc [String Any -> (Map Any Any)]
+clojure.java.javadoc/javadoc [Any -> Any]
 
 
 clojure.core/interpose (All [x] (IFn [x (Option (Seqable x)) -> (ASeq x)]))
