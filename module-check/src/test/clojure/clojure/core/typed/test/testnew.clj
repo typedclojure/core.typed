@@ -5,33 +5,33 @@
              [clojure.core.typed.test.destructure]))
 
 (deftest function?-test
-  (is-tc-e   (function? function?) Boolean
+  (is-tc-e (function? function?) Boolean
              :requires [[clojure.test :refer [function?]]])
-  (is-tc-err   (function? function?) String
+  (is-tc-err (function? function?) String
              :requires [[clojure.test :refer [function?]]]))
   
 (deftest assert-any-test
-  (is-tc-e   (assert-any "Hi" (= 4(+ 2 2) )) Any
+  (is-tc-e (assert-any "Hi" (= 4(+ 2 2) )) Any
              :requires [[clojure.test :refer [assert-any]]]))
            
 (deftest do-report-test
-  (is-tc-e  (do-report 1)  Any
+  (is-tc-e (do-report 1)  Any
              :requires [[clojure.test :refer [do-report]]]))
             
 (deftest run-tests-test
-  	(is-tc-e #(run-tests) (Var1 [-> (t/Map t/Any t/Any)])
+  	(is-tc-e #(run-tests)  [-> (t/Map t/Any t/Any)]
              :requires [[clojure.test :refer [run-tests]]])
         (is-tc-err (run-tests) String
              :requires [[clojure.test :refer [run-tests]]]))
             
 (deftest run-all-tests-test
-  	(is-tc-e #(run-all-tests) (Var1 [-> (t/Map t/Any t/Any)])
+  	(is-tc-e #(run-all-tests)  [-> (t/Map t/Any t/Any)]
              :requires [[clojure.test :refer [run-all-tests]]])
         (is-tc-err (run-all-tests) String
              :requires [[clojure.test :refer [run-all-tests]]]))
             
 (deftest successful?-test
-  (is-tc-e  (successful? 1) Boolean
+  (is-tc-e (successful? 1) Boolean
              :requires [[clojure.test :refer [successful?]]]))
             
 (deftest compose-fixtures-test
@@ -53,7 +53,6 @@
              :requires [[clojure.test :refer [testing-contexts-str]]]))
 
 (deftest test-ns-test
-  	(is-tc-e (test-ns 'clojure.core.typed.test.destructure) (Var1 [-> (t/Map t/Any t/Any)])
+  	(is-tc-e #(test-ns 'clojure.core.typed.test.destructure) [-> (t/Map t/Any t/Any)]
              :requires [[clojure.test :refer [test-ns]]]))
             
-
