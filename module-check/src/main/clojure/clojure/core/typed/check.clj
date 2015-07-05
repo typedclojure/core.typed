@@ -1401,11 +1401,11 @@
 
 (add-check-method :local
   [{sym :name :as expr} & [expected]]
-  (when (and 
-          (r/Unique? (:t (local-result/local-ret sym)))
-          (contains? @lex/*used-unique-locals* sym))
+  (if (contains? @lex/*used-unique-locals* sym)
     (err/tc-delayed-error (str "Unique value used more than once")))
-  (when (r/Unique? (:t (local-result/local-ret sym)))
+  (if (and
+        (not (contains? @lex/*used-unique-locals* sym)) 
+        (r/Unique? (:t (local-result/local-ret sym))))
     (reset! lex/*used-unique-locals* (into @lex/*used-unique-locals* #{sym})))
   (assoc expr
          u/expr-type (local-result/local-result expr sym expected)))
