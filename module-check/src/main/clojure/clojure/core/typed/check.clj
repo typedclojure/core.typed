@@ -1253,6 +1253,7 @@
             ctarget (check target)
             cdispatch-val-expr (check dispatch-val-expr)
             dispatch-type (mm/multimethod-dispatch-type mmsym)]
+        (p/p :check/checked-MultiFn-addMethod)
         (if-not dispatch-type
           (binding [vs/*current-env* env]
             (err/tc-delayed-error (str "Multimethod requires dispatch type: " mmsym
@@ -1425,12 +1426,25 @@
            :target ctarget
            u/expr-type (cu/error-ret expected))))
 
+(defn clojure-lang-call? [^String m]
+  (.startsWith m "clojure.lang"))
+
+(defmacro profile-inlining [chk-op source]
+  {:pre [(keyword? chk-op)]}
+  `(p/when-profile 
+     (let [mstr# ~source]
+       (when (clojure-lang-call? mstr#)
+         (u/trace mstr# " is inline" ~chk-op)
+         (u/p ~(keyword (str "check/" (name chk-op) "-clojure-lang-probably-inline")))))))
+
 (add-check-method :static-call
   [expr & [expected]]
   {:post [(-> % u/expr-type r/TCResult?)]}
   #_(prn "static-method")
   (u/trace 
     "static Call: " (:method expr))
+  (profile-inlining :static-call
+    (str (cu/MethodExpr->qualsym expr)))
   (let [spec (static-method-special expr expected)]
     (if (not= :default spec)
       spec
@@ -1442,6 +1456,8 @@
           (if (contains? % :args)
             (vector? (:args %))
             true)]}
+  (profile-inlining :instance-call
+    (str (cu/MethodExpr->qualsym expr)))
   (let [spec (instance-method-special expr expected)]
     (if (not= :default spec)
       spec
