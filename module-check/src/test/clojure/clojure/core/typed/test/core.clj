@@ -1508,11 +1508,14 @@
   (is-tc-e (java.io.File. "a"))
   (is-tc-e (let [a (or "a" "b")]
              (java.io.File. a)))
+  (is-tc-e
+    (fn [& {:keys [path] :or {path "foo"}}]
+      (java.io.File. path))
+    [& :optional {:path String} -> java.io.File])
   (is-tc-err
     (fn [& {:keys [path] :or {path "foo"}}]
-      (print-env "a")
       (java.io.File. path))
-    [& :optional {:path String} -> java.io.File]))
+    [& :optional {:path Int} -> java.io.File]))
 
 ;(fn> [a :- (U (Extends Number :without [(IPerVec clojure.core.typed/Any)])
 ;              (Extends (IPV clojure.core.typed/Any) :without [Number])
@@ -4943,6 +4946,35 @@
                  k)))
   )
 
+(deftest rewrite-reflecting-method-test
+  (is-tc-err (fn [a] (.getParent a)))
+  (is-tc-e (fn [^java.io.File a] (.getParent a))
+           [java.io.File -> Any])
+  (is-tc-e (fn [a] (.getParent a))
+           [java.io.File -> Any])
+  (is-tc-e (fn [a] (.getParent a))
+           [java.io.File -> (U nil Str)])
+  (is-tc-e (fn [a] 
+             {:pre [(instance? java.io.File a)]}
+             (.getParent a)))
+  (is-tc-e (fn [a] (.getParent a))
+           [java.io.File -> Any]))
+
+(deftest rewrite-reflecting-ctor-test
+  (is-tc-err (java.io.File. 1))
+  (is-tc-err (fn [a]
+               (java.io.File. a)))
+  (is-tc-e (fn [a]
+             (java.io.File. a))
+           [Str -> Any])
+  (is-tc-e (let [[a] [(str "a")]]
+             (java.io.File. a)))
+  (is-tc-e (java.io.File. (first [(str "a")])))
+  (is-tc-err (let [[a] [(long 1)]]
+               (java.io.File. a)))
+  (is-tc-e (fn [a]
+             (java.io.File. a))
+           [Str -> java.io.File]))
 
 (deftest profile-inline-test
   ;; should have :check/instance-call-clojure-lang-probably-inline 1
