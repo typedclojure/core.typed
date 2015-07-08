@@ -782,6 +782,18 @@ clojure.java.javadoc/add-local-javadoc [Any -> (List Any)]
 clojure.java.javadoc/add-remote-javadoc [String Any -> (Map Any Any)]
 clojure.java.javadoc/javadoc [Any -> Any]
 
+clojure.edn/read-string[(U String nil) -> (U nil Symbol Long)] 
+
+clojure.java.shell/sh [ String * -> (Map Any Any)]
+
+clojure.java.browse/browse-url [Any -> Boolean]
+
+clojure.java.io/delete-file [String -> Boolean]
+
+clojure.stacktrace/e [-> (U nil Any)]
+
+clojure.reflect/reflect [Any -> (Map Any Any)]
+
 
 clojure.core/interpose (All [x] (IFn [x (Option (Seqable x)) -> (ASeq x)]))
 clojure.core/interleave (All [x] [(Option (Seqable x)) (Option (Seqable x)) (Option (Seqable x)) * -> (ASeq x)])
