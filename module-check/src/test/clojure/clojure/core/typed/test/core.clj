@@ -11,6 +11,7 @@
             [clojure.core.typed.unsafe]
             [clojure.core.typed.init]
             [clojure.core.typed.utils :as u :refer [expr-type]]
+            [clojure.core.typed.profiling :as p :refer [profile]]
             [clojure.core.typed.errors :as err]
             [clojure.core.typed.current-impl :as impl]
             [clojure.core.typed.check :as chk]
@@ -1507,11 +1508,14 @@
   (is-tc-e (java.io.File. "a"))
   (is-tc-e (let [a (or "a" "b")]
              (java.io.File. a)))
+  (is-tc-e
+    (fn [& {:keys [path] :or {path "foo"}}]
+      (java.io.File. path))
+    [& :optional {:path String} -> java.io.File])
   (is-tc-err
     (fn [& {:keys [path] :or {path "foo"}}]
-      (print-env "a")
       (java.io.File. path))
-    [& :optional {:path String} -> java.io.File]))
+    [& :optional {:path Int} -> java.io.File]))
 
 ;(fn> [a :- (U (Extends Number :without [(IPerVec clojure.core.typed/Any)])
 ;              (Extends (IPV clojure.core.typed/Any) :without [Number])
@@ -4941,6 +4945,53 @@
                  (assert (keyword? i))
                  k)))
   )
+
+(deftest rewrite-reflecting-method-test
+  (is-tc-err (fn [a] (.getParent a)))
+  (is-tc-e (fn [^java.io.File a] (.getParent a))
+           [java.io.File -> Any])
+  (is-tc-e (fn [a] (.getParent a))
+           [java.io.File -> Any])
+  (is-tc-e (fn [a] (.getParent a))
+           [java.io.File -> (U nil Str)])
+  (is-tc-e (fn [a] 
+             {:pre [(instance? java.io.File a)]}
+             (.getParent a)))
+  (is-tc-e (fn [a] (.getParent a))
+           [java.io.File -> Any]))
+
+(deftest rewrite-reflecting-ctor-test
+  (is-tc-err (java.io.File. 1))
+  (is-tc-err (fn [a]
+               (java.io.File. a)))
+  (is-tc-e (fn [a]
+             (java.io.File. a))
+           [Str -> Any])
+  (is-tc-e (let [[a] [(str "a")]]
+             (java.io.File. a)))
+  (is-tc-e (java.io.File. (first [(str "a")])))
+  (is-tc-err (let [[a] [(long 1)]]
+               (java.io.File. a)))
+  (is-tc-e (fn [a]
+             (java.io.File. a))
+           [Str -> java.io.File]))
+
+(deftest profile-inline-test
+  ;; should have :check/instance-call-clojure-lang-probably-inline 1
+  (is (profile :info :bar
+               (tc-e
+                 #(.getName (java.io.File. "a")))
+               true))
+  ;; should have :check/instance-call-clojure-lang-probably-inline
+  (is (profile :info :bar
+               (tc-e
+                 #(nil? nil))
+               true))
+  ;; has :check/static-call-clojure-lang-probably-inline
+  (is (profile :info :bar
+               (tc-e
+                 (zero? 0))
+               true)))
 
 ;    (is-tc-e 
 ;      (let [f (fn [{:keys [a] :as m} :- '{:a (U nil Num)}] :- '{:a Num} 
