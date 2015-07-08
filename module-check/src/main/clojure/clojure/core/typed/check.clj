@@ -1480,8 +1480,6 @@
           (let [e (method/check-invoke-method check rewrite expected
                                               :ctarget ctarget
                                               :cargs cargs)]
-            (binding [*print-meta* true]
-              (prn (clojure.core.typed.deps.clojure.tools.analyzer.passes.jvm.emit-form/emit-form e)))
             e)
           ;; TODO field cases
           (give-up)))
