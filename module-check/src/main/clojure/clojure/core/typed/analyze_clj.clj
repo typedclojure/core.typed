@@ -414,7 +414,6 @@
   ;                    (ExceptionThrown. e)))]
   ;  (merge ast {:result result})))
   (let [frm (emit-form/emit-form ast)
-        ;_ (prn "form" frm)
         result (eval frm)]  ;; eval the emitted form rather than directly the form to avoid double macroexpansion
     (merge ast {:result result})))
 
