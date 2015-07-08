@@ -34,7 +34,6 @@
                            m))
                        methods
                        cmethodss)]
-    (prn ((juxt count identity (comp :body first)) cmethods))
     (assoc fexpr
            :methods cmethods
            ::t/cmethods cmethods
