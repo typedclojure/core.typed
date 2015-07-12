@@ -794,6 +794,14 @@ clojure.stacktrace/e [-> (U nil Any)]
 
 clojure.reflect/reflect [Any -> (Map Any Any)]
 
+clojure.inspector/atom? [Any -> Boolean]
+clojure.inspector/collection-tag [Any -> Keyword]
+clojure.inspector/tree-model [Any -> Any]
+clojure.inspector/old-table-model [(Vec Any) -> Any]
+clojure.inspector/inspect [Any -> javax.swing.JFrame]
+clojure.inspector/inspect-tree [Any -> javax.swing.JFrame]
+clojure.inspector/inspect-table [(Vec Any) -> javax.swing.JFrame]
+
 
 clojure.core/interpose (All [x] (IFn [x (Option (Seqable x)) -> (ASeq x)]))
 clojure.core/interleave (All [x] [(Option (Seqable x)) (Option (Seqable x)) (Option (Seqable x)) * -> (ASeq x)])
