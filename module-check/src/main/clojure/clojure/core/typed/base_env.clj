@@ -802,6 +802,11 @@ clojure.inspector/inspect [Any -> javax.swing.JFrame]
 clojure.inspector/inspect-tree [Any -> javax.swing.JFrame]
 clojure.inspector/inspect-table [(Vec Any) -> javax.swing.JFrame]
 
+clojure.main/demunge [String -> String]
+clojure.main/repl-prompt [-> Any]
+clojure.main/repl [-> Any]
+clojure.main/main [-> nil]
+
 
 clojure.core/interpose (All [x] (IFn [x (Option (Seqable x)) -> (ASeq x)]))
 clojure.core/interleave (All [x] [(Option (Seqable x)) (Option (Seqable x)) (Option (Seqable x)) * -> (ASeq x)])
