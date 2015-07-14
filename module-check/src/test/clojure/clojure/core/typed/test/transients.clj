@@ -36,88 +36,89 @@
                  ;(conj! x 1))
                ;(conj! x 2))))
 
-(deftest if-tests
-  (is-tc-err (let [x (transient {})]
-              (do
-                x
-                 (if (< 1 2)
-                   x
-                   x))))
-  (is-tc-err (let [x (transient {})]
-               (if (< 1 2)
-                 (do
-                   x
-                   (if (< 1 2)
-                     x
-                     x)
-                   x))))
-  (is-tc-err (let [x (transient {})]
-              (if (< 1 2)
-                x
-                x)
-               x))
-  (is-tc-e (let [x (transient {})]
-             (if (< 1 2)
-               (if (< 1 2) x x)
-               x)))
-  (is-tc-err (let [x (transient {})]
-             (when true
-               x
-               x)
-             x))
-  (is-tc-err (let [x (transient {})]
-              (if (< 1 2)
-                [x x]
-                x)))
-  (is-tc-e (let [x (transient {})]
-             (if false
-               [x x]
-               x)))
-  (is-tc-err (let [x (transient {})]
-              (if (< 1 2)
-                [x x]
-                [x x])))
-  (is-tc-err (let [x (transient {})]
-              (if true
-                x
-                [x x])
-              x))
-  (is-tc-err (let [x (transient {})]
-               (if x 
-                 x
-                 x)))
-  (is-tc-err (let [x (transient {})]
-              (do
-                x
-                (if true
-                  x
-                  x)
-                x))))
+;(deftest if-tests
+  ;(is-tc-err (let [x (transient {})]
+              ;(do
+                ;x
+                 ;(if (< 1 2)
+                   ;x
+                   ;x))))
+  ;(is-tc-err (let [x (transient {})]
+               ;(if (< 1 2)
+                 ;(do
+                   ;x
+                   ;(if (< 1 2)
+                     ;x
+                     ;x)
+                   ;x))))
+  ;(is-tc-err (let [x (transient {})]
+              ;(if (< 1 2)
+                ;x
+                ;x)
+               ;x))
+  ;(is-tc-e (let [x (transient {})]
+             ;(if (< 1 2)
+               ;(if (< 1 2) x x)
+               ;x)))
+  ;(is-tc-err (let [x (transient {})]
+             ;(when true
+               ;x
+               ;x)
+             ;x))
+  ;(is-tc-err (let [x (transient {})]
+              ;(if (< 1 2)
+                ;[x x]
+                ;x)))
+  ;(is-tc-e (let [x (transient {})]
+             ;(if false
+               ;[x x]
+               ;x)))
+  ;(is-tc-err (let [x (transient {})]
+              ;(if (< 1 2)
+                ;[x x]
+                ;[x x])))
+  ;(is-tc-err (let [x (transient {})]
+              ;(if true
+                ;x
+                ;[x x])
+              ;x))
+  ;(is-tc-err (let [x (transient {})]
+               ;(if x 
+                 ;x
+                 ;x)))
+  ;(is-tc-err (let [x (transient {})]
+              ;(do
+                ;x
+                ;(if true
+                  ;x
+                  ;x)
+                ;x))))
+
+(deftest loop-tests
+  (is-tc-err (let [t (transient [])]
+               (dotimes [i 10]
+                 (conj! t i))
+               (persistent! t)))
+  (is-tc-err (let [t (transient {})]
+               (dotimes [i 1]
+                 (assoc! t i i))))
+  (is-tc-e (persistent! 
+             (reduce (fn [t i] (assoc! t i i))
+                   (transient {})
+                   (range 10)))))
 
 
-  
-;(let [t (transient [])]
+;(let [t (transient {})]
   ;(dotimes [i 10]
-    ;(conj! t i))
-  ;(persistent! t))
-
-;(persistent!
-  ;(reduce (fn [t i] (assoc! t i i))
-          ;(transient {})
-          ;(range 10)))
-
+    ;(assoc! t i i)))
 
 ;(let [x (transient {})]
-  ;(if x
-    ;x
-    ;x))
-
-;(let [x (transient {})]
-  ;(if true
-    ;x
-    ;x)
   ;x)
-;(let [x [1 2 (transient [1 2 3])]]
+
+;(let [t (transient [])]
+  ;(loop [] t))
+
+;(let [x (transient [])]
   ;x)
 
 
@@ -147,6 +148,19 @@
       ;(recur (inc i) (conj! v i))
       ;(persistent! v))))
 
+;(let [t :- (Unique (ITransientMap Any Any)), (transient {})]
+  ;(dotimes [i 10]
+    ;(assoc! t :a 1)))
+
+
 ;(let [t (transient {})]
   ;(dotimes [i 10]
-    ;(assoc! t i i)))
+    ;(assoc! t i i))
+  ;(persistent! t))
+
+
+
+;(let [x  [1 (transient {}) 3], y 5]
+  ;x
+  ;x
+  ;y)

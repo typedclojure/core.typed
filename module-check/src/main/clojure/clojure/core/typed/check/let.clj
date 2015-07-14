@@ -18,7 +18,8 @@
             [clojure.core.typed.check.recur-utils :as recur-u]
             [clojure.core.typed.subst-obj :as subst-obj]
             [clojure.core.typed.object-rep :as obj]
-            [clojure.core.typed.contract-utils :as con]))
+            [clojure.core.typed.contract-utils :as con]
+            [clojure.core.typed.local-result :as local-result]))
 
 (defn check-let [check {:keys [bindings] :as expr} expected & [{is-loop :loop? :keys [expected-bnds]}]]
   (let [_ (assert (contains? expr (ast-u/let-body-kw))
@@ -41,6 +42,9 @@
                         ((some-fn nil? r/Type?) expected-bnd)
                         (identical? (boolean expected-bnd) (boolean is-loop))]
                   :post [((con/hvector-c? lex/PropEnv? vector?) %)]}
+
+                 (swap! lex/*used-unique-locals* into #{sym})
+
                  (let [; check rhs
                        cinit (binding [vs/*current-expr* init]
                                (var-env/with-lexical-env env
@@ -125,10 +129,10 @@
                            (update-in [:fl] subst-obj/subst-filter-set sym obj/-empty true)
                            (update-in [:o] subst-obj/subst-object sym obj/-empty true)
                            (update-in [:flow :normal] subst-obj/subst-filter sym obj/-empty true)))
+
                      (u/expr-type cbody)
                      (map :name bindings))]
          (assoc expr
                 (ast-u/let-body-kw) cbody
                 :bindings cbindings
                 u/expr-type unshadowed-ret))))))
-
