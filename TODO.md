@@ -6,6 +6,4 @@
     * If a function closes over a unique variable, mark it as unique.
 * Handle the case for unique variables in datatypes.
     * Unsure about all the details.
-* Handle the case for unique variables in collections.
-    * If a collection contains a unique variable, it is unique.
-
+* Check the case for atoms. (since its a var)
