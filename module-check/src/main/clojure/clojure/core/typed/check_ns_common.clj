@@ -44,8 +44,7 @@
                              ns-or-syms))]
         (impl/with-full-impl impl
           (binding [lex/*used-unique-locals* (atom #{})
-                    lex/*then-locals* (atom #{})
-                    lex/*else-locals* (atom #{})
+                    lex/*unique-collection-locals* (atom #{})
                     vs/*delayed-errors* (err/-init-delayed-errors)
                     vs/*already-checked* (atom #{})
                     vs/*trace-checker* trace

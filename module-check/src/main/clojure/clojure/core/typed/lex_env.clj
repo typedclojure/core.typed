@@ -12,8 +12,7 @@
 (def alias-env? (con/hash-c? con/local-sym? obj/RObject?))
 
 (defonce ^:dynamic *used-unique-locals* (atom #{} :validator (con/set-c? (every-pred symbol? namespace))))
-(defonce ^:dynamic *then-locals* (atom #{} :validator (con/set-c? (every-pred symbol? namespace))))
-(defonce ^:dynamic *else-locals* (atom #{} :validator (con/set-c? (every-pred symbol? namespace))))
+(defonce ^:dynamic *unique-collection-locals* (atom #{} :validator (con/set-c? (every-pred seq? namespace))))
 
 (u/defrecord PropEnv [l props aliases]
   "A lexical environment l, props is a list of known propositions"

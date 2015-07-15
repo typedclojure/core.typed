@@ -7,7 +7,8 @@
             [clojure.core.typed.type-rep :as r]
             [clojure.core.typed.utils :as u]
             [clojure.core.typed.subtype :as sub]
-            [clojure.core.typed.check.utils :as cu])
+            [clojure.core.typed.check.utils :as cu]
+            [clojure.core.typed.lex-env :as lex])
   (:import (clojure.lang PersistentHashSet)))
 
 (defn check-set [check {:keys [items] :as expr} expected]
@@ -18,6 +19,8 @@
                    (impl/impl-case
                      :clojure (c/RClass-of PersistentHashSet [(apply c/Un ts)])
                      :cljs (c/Protocol-of 'cljs.core/ISet [(apply c/Un ts)])))]
+    (when (not (empty? (filterv r/Unique? (mapv :t (mapv u/expr-type cargs)))))
+      (reset! lex/*unique-collection-locals* (into @lex/*unique-collection-locals* #{(mapv :t (mapv u/expr-type cargs))})))
     (assoc expr
            :items cargs
            u/expr-type (binding [vs/*current-expr* expr]

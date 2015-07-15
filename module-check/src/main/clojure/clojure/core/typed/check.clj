@@ -220,8 +220,7 @@
                                            " via check-ns or cf")
                                       :form (ast-u/emit-form-fn expr)
                                       :return (r/TCError-maker)))]
-    (if (r/Unique? id)
-      (err/tc-delayed-error "Unique var " + id + "used more than once"))
+    
     (assoc expr
            u/expr-type (binding [vs/*current-expr* expr]
                          (below/maybe-check-below
@@ -1400,12 +1399,18 @@
 
 (add-check-method :local
   [{sym :name :as expr} & [expected]]
+  ;(when (not (empty? @lex/*unique-collection-locals*))
+    ;(reset! lex/*used-unique-locals* (into @lex/*used-unique-locals* #{sym})))
+  ;(err/tc-delayed-error (str "value of used unique locals: " @lex/*used-unique-locals*))
   (if (and
         (not (contains? @lex/*used-unique-locals* sym)) 
         (r/Unique? (:t (local-result/local-ret sym))))
     (reset! lex/*used-unique-locals* (into @lex/*used-unique-locals* #{sym}))
-    (when (r/Unique? (:t (local-result/local-ret sym)))
+    (when (contains? @lex/*used-unique-locals* sym) 
+      ;(r/Unique? (:t (local-result/local-ret sym)))
       (err/tc-delayed-error (str "Unique value " (pr-str sym) " used more than once"))))
+  (when (not (empty? @lex/*unique-collection-locals*))
+    (reset! lex/*used-unique-locals* (into @lex/*used-unique-locals* #{sym})))
   (assoc expr
          u/expr-type (local-result/local-result expr sym expected)))
 

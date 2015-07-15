@@ -4,13 +4,17 @@
             [clojure.core.typed.utils :as u]
             [clojure.core.typed.subtype :as sub]
             [clojure.core.typed.check.utils :as cu]
-            [clojure.core.typed.filter-ops :as fo]))
+            [clojure.core.typed.filter-ops :as fo]
+            [clojure.core.typed.errors :as err]
+            [clojure.core.typed.lex-env :as lex]))
 
 (defn check-vector [check {:keys [items] :as expr} expected]
   (let [cargs (mapv check items)
         res-type (r/-hvec (mapv (comp r/ret-t u/expr-type) cargs)
                           :filters (mapv (comp r/ret-f u/expr-type) cargs)
                           :objects (mapv (comp r/ret-o u/expr-type) cargs))]
+    (when (not (empty? (filterv r/Unique? (mapv :t (mapv u/expr-type cargs)))))
+      (reset! lex/*unique-collection-locals* (into @lex/*unique-collection-locals* #{(mapv :t (mapv u/expr-type cargs))})))
     (assoc expr
            :items cargs
            u/expr-type (below/maybe-check-below

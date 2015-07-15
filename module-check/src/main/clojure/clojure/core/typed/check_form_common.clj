@@ -76,8 +76,7 @@
   (p/profile-if profile
     (reset-caches/reset-caches)
     (binding [lex/*used-unique-locals* (atom #{})
-              lex/*then-locals* (atom #{})
-              lex/*else-locals* (atom #{})
+              lex/*unique-collection-locals* (atom #{})
               vs/*already-collected* (atom #{})
               vs/*already-checked* (atom #{})
               vs/*delayed-errors* (err/-init-delayed-errors)

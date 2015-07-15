@@ -43,7 +43,6 @@
                         (identical? (boolean expected-bnd) (boolean is-loop))]
                   :post [((con/hvector-c? lex/PropEnv? vector?) %)]}
 
-                 (swap! lex/*used-unique-locals* into #{sym})
 
                  (let [; check rhs
                        cinit (binding [vs/*current-expr* init]

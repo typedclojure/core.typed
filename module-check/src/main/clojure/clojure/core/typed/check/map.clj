@@ -6,7 +6,8 @@
             [clojure.core.typed.check.utils :as cu]
             [clojure.core.typed.check-below :as below]
             [clojure.core.typed.filter-ops :as fo]
-            [clojure.core.typed.type-ctors :as c])
+            [clojure.core.typed.type-ctors :as c]
+            [clojure.core.typed.lex-env :as lex])
   (:import (clojure.lang APersistentMap)))
 
 (alter-meta! *ns* assoc :skip-wiki true)
@@ -102,6 +103,10 @@
                                         [(apply c/Un (keys ts))
                                          (apply c/Un (vals ts))]) ))
         actual-ret (r/ret actual-t (fo/-true-filter))]
+    (when (not (empty? (filterv r/Unique? (mapv :t (mapv u/expr-type ckeyexprs)))))
+      (reset! lex/*unique-collection-locals* (into @lex/*unique-collection-locals* #{(mapv :t (mapv u/expr-type ckeyexprs))})))
+    (when (not (empty? (filterv r/Unique? (mapv :t (mapv u/expr-type cvalexprs)))))
+      (reset! lex/*unique-collection-locals* (into @lex/*unique-collection-locals* #{(mapv :t (mapv u/expr-type cvalexprs))})))
     (assoc expr
            :keys ckeyexprs
            :vals cvalexprs
