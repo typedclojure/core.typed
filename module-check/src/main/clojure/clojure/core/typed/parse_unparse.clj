@@ -254,12 +254,11 @@
 (defmethod parse-type-list 'clojure.core.typed/Pred [t] (parse-Pred t))
 (defmethod parse-type-list 'cljs.core.typed/Pred [t] (parse-Pred t))
 
-; FIXME deprecate
 (defmethod parse-type-list 'Not
   [[_ tsyn :as all]]
   (when-not (= (count all) 2) 
     (err/int-error (str "Wrong arguments to Not (expected 1): " all)))
-  (r/NotType-maker (parse-type tsyn)))
+  (r/make-Not (parse-type tsyn)))
 
 (defn parse-Difference [[_ tsyn & dsyns :as all]]
   (when-not (<= 3 (count all))

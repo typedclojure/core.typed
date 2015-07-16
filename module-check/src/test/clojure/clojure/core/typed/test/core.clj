@@ -4961,6 +4961,40 @@
                  (zero? 0))
                true)))
 
+(defmacro negate-sub [s t]
+  `(In (parse-type '~s) 
+       (make-Not (parse-type '~t))))
+
+(deftest not-test
+  (is-clj (= (parse-clj '(Not Int))
+             (parse-clj '(Not (Not (Not Int))))))
+  (is-clj (= (negate-sub Int Num)
+             -nothing))
+  (is-clj (= (negate-sub Num Int)
+             (parse-clj 'Int)))
+  (is-clj (= (clj (unp (negate-sub Num Int)))
+             (parse-clj 'Int))))
+
+;(I Num (Not Int))
+;
+;(I Num (Not Int))
+;
+;(clj (unp (negate-sub (U nil Num) Int)))
+;(clj (unp (negate-sub Int Num)))
+;(clj (unp (negate-sub (U nil Int) Num)))
+;
+;(deftest negate-sub-test
+;  (is-clj (negate-sub (HMap :mandatory {:a Int})
+;                      (HMap :mandatory {:a Num}))))
+;
+;(clj (negate-sub Int Num))
+;(clj (negate-sub Num Int))
+;
+;(clj (unparse-type
+;       (In (parse-clj 'Num)
+;           (parse-clj '(Not Num)))))
+;
+
 ;    (is-tc-e 
 ;      (let [f (fn [{:keys [a] :as m} :- '{:a (U nil Num)}] :- '{:a Num} 
 ;                {:pre [(number? a)]} 
