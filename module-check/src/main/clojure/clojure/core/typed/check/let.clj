@@ -19,7 +19,8 @@
             [clojure.core.typed.subst-obj :as subst-obj]
             [clojure.core.typed.object-rep :as obj]
             [clojure.core.typed.contract-utils :as con]
-            [clojure.core.typed.local-result :as local-result]))
+            [clojure.core.typed.local-result :as local-result]
+            [clojure.set :as set]))
 
 (defn check-let [check {:keys [bindings] :as expr} expected & [{is-loop :loop? :keys [expected-bnds]}]]
   (let [_ (assert (contains? expr (ast-u/let-body-kw))
@@ -111,8 +112,10 @@
                [lex/*lexical-env* []] (map vector bindings (or expected-bnds
                                                                (repeat nil))))
 
+             loop-unique-locals (atom @lex/*used-unique-locals*)
+
              cbody (var-env/with-lexical-env env
-                     (if is-loop
+                     (if is-loop 
                        (binding [recur-u/*recur-target* (recur-u/->RecurTarget expected-bnds nil nil nil)]
                          (check body expected))
                        (binding [vs/*current-expr* body]
@@ -131,6 +134,10 @@
 
                      (u/expr-type cbody)
                      (map :name bindings))]
+         (when (and 
+                 is-loop
+                 (not (empty? (set/difference @lex/*used-unique-locals* @loop-unique-locals))))
+           (err/tc-delayed-error (str "Unique value used inside of loop!")))
          (assoc expr
                 (ast-u/let-body-kw) cbody
                 :bindings cbindings
