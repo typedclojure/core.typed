@@ -94,35 +94,35 @@
                   x)
                 x))))
 
-(deftest collection-tests
-  (is-tc-err (let [x [1 (transient {}) 3]]
-               x
-               x))
-  (is-tc-err (let [x #{1 (transient {}) 3}]
-               x
-               x))
-  (is-tc-err (let [x {1 (transient {})}]
-               x
-               x))
-  (is-tc-err (let [x {(transient {}) 1}]
-               x
-               x))
-  (is-tc-err (let [x {(transient {}) (transient {})}]
-               x
-               x)))
+;(deftest collection-tests
+  ;(is-tc-err (let [x [1 (transient {}) 3]]
+               ;x
+               ;x))
+  ;(is-tc-err (let [x #{1 (transient {}) 3}]
+               ;x
+               ;x))
+  ;(is-tc-err (let [x {1 (transient {})}]
+               ;x
+               ;x))
+  ;(is-tc-err (let [x {(transient {}) 1}]
+               ;x
+               ;x))
+  ;(is-tc-err (let [x {(transient {}) (transient {})}]
+               ;x
+               ;x)))
 
-;(deftest loop-tests
-  ;(is-tc-err (let [t (transient [])]
-               ;(dotimes [i 10]
-                 ;(conj! t i))
-               ;(persistent! t)))
-  ;(is-tc-err (let [t (transient {})]
-               ;(dotimes [i 1]
-                 ;(assoc! t i i))))
-  ;(is-tc-e (persistent! 
-             ;(reduce (fn [t i] (assoc! t i i))
-                   ;(transient {})
-                   ;(range 10)))))
+(deftest loop-tests
+  (is-tc-err (let [t (transient [])]
+               (dotimes [i 10]
+                 (conj! t i))
+               (persistent! t)))
+  (is-tc-err (let [t (transient {})]
+               (dotimes [i 1]
+                 (assoc! t i i))))
+  (is-tc-e (persistent! 
+             (reduce (fn [t i] (assoc! t i i))
+                   (transient {})
+                   (range 10)))))
 
 
 ;(let [t (transient {})]
@@ -132,8 +132,10 @@
 ;(let [x (transient {})]
   ;x)
 
-;(let [t (transient [])]
-  ;(loop [] t))
+;(let [t (transient []), x []]
+  ;t
+  ;(loop [] t)
+  ;t)
 
 ;(let [x (transient [])]
   ;x)
@@ -143,9 +145,13 @@
   ;(assoc! @m-atom :a 1)
   ;(assoc! @m-atom :b 2))
 
-;(let [x [1 "a" (transient {})]]
+;(let [x [1 "a" (transient {})], y 1, z #{1 (transient {}) 3}]
   ;x
-  ;x)
+  ;x
+  ;y
+  ;y
+  ;z
+  ;z)
 
 
 ; Some more interesting cases 
