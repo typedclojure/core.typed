@@ -4965,7 +4965,7 @@
   `(In (parse-type '~s) 
        (make-Not (parse-type '~t))))
 
-(deftest not-test
+#_(deftest not-test
   (is-clj (= (parse-clj '(Not Int))
              (parse-clj '(Not (Not (Not Int))))))
   (is-clj (= (negate-sub Int Num)

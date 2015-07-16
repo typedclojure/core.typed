@@ -34,7 +34,7 @@
    :post [(fr/Filter? %)]}
   (if (or (= r/-any t) (and (symbol? i) (r/is-var-mutated? i)))
     fr/-top
-    (fr/NotTypeFilter-maker t (seq p) i)))
+    (fr/TypeFilter-maker (r/make-Not t) (seq p) i)))
 
 (defn -filter-at [t o]
   (if (or/Path? o)
