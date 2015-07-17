@@ -27,7 +27,6 @@
             [clojure.set :as set]
             [clojure.reflect :as reflect]
             [clojure.repl :as repl]
-            [clojure.core.typed.debug :as b]
             [clojure.core.cache :as cache])
   (:import (clojure.core.typed.type_rep HeterogeneousMap Poly TypeFn PolyDots TApp App Value
                                         Union Intersection F Function Mu B KwArgs KwArgsSeq RClass
@@ -460,8 +459,8 @@
 
                 (not (overlap t1 t2)) bottom
 
-                (b/dbg (subtype? t1 t2)) t1
-                (b/dbg (subtype? t2 t1)) t2
+                (subtype? t1 t2) t1
+                (subtype? t2 t1) t2
                 :else (do
                         #_(prn "failed to eliminate intersection" (make-Intersection [t1 t2]))
                         (make-Intersection [t1 t2])))]
