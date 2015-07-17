@@ -154,7 +154,7 @@
              (map #(update* % ft pos? lo) (:types t)))
 
       (r/NotType? t)
-      (r/make-Not (update (:type t) (r/make-Not ft) (not pos?) lo))
+      (r/make-Not (update* (:type t) (r/make-Not ft) (not pos?) lo))
 
       (or (r/Union? ft)
           (r/Intersection? ft))
@@ -162,7 +162,7 @@
              (map #(update* t % pos? lo) (:types ft)))
 
       (r/NotType? ft)
-      (update t (:type ft) (not pos?) lo)
+      (update* t (:type ft) (not pos?) lo)
 
       ;from here, t is fully resolved and is not a Union or Intersection
 
