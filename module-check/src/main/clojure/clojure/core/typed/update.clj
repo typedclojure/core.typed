@@ -128,7 +128,7 @@
 ; ft is the new type to update with
 ; pos? indicates polarity
 ; - if true, we're updating with a TypeFilter so we use restrict
-; - if false, we're updateing with a NotTypeFilter so we use remove
+; - if false, we're updating with a NotTypeFilter so we use remove
 ; lo is a sequence of path elements, in the same order as -> (left to right)
 ;[Type Type Boolean PathElems -> Type]
 (defn update* [t ft pos? lo]
@@ -144,16 +144,25 @@
       ; Just update t with the correct polarity.
 
       (empty? lo)
-      (if pos?
-        (c/restrict t ft)
-        (remove/remove* t ft))
+      (c/restrict t ((if pos? identity r/make-Not) ft))
 
       ; unwrap unions and intersections to update their members
 
-      (or (r/Union? t)        
+      (or (r/Union? t)
           (r/Intersection? t)) 
       (apply (if (r/Union? t) c/Un c/In)
              (map #(update* % ft pos? lo) (:types t)))
+
+      (r/NotType? t)
+      (r/make-Not (update (:type t) (r/make-Not ft) (not pos?) lo))
+
+      (or (r/Union? ft)
+          (r/Intersection? ft))
+      (apply (if (r/Union? ft) c/Un c/In)
+             (map #(update* t % pos? lo) (:types ft)))
+
+      (r/NotType? ft)
+      (update t (:type ft) (not pos?) lo)
 
       ;from here, t is fully resolved and is not a Union or Intersection
 
@@ -162,8 +171,7 @@
       ; eg. (number? (-> hmap :a :b))
       (and (pe/KeyPE? (first lo))
            (r/HeterogeneousMap? t))
-      (let [polarity pos?
-            update-to-type ft
+      (let [update-to-type ft
             path lo
             [fkeype & rstpth] path
             fpth (cu/KeyPE->Type fkeype)
@@ -388,9 +396,9 @@
       :else (err/int-error (str "update along ill-typed path " (pr-str (prs/unparse-type t)) " " (mapv prs/unparse-path-elem lo)))))))
 
 (defn update [t lo]
-  {:pre [((some-fn fl/TypeFilter? fl/NotTypeFilter?) lo)]
+  {:pre [(fl/TypeFilter? lo)]
    :post [(r/Type? %)]}
-  (update* t (:type lo) (fl/TypeFilter? lo) (fl/filter-path lo)))
+  (update* t (:type lo) true (fl/filter-path lo)))
 
 ;; sets the flag box to #f if anything becomes (U)
 ;[PropEnv (Seqable Filter) (Atom Boolean) -> PropEnv]
