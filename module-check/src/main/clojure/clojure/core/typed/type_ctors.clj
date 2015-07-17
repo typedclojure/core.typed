@@ -1608,13 +1608,17 @@
 
         ; eg. (overlap (Not Number) Integer) => false
         ;     (overlap (Not Integer) Number) => true
+        ;     (overlap (Not Number) nil) => true
+        ;     (overlap (Not nil) Number) => true
         ;     (overlap (Not y) x) => true
         (or (r/NotType? t1)
             (r/NotType? t2))
         (let [[t1 t2] (if (r/NotType? t1) [t1 t2] [t2 t1])
               neg-type (fully-resolve-type (:type t1))]
-          (and (subtype? neg-type t2)
-               (not (subtype? t2 neg-type))))
+          (or (not (overlap neg-type t2))
+              (and ;(or (subtype? neg-type t2)
+                   ;    (not (subtype? neg-type t2)))
+                   (not (subtype? t2 neg-type)))))
 
         ;if both are Classes, and at least one isn't an interface, then they must be subtypes to have overlap
         ;      (and (r/RClass? t1)
@@ -1652,10 +1656,15 @@
             (and (some (fn [pos] (overlap pos other-type)) (.extends the-extends))
                  (not-any? (fn [neg] (overlap neg other-type)) (.without the-extends)))))
 
-        (or (r/Value? t1)
-            (r/Value? t2)) 
-        (or (subtype? t1 t2)
-            (subtype? t2 t1))
+        (or (r/F? t1)
+            (r/F? t2))
+        true
+
+        (r/Value? t1)
+        (subtype? t1 t2)
+
+        (r/Value? t2)
+        (subtype? t2 t1)
 
         (and (r/CountRange? t1)
              (r/CountRange? t2)) 
