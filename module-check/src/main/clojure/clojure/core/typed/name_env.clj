@@ -162,8 +162,10 @@
       (cond
         (= protocol-name-type t) (prenv/resolve-protocol sym)
         (= datatype-name-type t) (dtenv/resolve-datatype sym)
-        (= declared-name-type t) (throw (IllegalArgumentException. (str "Reference to declared but undefined name " sym)))
+        (= declared-name-type t) (u/maybe-name-res-fail
+                                   (err/int-error (str "Reference to declared but undefined name " sym)))
         (r/Type? t) (vary-meta t assoc :source-Name sym)
-        :else (err/int-error (str "Cannot resolve name " (pr-str sym)
-                                  (when t
-                                    (str " (Resolved to instance of)" (pr-str (class t))))))))))
+        :else (u/maybe-name-res-fail
+                (err/int-error (str "Cannot resolve name " (pr-str sym)
+                                    (when t
+                                      (str " (Resolved to instance of)" (pr-str (class t)))))))))))

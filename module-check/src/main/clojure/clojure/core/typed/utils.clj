@@ -28,6 +28,16 @@
 (t/ann cs-gen-exn Exception)
 (def cs-gen-exn (Exception. "Constraint generation failed."))
 
+(t/ann name-res-exn Exception)
+(def name-res-exn (Exception. "Name resolution failed."))
+
+(defonce ^:dynamic *fast-name-res-fail* nil)
+
+(defmacro maybe-name-res-fail [& body]
+  `(if *fast-name-res-fail*
+     (throw name-res-exn)
+     (do ~@body)))
+
 (defmacro handle-subtype-failure [& body]
   `(try
      ~@body

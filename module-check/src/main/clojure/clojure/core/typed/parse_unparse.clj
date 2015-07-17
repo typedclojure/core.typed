@@ -402,10 +402,14 @@
 (defmethod parse-type-list 'clojure.core.typed/U [syn] (parse-union-type syn))
 (defmethod parse-type-list 'cljs.core.typed/U [syn] (parse-union-type syn))
 
-; don't do any simplification of the intersection because some types might
-; not be resolved
 (defn parse-intersection-type [[i & types]]
-  (c/make-Intersection (doall (map parse-type types))))
+  (let [ts (map parse-type types)]
+    (binding [u/*fast-name-res-fail* true]
+      (try (apply c/In ts)
+           (catch Exception e
+             (if (identical? u/name-res-exn e)
+               (c/make-Intersection ts)
+               (throw e)))))))
 
 (defmethod parse-type-list 'I [syn] 
   (err/deprecated-plain-op 'I)
@@ -1225,7 +1229,8 @@
         :clojure (ns-name *ns*)
         :cljs (do
                 (require '[clojure.core.typed.util-cljs])
-                ((impl/v 'clojure.core.typed.util-cljs/cljs-ns))))))
+                ((impl/v 'clojure.core.typed.util-cljs/cljs-ns)))
+        :default 'user)))
 
 (defmacro with-unparse-ns [sym & body]
   `(binding [*unparse-type-in-ns* ~sym]
@@ -1308,7 +1313,8 @@
             :clojure
             (when-let [alias (alias-in-ns (namespace sym) ns)]
               (symbol (str alias) (name sym)))
-            :cljs nil))
+            :cljs nil
+            :default nil))
         ; otherwise use fully qualified name
         sym)
     sym))
@@ -1471,7 +1477,8 @@
 (defmethod unparse-type* Protocol
   [{:keys [the-var poly?]}]
   (let [s (impl/impl-case :clojure (unparse-Name-symbol-in-ns the-var)
-                          :cljs the-var)]
+                          :cljs the-var
+                          :default the-var)]
     (if poly?
       (list* s (mapv unparse-type poly?))
       s)))
