@@ -37,11 +37,11 @@
 (derive clojure any-impl)
 (derive clojurescript any-impl)
 
-(defonce ^:dynamic *current-impl* nil)
-(set-validator! #'*current-impl* (some-fn nil? keyword?))
+(defonce ^:dynamic *current-impl* :default)
+(set-validator! #'*current-impl* keyword?)
 
 (defmacro with-impl [impl & body]
-  `(do (assert ((some-fn #{~impl} nil?) *current-impl*) 
+  `(do (assert ((set [~impl :default]) *current-impl*) 
                (str "Cannot overlay different core.typed implementations: " (pr-str *current-impl*)
                     ", expected " (pr-str ~impl)))
      (binding [*current-impl* ~impl]
@@ -114,7 +114,7 @@
 
 
 (defn implementation-specified? []
-  (boolean *current-impl*))
+  ((complement #{:default}) *current-impl*))
 
 (defn ensure-impl-specified []
   (assert (implementation-specified?) "No implementation specified"))
@@ -140,13 +140,15 @@
 (defn assert-cljs []
   (assert (= clojurescript *current-impl*) "Clojurescript implementation only"))
 
-(defmacro impl-case [& {clj-case :clojure cljs-case :cljs :as opts}]
-  (assert (= #{:clojure :cljs} (set (keys opts)))
+(defmacro impl-case [& {clj-case :clojure cljs-case :cljs default :default :as opts}]
+  (assert (empty? (set/difference (set (keys opts)) #{:clojure :cljs :default}))
           "Incorrect cases to impl-case")
-  `(case (current-impl)
+  `(case *current-impl*
      ~clojure ~clj-case
      ~clojurescript ~cljs-case
-     (assert nil (str "No case matched for impl-case" (current-impl)))))
+     ~(if (contains? opts :default)
+        default
+        `(assert nil (str "No case matched for impl-case " *current-impl*)))))
 
 (defn var->symbol [^clojure.lang.Var var]
   {:pre [(var? var)]

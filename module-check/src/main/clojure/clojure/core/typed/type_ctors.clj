@@ -27,6 +27,7 @@
             [clojure.set :as set]
             [clojure.reflect :as reflect]
             [clojure.repl :as repl]
+            [clojure.core.typed.debug :as b]
             [clojure.core.cache :as cache])
   (:import (clojure.core.typed.type_rep HeterogeneousMap Poly TypeFn PolyDots TApp App Value
                                         Union Intersection F Function Mu B KwArgs KwArgsSeq RClass
@@ -389,7 +390,7 @@
 (defn make-Intersection [types]
   (let [cnt (count types)]
     (cond
-      (= 0 cnt) r/-nothing
+      (= 0 cnt) r/-any
       (= 1 cnt) (first types)
       :else (r/Intersection-maker (apply sorted-set-by u/type-comparator types)))))
 
@@ -459,8 +460,8 @@
 
                 (not (overlap t1 t2)) bottom
 
-                (subtype? t1 t2) t1
-                (subtype? t2 t1) t2
+                (b/dbg (subtype? t1 t2)) t1
+                (b/dbg (subtype? t2 t1)) t2
                 :else (do
                         #_(prn "failed to eliminate intersection" (make-Intersection [t1 t2]))
                         (make-Intersection [t1 t2])))]
@@ -476,7 +477,7 @@
            result :- (t/Seqable r/Type), []]
     (if (empty? work)
       result
-      (let [resolved (doall (map fully-resolve-type work))
+      (let [resolved (mapv fully-resolve-type work)
             {intersections true non-intersections false} (group-by r/Intersection? resolved)]
         (recur (doall (mapcat :types intersections))
                (doall (concat result non-intersections)))))))
@@ -505,9 +506,9 @@
   (p :type-ctors/In-ctor
     (let [res (let [ts (set (flatten-intersections types))]
                 (cond
-                  ; empty intersection is bottom
+                  ; empty intersection is Top
                   (or (empty? ts)
-                      (contains? ts bottom)) bottom
+                      (contains? ts bottom)) r/-any
 
                   (= 1 (count ts)) (first ts)
 
@@ -1370,6 +1371,16 @@
   (let [resolve-name* (t/var> clojure.core.typed.name-env/resolve-name*)]
     (resolve-name* (:id nme))))
 
+(t/ann fully-resolve-type-handle-resolve-error
+       (t/IFn [r/Type -> r/Type]))
+(defn fully-resolve-type-handle-resolve-error [t]
+  (binding [u/*fast-name-res-fail* true]
+    (try (fully-resolve-type t)
+         (catch Exception e
+           (if (identical? e u/name-res-exn)
+             t
+             (throw e))))))
+
 (t/ann fully-resolve-type 
        (t/IFn [r/Type -> r/Type]
            [r/Type (t/Set r/Type) -> r/Type]))
@@ -1591,19 +1602,20 @@
         (and (r/NotType? t1)
              (r/NotType? t2))
         ;FIXME what if both are Not's?
+        ; I think only (overlap (Not Any) (Not Any)) => false,
+        ; everything else is true?
+        ; (overlap (Not nil) (Not Object)) => true
         true
 
         ; eg. (overlap (Not Number) Integer) => false
         ;     (overlap (Not Integer) Number) => true
         ;     (overlap (Not y) x) => true
-        (r/NotType? t1)
-        (let [neg-type (fully-resolve-type (:type t1))]
-          (or (some (some-fn r/B? r/F?) [neg-type t2])
-              (not (overlap neg-type t2))))
-
-        (r/NotType? t2)
-        ;switch arguments to catch above case
-        (overlap t2 t1)
+        (or (r/NotType? t1)
+            (r/NotType? t2))
+        (let [[t1 t2] (if (r/NotType? t1) [t1 t2] [t2 t1])
+              neg-type (fully-resolve-type (:type t1))]
+          (and (subtype? neg-type t2)
+               (not (subtype? t2 neg-type))))
 
         ;if both are Classes, and at least one isn't an interface, then they must be subtypes to have overlap
         ;      (and (r/RClass? t1)
