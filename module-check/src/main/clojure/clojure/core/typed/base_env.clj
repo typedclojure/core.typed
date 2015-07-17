@@ -802,6 +802,11 @@ clojure.inspector/inspect [Any -> javax.swing.JFrame]
 clojure.inspector/inspect-tree [Any -> javax.swing.JFrame]
 clojure.inspector/inspect-table [(Vec Any) -> javax.swing.JFrame]
 
+clojure.pprint/cl-format [ (U Boolean nil) String -> Any]
+clojure.pprint/fresh-line [-> Any]
+clojure.pprint/get-pretty-writer [Any -> Any]
+clojure.pprint/pprint [Any -> Any]
+
 clojure.main/demunge [String -> String]
 clojure.main/repl-prompt [-> Any]
 clojure.main/repl [-> Any]
