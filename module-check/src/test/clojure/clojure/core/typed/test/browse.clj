@@ -5,7 +5,7 @@
              [clojure.core.typed.test.destructure]))
 
 (deftest browse-url-test
-  (is-tc-e   (browse-url "www.facebook.com" ) Boolean
+  (is-tc-e   #(browse-url "www.facebook.com" ) [-> Boolean]
              :requires [[clojure.java.browse :refer [browse-url]]])
   (is-tc-err   (browse-url "www.facebook.com" ) String
              :requires [[clojure.java.browse :refer [browse-url]]]))
