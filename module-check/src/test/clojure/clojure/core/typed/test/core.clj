@@ -1442,6 +1442,18 @@
     (both-subtype? (update (Un -nil (make-HMap :mandatory {(-val :foo) (RClass-of Number)}))
                            (-not-filter (Un -false -nil) 'id [(-kpe :foo)]))
                    (make-HMap :mandatory {(-val :foo) (RClass-of Number)})))
+  (is-clj 
+    (both-subtype? (update -nil
+                           (-not-filter -nil 'id [(-kpe :foo)]))
+                   -nothing))
+  (is-clj 
+    (both-subtype? (update -nil
+                           (-not-filter -false 'id [(-kpe :foo)]))
+                   -nil))
+  (is-clj 
+    (both-subtype? (update -nil
+                           (-not-filter (Un -false -nil) 'id [(-kpe :foo)]))
+                   -nothing))
   ; if (:foo a) is nil, either a has a :foo entry with nil, or no :foo entry
   (is-clj (both-subtype? (update (make-HMap)
                                  (-filter -nil 'id [(-kpe :foo)]))
@@ -5062,6 +5074,64 @@
                    "asdf"))))
     (is-tc-e (fn [m :- (Map Kw Str)] :- Str 
                (or (:foo m) "asdf")))))
+
+(defmacro negate-sub [s t]
+  `(In (parse-type '~s) 
+       (make-Not (parse-type '~t))))
+
+(deftest empty-intersection-test
+  (is-clj (= (parse-clj '(I))
+             (parse-clj 'Any)))
+  (is-tc-e (ann-form :a Any) (I)))
+
+(deftest not-test
+  (is-clj (overlap (parse-clj `(~'Not Int))
+                   (parse-clj `(~'Not Int))))
+  (is-clj (overlap (parse-clj `(~'Not Int))
+                   (parse-clj `(~'Not Num))))
+  (is-clj (overlap (parse-clj `(~'Not false))
+                   (parse-clj `(~'Not nil))))
+  (is-clj (overlap (parse-clj `Any)
+                   (parse-clj `(~'Not (U false nil)))))
+  (is-clj (overlap (parse-clj `Num)
+                   (parse-clj `(~'Not Int))))
+  (is-clj (not (overlap (parse-clj `Int)
+                        (parse-clj `(~'Not Num)))))
+  ; FIXME
+  ;(is-clj (not (overlap (parse-clj '(Not Any))
+  ;                      (parse-clj '(Not Any)))))
+  (is-clj (= (parse-clj `(~'Not Int))
+             (parse-clj `(~'Not (~'Not (~'Not Int))))))
+  (is-clj (= (parse-clj `(~'Not Int))
+             (parse-clj `(~'Not (~'Not (~'Not Int))))))
+  (is-clj (= (parse-clj `(I Any (~'Not (U nil false))))
+             (parse-clj `(~'Not (U nil false)))))
+  (is-clj (= (parse-clj `(I Int (~'Not Num)))
+             -nothing))
+  ;(is-clj (= (negate-sub Num Int)
+  ;           (parse-clj 'Int)))
+  (is-clj (both-subtype? (parse-clj `(I Num (~'Not Int)))
+                         (parse-clj `Num))))
+
+;(I Num (Not Int))
+;
+;(I Num (Not Int))
+;
+;(clj (unp (negate-sub (U nil Num) Int)))
+;(clj (unp (negate-sub Int Num)))
+;(clj (unp (negate-sub (U nil Int) Num)))
+;
+;(deftest negate-sub-test
+;  (is-clj (negate-sub (HMap :mandatory {:a Int})
+;                      (HMap :mandatory {:a Num}))))
+;
+;(clj (negate-sub Int Num))
+;(clj (negate-sub Num Int))
+;
+;(clj (unparse-type
+;       (In (parse-clj 'Num)
+;           (parse-clj '(Not Num)))))
+;
 
 ;    (is-tc-e 
 ;      (let [f (fn [{:keys [a] :as m} :- '{:a (U nil Num)}] :- '{:a Num} 
