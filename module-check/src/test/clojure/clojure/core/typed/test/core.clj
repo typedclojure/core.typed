@@ -5034,6 +5034,12 @@
                  ['{} -> Any :object {:id 0 :path [(Key :a) (Key :b)]}])
       )))
 
+(deftest filter-ctor-test
+  (is-clj (= -bot
+             (-filter -nothing 'a)))
+  (is-clj (= -bot
+             (-not-filter -any 'a))))
+
 (deftest ctyp-241-test
   (testing "don't update non-HMaps"
     (is-tc-err (fn [m :- (Map Kw Str)] :- Str 

@@ -23,8 +23,13 @@
          (fr/name-ref? i)
          ((some-fn nil? #(every? pr/PathElem? %)) p)]
    :post [(fr/Filter? %)]}
-  (if (or (= r/-any t) (and (symbol? i) (r/is-var-mutated? i)))
-    fr/-top
+  (cond 
+    ; is it harmful to delete this proposition?
+    ;(= r/-any t) fr/-top
+
+    (= r/-nothing t) fr/-bot
+
+    :else
     (fr/TypeFilter-maker t (seq p) i)))
 
 (defn -not-filter [t i & [p]]
@@ -32,8 +37,13 @@
          (fr/name-ref? i)
          ((some-fn nil? #(every? pr/PathElem? %)) p)]
    :post [(fr/Filter? %)]}
-  (if (or (= r/-any t) (and (symbol? i) (r/is-var-mutated? i)))
-    fr/-top
+  (cond 
+    (= r/-any t) fr/-bot
+
+    ; is it harmful to delete this proposition?
+    ;(= r/-nothing t) fr/-top
+
+    :else
     (fr/NotTypeFilter-maker t (seq p) i)))
 
 (defn -filter-at [t o]
@@ -330,6 +340,8 @@
     (fr/TopFilter? a) c
     ;; P -> tt = tt for any P
     (fr/TopFilter? c) fr/-top
+    ;; TODO if c is Bot, return is (opposite a)
+
     :else (fr/ImpFilter-maker a c)))
 
 
