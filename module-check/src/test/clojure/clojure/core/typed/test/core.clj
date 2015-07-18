@@ -292,17 +292,17 @@
   ;a => 0
   (is-clj 
     (= (tc-t 
-         (fn [a :- (U '{:op (Value :if)}
-                      '{:op (Value :var)})] 
-           (:op a)))
+           (fn [a :- (U '{:op (Value :if)}
+                        '{:op (Value :var)})] 
+             (:op a)))
        (clj
          (ret 
            (parse-type 
              `(IFn [(U '{:op (Value :var)} '{:op (Value :if)}) :-> (U ':var ':if) 
-                    :filters {:then (& (~'! (U nil false) 0 [(~'Key :op)])
-                                       (~'is (U ':if ':var) 0 [(~'Key :op)]))
-                              :else (~'| (~'is (HMap :absent-keys #{:op}) 0) 
-                                         (~'is (U nil false) 0 [(~'Key :op)]))} 
+                    :filters {:then (~'is '{:op (U ':if ':var)} 0)
+                              :else (~'is (U (HMap :absent-keys #{:op})
+                                             (HMap :mandatory {:op (U nil false)}))
+                                          0)}
                     :object {:path [(~'Key :op)], :id 0}]))
            (-FS -top -bot)
            -empty)))))
