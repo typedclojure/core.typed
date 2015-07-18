@@ -2002,16 +2002,17 @@
 
 ;CTYP-53
 (deftest hmap-cast-test
-  (is (both-subtype?
-        (ety
-          (fn
-            [m :- (HMap)]
-            (assert (:foo m))
-            m))
-        (parse-clj `['{} :-> '{:foo Any}
-                     :filters {:then ~'tt
-                               :else ~'ff}
-                     :object {:id 0}])))
+  (is-tc-e
+    (fn
+      [m :- (HMap)] :- (HMap :mandatory {:foo Any})
+      (print-env "foo")
+      (assert (print-filterset "blah" (:foo m)))
+      m)
+    :ret
+    (ret (parse-clj `['{} :-> '{:foo Any}
+                      :filters {:then ~'tt
+                                :else ~'ff}
+                      :object {:id 0}])))
   (is (both-subtype? 
         (ety
           (fn

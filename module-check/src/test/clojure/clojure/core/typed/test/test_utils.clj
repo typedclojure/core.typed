@@ -68,7 +68,8 @@
     :ret          Check the return TCResult of this expression against this ret. Evaluated
                   in the current namespace."
   [frm & opts]
-  (apply common-test/tc-e tc-common* frm opts))
+  `(clj 
+     ~(apply common-test/tc-e tc-common* frm opts)))
 
 (comment
   (tc-e 1)
