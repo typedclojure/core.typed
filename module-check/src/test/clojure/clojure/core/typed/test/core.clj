@@ -4961,6 +4961,90 @@
                  (zero? 0))
                true)))
 
+(deftest update-hmap-test
+  (is-tc-e (fn [m :- '{}]
+             (if (-> m :a :b)
+               (print-env "then")
+               (print-env "else"))))
+  (is-tc-e (fn [m :- '{}]
+             (-> m :a))
+           ['{} -> Any])
+  (testing "object is remembered if we're directly looking up HMaps or nil"
+    (is-tc-e (fn [m :- '{}]
+               (-> m :a))
+             ['{} -> Any :object {:id 0 :path [(Key :a)]}])
+    (is-tc-e (fn [m :- (U '{:a Int} '{})]
+               (-> m :a))
+             ['{} -> Any :object {:id 0 :path [(Key :a)]}])
+    (is-tc-e (do
+               (defalias M '{:a Int})
+               (fn [m :- (U nil M '{:a Num} '{})]
+                 (-> m :a)))
+             ['{} -> Any :object {:id 0 :path [(Key :a)]}])
+    (testing "intersections that contain a HMap remember the object"
+      (is-tc-e (fn [m :- (I '{:a Str} (Map Kw Str))] :- Str 
+                 (-> m :a))
+               [(I '{:a Str} (Map Kw Str)) -> Any :object {:id 0 :path [(Key :a)]}])))
+
+  ;; TODO remove this restriction
+  (testing "object is forgotten for plain immutable Map's" 
+    (is-tc-e (fn [m :- (Map Any Any)]
+               (-> m :a))
+             [(Map Any Any) -> Any])
+    (is-tc-err (fn [m :- (Map Any Any)]
+                 (-> m :a))
+               [(Map Any Any) -> Any :object {:id 0 :path [(Key :a)]}])
+    (is-tc-e (fn [m :- (Map Any Any)]
+               (-> m :a :b))
+             [(Map Any Any) -> Any])
+    (is-tc-err (fn [m :- (Map Any Any)]
+                 (-> m :a :b))
+               [(Map Any Any) -> Any :object {:id 0 :path [(Key :a) (Key :b)]}])
+
+    (testing "even nested immutable lookups where each level is immutable"
+      (is-tc-err (fn [m :- (Map Any (Map Any Any))]
+                   (-> m :a :b))
+                 [(Map Any Any) -> Any :object {:id 0 :path [(Key :a) (Key :b)]}])
+      (is-tc-err (fn [m :- (Map Any '{:b Any})]
+                   (-> m :a :b))
+                 [(Map Any Any) -> Any :object {:id 0 :path [(Key :a) (Key :b)]}])
+      (is-tc-err (fn [m :- (Map Any nil)]
+                   (-> m :a :b))
+                 [(Map Any Any) -> Any :object {:id 0 :path [(Key :a) (Key :b)]}])
+      (is-tc-err (fn [m :- (Map Any (Coll Any))]
+                   (-> m :a :b))
+                 [(Map Any Any) -> Any :object {:id 0 :path [(Key :a) (Key :b)]}])
+      ))
+  ;; TODO remove this restriction
+  (testing "forget object for keyword lookups on everything else"
+
+    (is-tc-e (fn [m :- Any]
+               (-> m :a))
+             [Any -> Any])
+    (is-tc-err (fn [m :- Any]
+                 (-> m :a))
+               [Any -> Any :object {:id 0 :path [(Key :a)]}])
+
+    (testing "nested lookup where inner lookup could be mutable"
+      (is-tc-e (fn [m :- '{}]
+                 (-> m :a :b))
+               ['{} -> Any])
+      (is-tc-err (fn [m :- '{}]
+                   (-> m :a :b))
+                 ['{} -> Any :object {:id 0 :path [(Key :a) (Key :b)]}])
+      )))
+
+(deftest ctyp-241-test
+  (testing "don't update non-HMaps"
+    (is-tc-err (fn [m :- (Map Kw Str)] :- Str 
+                 (if (:foo m) (:foo m) "asdf"))))
+  (testing "let-aliasing doesn't kick in for `e` because (:foo m) has no object"
+    (is-tc-e (fn [m :- (Map Kw Str)] :- Str 
+               (or (:foo m) "asdf")))
+    (is-tc-e (fn [m :- (Map Kw Str)] :- Str 
+               (let [e (:foo m)]
+                 (if e e "asdf"))))))
+
 ;    (is-tc-e 
 ;      (let [f (fn [{:keys [a] :as m} :- '{:a (U nil Num)}] :- '{:a Num} 
 ;                {:pre [(number? a)]} 

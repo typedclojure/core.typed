@@ -824,6 +824,11 @@
   :methods
   [p/TCType])
 
+(t/ann-many Type 
+            -logically-false -logically-true)
+(def -logically-false (Un -false -nil))
+(def -logically-true (NotType-maker -logically-false))
+
 (u/ann-record DifferenceType [type :- Type
                               without :- (t/SortedSet Type)])
 (u/def-type DifferenceType [type without]
