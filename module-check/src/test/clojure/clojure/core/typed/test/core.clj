@@ -4380,19 +4380,20 @@
 
 (deftest subtype-filter-test
   (testing "top and bot"
-    (is (sub/subtype-filter? -top -top))
-    (is (sub/subtype-filter? -bot -top))
-    (is (sub/subtype-filter? -bot -bot))
-    (is (not (sub/subtype-filter? -top -bot))))
-  (testing "this simplifies to top"
-    (is (= (-filter -any 'a) -top)))
+    (is-clj (sub/subtype-filter? -top -top))
+    (is-clj (sub/subtype-filter? -bot -top))
+    (is-clj (sub/subtype-filter? -bot -bot))
+    (is-clj (not (sub/subtype-filter? -top -bot))))
+  (testing "these simplify to top because they say nothing"
+    (is-clj (= (-filter -any 'a) -top))
+    (is-clj (= (-not-filter -nothing 'a) -top)))
   (testing "this doesn't simplify to top"
-    (is (not= (-filter -true 'a) -top)))
+    (is-clj (not= (-filter -true 'a) -top)))
   (testing "combine type-filter and top/bot"
-    (is (sub/subtype-filter? (-filter -true 'a) -top))
-    (is (sub/subtype-filter? -bot (-filter -true 'a)))
-    (is (not (sub/subtype-filter? -top (-filter -true 'a))))
-    (is (not (sub/subtype-filter? (-filter -true 'a) -bot))))
+    (is-clj (sub/subtype-filter? (-filter -true 'a) -top))
+    (is-clj (sub/subtype-filter? -bot (-filter -true 'a)))
+    (is-clj (not (sub/subtype-filter? -top (-filter -true 'a))))
+    (is-clj (not (sub/subtype-filter? (-filter -true 'a) -bot))))
   (testing "simple type-filters"
     (is-clj (sub/subtype-filter? (-filter -true 'a) (-filter -true 'a)))
     (testing "different types, that are subtypes"

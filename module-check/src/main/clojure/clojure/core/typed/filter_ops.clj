@@ -24,8 +24,7 @@
          ((some-fn nil? #(every? pr/PathElem? %)) p)]
    :post [(fr/Filter? %)]}
   (cond 
-    ; is it harmful to delete this proposition?
-    ;(= r/-any t) fr/-top
+    (= r/-any t) fr/-top
 
     (= r/-nothing t) fr/-bot
 
@@ -40,8 +39,7 @@
   (cond 
     (= r/-any t) fr/-bot
 
-    ; is it harmful to delete this proposition?
-    ;(= r/-nothing t) fr/-top
+    (= r/-nothing t) fr/-top
 
     :else
     (fr/NotTypeFilter-maker t (seq p) i)))
