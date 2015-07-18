@@ -144,17 +144,22 @@
       ; Just update t with the correct polarity.
 
       (empty? lo)
-      (c/restrict t ((if pos? identity r/make-Not) ft))
+      (c/restrict t ((if pos? identity c/Not) ft))
 
       ; unwrap unions and intersections to update their members
 
       (or (r/Union? t)
-          (r/Intersection? t)) 
+          (r/Intersection? t))
       (apply (if (r/Union? t) c/Un c/In)
              (map #(update* % ft pos? lo) (:types t)))
 
       (r/NotType? t)
-      (r/make-Not (update* (:type t) (r/make-Not ft) (not pos?) lo))
+      (let [t (c/Not (:type t))]
+        (if (r/NotType? t)
+          ;; polarity doesn't change because ft is also negated
+          (c/Not (update* (:type t) (c/Not ft) pos? lo))
+          ;; try again
+          (update* t ft pos? lo)))
 
       (or (r/Union? ft)
           (r/Intersection? ft))
@@ -162,7 +167,10 @@
              (map #(update* t % pos? lo) (:types ft)))
 
       (r/NotType? ft)
-      (update* t (:type ft) (not pos?) lo)
+      (let [ft (c/Not (:type ft))]
+        (if (r/NotType? ft)
+          (update* t (:type ft) (not pos?) lo)
+          (update* t ft pos? lo)))
 
       ;from here, t is fully resolved and is not a Union or Intersection
 
@@ -223,7 +231,7 @@
                 :complete? (c/complete-hmap? t))))))
 
       ; nil returns nil on keyword lookups
-      (and (not pos?)
+      (and (== (count lo) 1)
            (pe/KeyPE? (first lo))
            (r/Nil? t))
       (update* r/-nil ft pos? (next lo))

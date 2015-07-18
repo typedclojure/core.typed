@@ -506,8 +506,10 @@
     (let [res (let [ts (set (flatten-intersections types))]
                 (cond
                   ; empty intersection is Top
-                  (or (empty? ts)
-                      (contains? ts bottom)) r/-any
+                  (empty? ts) r/-any
+
+                  ; intersection containing Bottom is Bottom
+                  (contains? ts bottom) r/-nothing
 
                   (= 1 (count ts)) (first ts)
 
@@ -541,6 +543,16 @@
       #_(prn 'IN res (class res))
       res))
   )
+
+(defn Not [t]
+  {:pre [(r/Type? t)]
+   :post [(r/Type? %)]}
+  (let [t (fully-resolve-type t)]
+    (cond
+      (r/NotType? t) (:type t)
+      (r/Union? t) (apply In (map Not (:types t)))
+      (r/Intersection? t) (apply Un (map Not (:types t)))
+      :else (r/make-Not t))))
 
 (declare TypeFn* instantiate-poly instantiate-typefn abstract-many instantiate-many)
 

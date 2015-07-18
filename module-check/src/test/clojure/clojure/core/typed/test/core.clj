@@ -1442,6 +1442,18 @@
     (both-subtype? (update (Un -nil (make-HMap :mandatory {(-val :foo) (RClass-of Number)}))
                            (-not-filter (Un -false -nil) 'id [(-kpe :foo)]))
                    (make-HMap :mandatory {(-val :foo) (RClass-of Number)})))
+  (is-clj 
+    (both-subtype? (update -nil
+                           (-not-filter -nil 'id [(-kpe :foo)]))
+                   -nothing))
+  (is-clj 
+    (both-subtype? (update -nil
+                           (-not-filter -false 'id [(-kpe :foo)]))
+                   -nil))
+  (is-clj 
+    (both-subtype? (update -nil
+                           (-not-filter (Un -false -nil) 'id [(-kpe :foo)]))
+                   -nothing))
   ; if (:foo a) is nil, either a has a :foo entry with nil, or no :foo entry
   (is-clj (both-subtype? (update (make-HMap)
                                  (-filter -nil 'id [(-kpe :foo)]))

@@ -10,63 +10,72 @@
             [clojure.test :refer :all]))
 
 ;; When Difference is ready, uncomment tests at the bottom
+(deftest not-constructor-tests
+  (is-clj (= (restrict -nil (Not -false))
+             -nil))
+  (is-clj (= (restrict -nil (Not -nil))
+             -nothing))
+  (is-clj (= (In -nil -nothing)
+             -nothing))
+  (is-clj (= (Not (Un -nil -false))
+             (In (Not -nil) (Not -false)))))
 
 (deftest not-type-subtype
-  (is-clj (not (subtype? (make-Not -nil) -nil)))
-  (is-clj (subtype? (make-Not -nil) (make-Not -nil)))
-  (is-clj (not (subtype? (make-Not -nil) (make-Not -false))))
-  (is-clj (subtype? (make-Not (Un -false -nil)) (make-Not -false))))
+  (is-clj (not (subtype? (Not -nil) -nil)))
+  (is-clj (subtype? (Not -nil) (Not -nil)))
+  (is-clj (not (subtype? (Not -nil) (Not -false))))
+  (is-clj (subtype? (Not (Un -false -nil)) (Not -false))))
 
 (deftest Not-combine-test
-  (is-clj (= (In -nil (make-Not -nil))
+  (is-clj (= (In -nil (Not -nil))
              (Un)))
   (is-clj (clj
-            (= (In (RClass-of Integer) (make-Not (RClass-of Number)))
+            (= (In (RClass-of Integer) (Not (RClass-of Number)))
                (Un))))
 
-  (is-clj (not (overlap (RClass-of Integer) (make-Not (RClass-of Number)))))
-  (is-clj (overlap (RClass-of Number) (make-Not -nil)))
+  (is-clj (not (overlap (RClass-of Integer) (Not (RClass-of Number)))))
+  (is-clj (overlap (RClass-of Number) (Not -nil)))
 
-  (is-clj (overlap (make-Not (RClass-of Number))
-                   (make-Not (RClass-of Integer))))
+  (is-clj (overlap (Not (RClass-of Number))
+                   (Not (RClass-of Integer))))
 
-  (is-clj (not (overlap (make-Not (RClass-of Number)) 
+  (is-clj (not (overlap (Not (RClass-of Number)) 
                         (RClass-of Integer))))
 
-  (is-clj (= (In (RClass-of Number) (make-Not -nil))
+  (is-clj (= (In (RClass-of Number) (Not -nil))
              (RClass-of Number)))
 
   (is-clj (= (In (Un (RClass-of Number) -nil) -nil)
              -nil))
-  (is-clj (= (In (Un (RClass-of Number) -nil) (make-Not -nil))
+  (is-clj (= (In (Un (RClass-of Number) -nil) (Not -nil))
              (RClass-of Number)))
-  (is-clj (= (In (RClass-of Number) (make-Not -nil))
+  (is-clj (= (In (RClass-of Number) (Not -nil))
              (RClass-of Number)))
 
-  (is-clj (clj (= (In (Un -nil (RClass-of Number)) (make-Not (Un -false -nil)))
+  (is-clj (clj (= (In (Un -nil (RClass-of Number)) (Not (Un -false -nil)))
                   (RClass-of Number))))
 
-  (is-clj (overlap (Un -nil (RClass-of Number)) (make-Not (Un -false -nil))))
+  (is-clj (overlap (Un -nil (RClass-of Number)) (Not (Un -false -nil))))
 
-  (is-clj (= (In (Un -nil (RClass-of Number)) (make-Not -nil))
+  (is-clj (= (In (Un -nil (RClass-of Number)) (Not -nil))
              (RClass-of Number)))
-  (is-clj (= (Un (In -nil (make-Not -nil))
-                 (In (RClass-of Number) (make-Not -nil)))
+  (is-clj (= (Un (In -nil (Not -nil))
+                 (In (RClass-of Number) (Not -nil)))
              (RClass-of Number)))
 
-  (is-clj (= (In (make-Not (RClass-of Number))
-                 (make-Not (RClass-of Integer)))
-             (make-Not (RClass-of Number))))
+  (is-clj (= (In (Not (RClass-of Number))
+                 (Not (RClass-of Integer)))
+             (Not (RClass-of Number))))
 
-  (is-clj (subtype? (RClass-of Number) (make-Not -nil)))
-  (is-clj (subtype? (RClass-of Number) (make-Not (RClass-of Integer))))
-  (is-clj (not (subtype? (RClass-of Integer) (make-Not (RClass-of Number)))))
-  (is-clj (not (subtype? (make-Not -nil) (RClass-of Number))))
+  (is-clj (subtype? (RClass-of Number) (Not -nil)))
+  (is-clj (subtype? (RClass-of Number) (Not (RClass-of Integer))))
+  (is-clj (not (subtype? (RClass-of Integer) (Not (RClass-of Number)))))
+  (is-clj (not (subtype? (Not -nil) (RClass-of Number))))
 
-  (is-clj (overlap (make-F 'x) (make-Not (make-F 'y))))
+  (is-clj (overlap (make-F 'x) (Not (make-F 'y))))
   (is-clj (overlap (make-F 'x) (make-F 'y)))
-  (is-clj (overlap (make-Not (make-F 'x)) (make-F 'y)))
-  (is-clj (overlap (make-Not (make-F 'x)) (make-Not (make-F 'y))))
+  (is-clj (overlap (Not (make-F 'x)) (make-F 'y)))
+  (is-clj (overlap (Not (make-F 'x)) (Not (make-F 'y))))
 
   (is-clj (= (In (Un (RClass-of Number) -nil) -nil)
              -nil))
@@ -80,32 +89,32 @@
 
   (is-clj (= (let [i (subst-all {'x (->t-subst (Un (RClass-of Number) -nil) no-bounds) 
                                  'y (->t-subst -nil no-bounds)} 
-                                (In (make-F 'x) (make-Not (make-F 'y))))
+                                (In (make-F 'x) (Not (make-F 'y))))
                    _ (assert (Intersection? i) (pr-str i))]
                (apply In (:types i)))
              (RClass-of Number)))
 
   (is-clj (overlap (make-F 'x)
-                   (make-Not (make-F 'y))))
+                   (Not (make-F 'y))))
   (is-clj (overlap (B-maker 0)
-                   (make-Not (B-maker 1))))
+                   (Not (B-maker 1))))
   (is-clj (not (subtype? (B-maker 0)
-                         (make-Not (B-maker 1)))))
+                         (Not (B-maker 1)))))
   (is-clj (not= (In (make-F 'x)
-                    (make-Not (make-F 'y)))
+                    (Not (make-F 'y)))
                 (Un))))
 
 ;(deftest difference-type-subtype
 ;  (is-clj (not (sub? (Difference Any nil) nil)))
 ;  (is-clj (sub? (Difference Any nil) (Difference Any nil)))
-;  (is-clj (overlap -any (make-Not -nil)))
+;  (is-clj (overlap -any (Not -nil)))
 ;  (is-clj (not (sub? (Difference Any nil) (Difference Any false))))
 ;  (is-clj (sub? (Difference Any (U false nil)) (Difference Any false)))
 ;  (is-clj (sub? (Difference Any false nil) (Difference Any false)))
 ;  (is-clj (sub? (Difference (U Long Float) Float) Long)))
 ;
 ;(deftest Difference-combine-test
-;  (is-clj (= (-difference -nil (make-Not -nil))
+;  (is-clj (= (-difference -nil (Not -nil))
 ;             (Un)))
 ;  (is-clj (clj
 ;            (= (-difference (RClass-of Integer) (RClass-of Number))
