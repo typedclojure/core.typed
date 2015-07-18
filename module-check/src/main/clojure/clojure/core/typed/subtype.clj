@@ -1068,7 +1068,7 @@
          (subtype? (:type s) (:type t)))))
 
 (defn simplify-not-type-filter [f]
-  {:pre [(fr/NotTypeFilter? f)]}
+  {:pre [(fr/TypeFilter? f)]}
   (let [[fpth & rstpth] (:path f)]
     (cond 
       (empty? (:path f)) 
@@ -1085,8 +1085,8 @@
       :else f)))
 
 (defn subtype-not-type-filter? [s t]
-  {:pre [(fr/NotTypeFilter? s)
-         (fr/NotTypeFilter? t)]}
+  {:pre [(fr/TypeFilter? s)
+         (fr/TypeFilter? t)]}
   (let [s (simplify-not-type-filter s)
         t (simplify-not-type-filter t)]
     (and (fr/equal-paths? s t)

@@ -31,8 +31,9 @@
   (is-clj 
     (let [pf (-filter (parse-type `t/NonEmptyCount) 0)
           nf (-not-filter (parse-type nil) 0)]
-      (= (-and pf nf)
-         (make-AndFilter pf nf))))
+      (= (-and (-filter (parse-type `t/NonEmptyCount) 0)
+               (-not-filter (parse-type nil) 0))
+         (-filter (parse-type `t/NonEmptyCount) 0))))
   (is-clj
     (subtype-type-filter? (-and (-filter (parse-type `(t/U nil (t/NonEmptyVec t/Num))) 0)
                                 (-filter (parse-type `(t/U nil t/EmptyCount)) 0))
