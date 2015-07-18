@@ -239,8 +239,7 @@
                 :complete? (c/complete-hmap? t))))))
 
       ; nil returns nil on keyword lookups
-      (and (not pos?)
-           (pe/KeyPE? (first lo))
+      (and (pe/KeyPE? (first lo))
            (r/Nil? t))
       (update* r/-nil ft pos? (next lo))
 
