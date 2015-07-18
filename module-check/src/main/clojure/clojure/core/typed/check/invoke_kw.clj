@@ -12,34 +12,24 @@
             [clojure.core.typed.filter-ops :as fo]
             [clojure.core.typed.object-rep :as obj]
             [clojure.core.typed.parse-unparse :as prs]
+            [clojure.core.typed.debug :as b]
             [clojure.core.typed.errors :as err]))
 
-(defn HMaps-or-nil? [t]
+; also copied to clojure.core.typed.update
+(defn immutable-lookup? [t]
   {:pre [(r/Type? t)]
    :post [(con/boolean? %)]}
-  (let [t (c/fully-resolve-type t)]
-    (cond
-      (or (r/HeterogeneousMap? t)
-          (r/Nil? t))
-      true
-
-      (r/Union? t) (every? HMaps-or-nil? (:types t))
-      (r/Intersection? t) (boolean (some HMaps-or-nil? (:types t)))
-      :else false)))
-
+  (sub/subtype? t (c/Un (c/RClass-of clojure.lang.IPersistentMap [r/-any r/-any]) r/-nil)))
 
 ;[(U nil Expr) TCResult TCResult (Option TCResult) (Option TCResult) -> TCResult]
 (defn invoke-keyword 
   "Return the type looking up kw-ret in target-ret, with default default-ret
   and expected result expected-ret.
   
-  Only attach accurate object and propositions if target-ret is a union of HMap's
-  or nil. Once we understand how to deal with objects that don't necessarily hold
+  Only attach accurate object and propositions if target-ret is a nilable 
+  immutable map. Once we understand how to deal with objects that don't necessarily hold
   in the lexical environment, we can relax this restriction and remember paths
-  to possibly-mutable things that are updated to immutable.
-
-  Theoretically, we can relax this a little if target-ret is provably immutable
-  (ie. is a subtype of Coll or perhaps Map). This is NYI."
+  to possibly-mutable things that are updated to immutable."
   [expr kw-ret target-ret default-ret expected-ret]
   {:pre [(r/TCResult? kw-ret)
          (r/TCResult? target-ret)
@@ -58,7 +48,7 @@
       (c/keyword-value? kwt)
       (let [{path-hm :path id-hm :id :as o} (when (obj/Path? (r/ret-o target-ret))
                                               (r/ret-o target-ret))
-            known-lookup? (HMaps-or-nil? targett)
+            add-prop-and-obj? (immutable-lookup? targett)
             o (or o (r/ret-o target-ret))
             _ (assert ((some-fn obj/Path? obj/EmptyObject?) o))
             this-pelem (pe/-kpe (:val kwt))
@@ -69,11 +59,10 @@
             (if (not= (c/Un) val-type)
               (r/ret val-type
                      (if (and ;; we don't want to generate HMap types for HVecs and other non-persistent-map things
-                              known-lookup?
+                              add-prop-and-obj?
                               (obj/Path? o)
                               ;; only handle nil defaults
-                              (= r/-nil defaultt)
-                              )
+                              (= r/-nil defaultt))
                        (fo/-FS ;; if val-type is false, this will simplify to ff
                                (fo/-filter-at
                                  (c/make-HMap :mandatory {kwt (c/In val-type r/-logically-true)})
@@ -83,7 +72,7 @@
                                        (c/make-HMap :mandatory {kwt r/-logically-false})) ; this map has a false kwt key
                                  o))
                        (fo/-FS fl/-top fl/-top))
-                     (if (and known-lookup? (obj/Path? o) (= r/-nil defaultt))
+                     (if (and add-prop-and-obj? (obj/Path? o) (= r/-nil defaultt))
                        (update-in o [:path] #(seq (concat % [this-pelem])))
                        obj/-empty))
               (do (u/tc-warning (str "Keyword lookup gave bottom type: "

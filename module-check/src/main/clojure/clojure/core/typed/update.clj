@@ -123,6 +123,30 @@
                                 [derived-props derived-atoms])
             :else (recur (cons p derived-props) derived-atoms (next worklist))))))))
 
+(defn solve-for-variable 
+  "Returns the type of variable x such that s <: t."
+  [s t x]
+  {:pre [(r/Type? s)
+         (r/Type? t)
+         (symbol? x)]
+   :post [((some-fn nil? r/Type?) %)]}
+  (let [subst (free-ops/with-bounded-frees {(r/make-F x) r/no-bounds}
+                (u/handle-cs-gen-failure
+                  (cgen/infer {x r/no-bounds} {} 
+                              [s]
+                              [t]
+                              r/-any)))
+        element-t-subst (get subst x)
+        _ (assert ((some-fn crep/t-subst? nil?) element-t-subst))
+        element-t (:type element-t-subst)]
+    element-t))
+
+; also copied to clojure.core.typed.check.invoke-kw
+(defn immutable-lookup? [t]
+  {:pre [(r/Type? t)]
+   :post [(con/boolean? %)]}
+  (sub/subtype? t (c/Un (c/RClass-of clojure.lang.IPersistentMap [r/-any r/-any]) r/-nil)))
+
 ; This is where filters are applied to existing types to generate more specific ones.
 ; t is the old type
 ; ft is the new type to update with
@@ -306,13 +330,25 @@
           :else t))
 
       ; keyword invoke of non-hmaps
-      ; (let [a (ann-form {} (Map Any Any))]
-      ;   (number? (-> a :a :b)))
+      ; (let [a :- (Map Any Any) {}]
+      ;   (number? (-> a :a)))
       ; 
       ; I don't think there's anything interesting worth encoding:
       ; use HMap for accurate updating.
-      (pe/KeyPE? (first lo))
-      t
+      (and (pe/KeyPE? (first lo))
+           (immutable-lookup? t))
+      (let [x (gensym)
+            value-t (solve-for-variable
+                      t
+                      (c/Un (c/RClass-of clojure.lang.IPersistentMap [r/-any (r/make-F x)]) r/-nil)
+                      x)
+            _ (when-not value-t
+                (err/int-error (str "Cannot resolve Map value type in update" value-t)))
+            [fkeype & rstpth] lo
+            kt (cu/KeyPE->Type fkeype)]
+        (c/In t
+              (c/Un (c/make-HMap :mandatory {kt (update* value-t ft pos? rstpth)})
+                    (update* (c/make-HMap :absent-keys #{kt}) ft pos? lo))))
 
       ; calls to `keys` and `vals`
       ((some-fn pe/KeysPE? pe/ValsPE?) (first lo))
@@ -322,22 +358,14 @@
 
             ; solve for x:  t <: (Seqable x)
             x (gensym)
-            subst (free-ops/with-bounded-frees {(r/make-F x) r/no-bounds}
-                    (u/handle-cs-gen-failure
-                      (cgen/infer {x r/no-bounds} {} 
-                                  [u]
-                                  [(c/RClass-of clojure.lang.Seqable [(r/make-F x)])]
-                                  r/-any)))
-            ;_ (prn "subst for Keys/Vals" subst)
-            _ (when-not subst
+            element-t (solve-for-variable
+                        u
+                        (c/RClass-of clojure.lang.Seqable [(r/make-F x)])
+                        x)
+            _ (when-not element-t
                 (err/int-error (str "Cannot update " (if (pe/KeysPE? fstpth) "keys" "vals") " of an "
                                     "IPersistentMap with type: " (pr-str (prs/unparse-type u)))))
-            element-t-subst (get subst x)
-            _ (assert (crep/t-subst? element-t-subst))
-            ; the updated 'keys/vals' type
-            element-t (:type element-t-subst)
-            ;_ (prn "element-t" (prs/unparse-type element-t))
-            _ (assert element-t)]
+            _ (assert (r/Type? element-t))]
         ;; FIXME this is easy to implement, just recur update* on rstpth instead of nil.
         ;; should also add a test.
         (assert (empty? rstpth) (str "Further path NYI keys/vals"))

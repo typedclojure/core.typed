@@ -4986,35 +4986,37 @@
                  (-> m :a))
                [(I '{:a Str} (Map Kw Str)) -> Any :object {:id 0 :path [(Key :a)]}])))
 
-  ;; TODO remove this restriction
-  (testing "object is forgotten for plain immutable Map's" 
+  (testing "object is remembered for plain nilable immutable Map's" 
     (is-tc-e (fn [m :- (Map Any Any)]
-               (-> m :a))
-             [(Map Any Any) -> Any])
-    (is-tc-err (fn [m :- (Map Any Any)]
                  (-> m :a))
                [(Map Any Any) -> Any :object {:id 0 :path [(Key :a)]}])
+    (is-tc-e (fn [m :- (U nil (Map Any Any))]
+               (-> m :a))
+             [(U nil (Map Any Any)) -> Any :object {:id 0 :path [(Key :a)]}])
+
     (is-tc-e (fn [m :- (Map Any Any)]
                (-> m :a :b))
-             [(Map Any Any) -> Any])
+             [(Map Any Any) -> Any]))
+
+  (testing "object is forgotten for nested lookups where some are possible mutable"
     (is-tc-err (fn [m :- (Map Any Any)]
                  (-> m :a :b))
-               [(Map Any Any) -> Any :object {:id 0 :path [(Key :a) (Key :b)]}])
+               [(Map Any Any) -> Any :object {:id 0 :path [(Key :a) (Key :b)]}]))
 
-    (testing "even nested immutable lookups where each level is immutable"
-      (is-tc-err (fn [m :- (Map Any (Map Any Any))]
-                   (-> m :a :b))
-                 [(Map Any Any) -> Any :object {:id 0 :path [(Key :a) (Key :b)]}])
-      (is-tc-err (fn [m :- (Map Any '{:b Any})]
-                   (-> m :a :b))
-                 [(Map Any Any) -> Any :object {:id 0 :path [(Key :a) (Key :b)]}])
-      (is-tc-err (fn [m :- (Map Any nil)]
-                   (-> m :a :b))
-                 [(Map Any Any) -> Any :object {:id 0 :path [(Key :a) (Key :b)]}])
-      (is-tc-err (fn [m :- (Map Any (Coll Any))]
-                   (-> m :a :b))
-                 [(Map Any Any) -> Any :object {:id 0 :path [(Key :a) (Key :b)]}])
-      ))
+  (testing "even nested immutable lookups where each level is immutable"
+    (is-tc-err (fn [m :- (Map Any (Map Any Any))]
+                 (-> m :a :b))
+               [(Map Any Any) -> Any :object {:id 0 :path [(Key :a) (Key :b)]}])
+    (is-tc-err (fn [m :- (Map Any '{:b Any})]
+                 (-> m :a :b))
+               [(Map Any Any) -> Any :object {:id 0 :path [(Key :a) (Key :b)]}])
+    (is-tc-err (fn [m :- (Map Any nil)]
+                 (-> m :a :b))
+               [(Map Any Any) -> Any :object {:id 0 :path [(Key :a) (Key :b)]}])
+    (is-tc-err (fn [m :- (Map Any (Coll Any))]
+                 (-> m :a :b))
+               [(Map Any Any) -> Any :object {:id 0 :path [(Key :a) (Key :b)]}])
+    )
   ;; TODO remove this restriction
   (testing "forget object for keyword lookups on everything else"
 
@@ -5041,15 +5043,23 @@
              (-not-filter -any 'a))))
 
 (deftest ctyp-241-test
-  (testing "don't update non-HMaps"
-    (is-tc-err (fn [m :- (Map Kw Str)] :- Str 
-                 (if (:foo m) (:foo m) "asdf"))))
-  (testing "let-aliasing doesn't kick in for `e` because (:foo m) has no object"
+  (testing "update plain Maps"
     (is-tc-e (fn [m :- (Map Kw Str)] :- Str 
-               (or (:foo m) "asdf")))
-    (is-tc-e (fn [m :- (Map Kw Str)] :- Str 
+               (if (:foo m) (:foo m) "asdf"))))
+  (is-clj 
+    (both-subtype? (update (parse-clj `(Map Kw Str)) (-not-filter (parse-clj `(U nil false)) 'a [(-kpe :foo)]))
+                   (parse-clj `(I '{:foo Str}
+                                  (Map Kw Str)))))
+  (testing
+    (is-tc-e (fn [m :- (Map Kw Str)] :- Str
                (let [e (:foo m)]
-                 (if e e "asdf"))))))
+                 (if e 
+                   (do 
+                     (print-env "foo")
+                     e )
+                   "asdf"))))
+    (is-tc-e (fn [m :- (Map Kw Str)] :- Str 
+               (or (:foo m) "asdf")))))
 
 ;    (is-tc-e 
 ;      (let [f (fn [{:keys [a] :as m} :- '{:a (U nil Num)}] :- '{:a Num} 
