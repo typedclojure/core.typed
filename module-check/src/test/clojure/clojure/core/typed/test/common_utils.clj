@@ -45,7 +45,13 @@
              (throw ex#))
            (when (empty? delayed-errors#)
              ~(when has-ret?
-                `(assert (= ~actual-ret ~(:ret opts))))
+                `(let [ret# ~(:ret opts)]
+                   (assert (= ~actual-ret ret#)
+                           (str "Provided ret does not match actual ret\n"
+                                "Provided\n"
+                                (pr-str ret#)
+                                "\nActual\n"
+                                (pr-str ~actual-ret)))))
              ~actual-ret)
            (err/print-errors! delayed-errors#)))))
 

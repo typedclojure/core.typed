@@ -30,9 +30,9 @@
         _ (assert (fr/name-ref? alias-id))
         t (path-type/path-type (var-env/type-of alias-id) alias-path)]
     (r/ret t 
-           (if (c/overlap t (c/Un r/-nil r/-false))
-             (fo/-FS (fo/-not-filter-at (c/Un r/-nil r/-false) obj)
-                     (fo/-filter-at (c/Un r/-nil r/-false) obj))
+           (if (c/overlap t r/-logically-false)
+             (fo/-FS (fo/-not-filter-at r/-logically-false obj)
+                     (fo/-filter-at r/-logically-false obj))
              (fo/-true-filter))
            obj)))
 

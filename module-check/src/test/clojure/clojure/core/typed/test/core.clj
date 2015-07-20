@@ -292,17 +292,17 @@
   ;a => 0
   (is-clj 
     (= (tc-t 
-         (fn [a :- (U '{:op (Value :if)}
-                      '{:op (Value :var)})] 
-           (:op a)))
+           (fn [a :- (U '{:op (Value :if)}
+                        '{:op (Value :var)})] 
+             (:op a)))
        (clj
          (ret 
            (parse-type 
              `(IFn [(U '{:op (Value :var)} '{:op (Value :if)}) :-> (U ':var ':if) 
-                    :filters {:then (& (~'! (U nil false) 0 [(~'Key :op)])
-                                       (~'is (U ':if ':var) 0 [(~'Key :op)]))
-                              :else (~'| (~'is (HMap :absent-keys #{:op}) 0) 
-                                         (~'is (U nil false) 0 [(~'Key :op)]))} 
+                    :filters {:then (~'is '{:op (U ':if ':var)} 0)
+                              :else (~'is (U (HMap :absent-keys #{:op})
+                                             (HMap :mandatory {:op (U nil false)}))
+                                          0)}
                     :object {:path [(~'Key :op)], :id 0}]))
            (-FS -top -bot)
            -empty)))))
@@ -1442,6 +1442,18 @@
     (both-subtype? (update (Un -nil (make-HMap :mandatory {(-val :foo) (RClass-of Number)}))
                            (-not-filter (Un -false -nil) 'id [(-kpe :foo)]))
                    (make-HMap :mandatory {(-val :foo) (RClass-of Number)})))
+  (is-clj 
+    (both-subtype? (update -nil
+                           (-not-filter -nil 'id [(-kpe :foo)]))
+                   -nothing))
+  (is-clj 
+    (both-subtype? (update -nil
+                           (-not-filter -false 'id [(-kpe :foo)]))
+                   -nil))
+  (is-clj 
+    (both-subtype? (update -nil
+                           (-not-filter (Un -false -nil) 'id [(-kpe :foo)]))
+                   -nothing))
   ; if (:foo a) is nil, either a has a :foo entry with nil, or no :foo entry
   (is-clj (both-subtype? (update (make-HMap)
                                  (-filter -nil 'id [(-kpe :foo)]))
@@ -2002,16 +2014,17 @@
 
 ;CTYP-53
 (deftest hmap-cast-test
-  (is (both-subtype?
-        (ety
-          (fn
-            [m :- (HMap)]
-            (assert (:foo m))
-            m))
-        (parse-clj `['{} :-> '{:foo Any}
-                     :filters {:then ~'tt
-                               :else ~'ff}
-                     :object {:id 0}])))
+  (is-tc-e
+    (fn
+      [m :- (HMap)] :- (HMap :mandatory {:foo Any})
+      (print-env "foo")
+      (assert (print-filterset "blah" (:foo m)))
+      m)
+    :ret
+    (ret (parse-clj `['{} :-> '{:foo Any}
+                      :filters {:then ~'tt
+                                :else ~'ff}
+                      :object {:id 0}])))
   (is (both-subtype? 
         (ety
           (fn
@@ -4380,19 +4393,20 @@
 
 (deftest subtype-filter-test
   (testing "top and bot"
-    (is (sub/subtype-filter? -top -top))
-    (is (sub/subtype-filter? -bot -top))
-    (is (sub/subtype-filter? -bot -bot))
-    (is (not (sub/subtype-filter? -top -bot))))
-  (testing "this simplifies to top"
-    (is (= (-filter -any 'a) -top)))
+    (is-clj (sub/subtype-filter? -top -top))
+    (is-clj (sub/subtype-filter? -bot -top))
+    (is-clj (sub/subtype-filter? -bot -bot))
+    (is-clj (not (sub/subtype-filter? -top -bot))))
+  (testing "these simplify to top because they say nothing"
+    (is-clj (= (-filter -any 'a) -top))
+    (is-clj (= (-not-filter -nothing 'a) -top)))
   (testing "this doesn't simplify to top"
-    (is (not= (-filter -true 'a) -top)))
+    (is-clj (not= (-filter -true 'a) -top)))
   (testing "combine type-filter and top/bot"
-    (is (sub/subtype-filter? (-filter -true 'a) -top))
-    (is (sub/subtype-filter? -bot (-filter -true 'a)))
-    (is (not (sub/subtype-filter? -top (-filter -true 'a))))
-    (is (not (sub/subtype-filter? (-filter -true 'a) -bot))))
+    (is-clj (sub/subtype-filter? (-filter -true 'a) -top))
+    (is-clj (sub/subtype-filter? -bot (-filter -true 'a)))
+    (is-clj (not (sub/subtype-filter? -top (-filter -true 'a))))
+    (is-clj (not (sub/subtype-filter? (-filter -true 'a) -bot))))
   (testing "simple type-filters"
     (is-clj (sub/subtype-filter? (-filter -true 'a) (-filter -true 'a)))
     (testing "different types, that are subtypes"
@@ -4960,6 +4974,164 @@
                (tc-e
                  (zero? 0))
                true)))
+
+(deftest update-hmap-test
+  (is-tc-e (fn [m :- '{}]
+             (if (-> m :a :b)
+               (print-env "then")
+               (print-env "else"))))
+  (is-tc-e (fn [m :- '{}]
+             (-> m :a))
+           ['{} -> Any])
+  (testing "object is remembered if we're directly looking up HMaps or nil"
+    (is-tc-e (fn [m :- '{}]
+               (-> m :a))
+             ['{} -> Any :object {:id 0 :path [(Key :a)]}])
+    (is-tc-e (fn [m :- (U '{:a Int} '{})]
+               (-> m :a))
+             ['{} -> Any :object {:id 0 :path [(Key :a)]}])
+    (is-tc-e (do
+               (defalias M '{:a Int})
+               (fn [m :- (U nil M '{:a Num} '{})]
+                 (-> m :a)))
+             ['{} -> Any :object {:id 0 :path [(Key :a)]}])
+    (testing "intersections that contain a HMap remember the object"
+      (is-tc-e (fn [m :- (I '{:a Str} (Map Kw Str))] :- Str 
+                 (-> m :a))
+               [(I '{:a Str} (Map Kw Str)) -> Any :object {:id 0 :path [(Key :a)]}])))
+
+  (testing "object is remembered for plain nilable immutable Map's" 
+    (is-tc-e (fn [m :- (Map Any Any)]
+                 (-> m :a))
+               [(Map Any Any) -> Any :object {:id 0 :path [(Key :a)]}])
+    (is-tc-e (fn [m :- (U nil (Map Any Any))]
+               (-> m :a))
+             [(U nil (Map Any Any)) -> Any :object {:id 0 :path [(Key :a)]}])
+
+    (is-tc-e (fn [m :- (Map Any Any)]
+               (-> m :a :b))
+             [(Map Any Any) -> Any]))
+
+  (testing "object is forgotten for nested lookups where some are possible mutable"
+    (is-tc-err (fn [m :- (Map Any Any)]
+                 (-> m :a :b))
+               [(Map Any Any) -> Any :object {:id 0 :path [(Key :a) (Key :b)]}]))
+
+  (testing "even nested immutable lookups where each level is immutable"
+    (is-tc-err (fn [m :- (Map Any (Map Any Any))]
+                 (-> m :a :b))
+               [(Map Any Any) -> Any :object {:id 0 :path [(Key :a) (Key :b)]}])
+    (is-tc-err (fn [m :- (Map Any '{:b Any})]
+                 (-> m :a :b))
+               [(Map Any Any) -> Any :object {:id 0 :path [(Key :a) (Key :b)]}])
+    (is-tc-err (fn [m :- (Map Any nil)]
+                 (-> m :a :b))
+               [(Map Any Any) -> Any :object {:id 0 :path [(Key :a) (Key :b)]}])
+    (is-tc-err (fn [m :- (Map Any (Coll Any))]
+                 (-> m :a :b))
+               [(Map Any Any) -> Any :object {:id 0 :path [(Key :a) (Key :b)]}])
+    )
+  ;; TODO remove this restriction
+  (testing "forget object for keyword lookups on everything else"
+
+    (is-tc-e (fn [m :- Any]
+               (-> m :a))
+             [Any -> Any])
+    (is-tc-err (fn [m :- Any]
+                 (-> m :a))
+               [Any -> Any :object {:id 0 :path [(Key :a)]}])
+
+    (testing "nested lookup where inner lookup could be mutable"
+      (is-tc-e (fn [m :- '{}]
+                 (-> m :a :b))
+               ['{} -> Any])
+      (is-tc-err (fn [m :- '{}]
+                   (-> m :a :b))
+                 ['{} -> Any :object {:id 0 :path [(Key :a) (Key :b)]}])
+      )))
+
+(deftest filter-ctor-test
+  (is-clj (= -bot
+             (-filter -nothing 'a)))
+  (is-clj (= -bot
+             (-not-filter -any 'a))))
+
+(deftest ctyp-241-test
+  (testing "update plain Maps"
+    (is-tc-e (fn [m :- (Map Kw Str)] :- Str 
+               (if (:foo m) (:foo m) "asdf"))))
+  (is-clj 
+    (both-subtype? (update (parse-clj `(Map Kw Str)) (-not-filter (parse-clj `(U nil false)) 'a [(-kpe :foo)]))
+                   (parse-clj `(I '{:foo Str}
+                                  (Map Kw Str)))))
+  (testing
+    (is-tc-e (fn [m :- (Map Kw Str)] :- Str
+               (let [e (:foo m)]
+                 (if e 
+                   (do 
+                     (print-env "foo")
+                     e )
+                   "asdf"))))
+    (is-tc-e (fn [m :- (Map Kw Str)] :- Str 
+               (or (:foo m) "asdf")))))
+
+(defmacro negate-sub [s t]
+  `(In (parse-type '~s) 
+       (make-Not (parse-type '~t))))
+
+(deftest empty-intersection-test
+  (is-clj (= (parse-clj '(I))
+             (parse-clj 'Any)))
+  (is-tc-e (ann-form :a Any) (I)))
+
+(deftest not-test
+  (is-clj (overlap (parse-clj `(~'Not Int))
+                   (parse-clj `(~'Not Int))))
+  (is-clj (overlap (parse-clj `(~'Not Int))
+                   (parse-clj `(~'Not Num))))
+  (is-clj (overlap (parse-clj `(~'Not false))
+                   (parse-clj `(~'Not nil))))
+  (is-clj (overlap (parse-clj `Any)
+                   (parse-clj `(~'Not (U false nil)))))
+  (is-clj (overlap (parse-clj `Num)
+                   (parse-clj `(~'Not Int))))
+  (is-clj (not (overlap (parse-clj `Int)
+                        (parse-clj `(~'Not Num)))))
+  ; FIXME
+  ;(is-clj (not (overlap (parse-clj '(Not Any))
+  ;                      (parse-clj '(Not Any)))))
+  (is-clj (= (parse-clj `(~'Not Int))
+             (parse-clj `(~'Not (~'Not (~'Not Int))))))
+  (is-clj (= (parse-clj `(~'Not Int))
+             (parse-clj `(~'Not (~'Not (~'Not Int))))))
+  (is-clj (= (parse-clj `(I Any (~'Not (U nil false))))
+             (parse-clj `(~'Not (U nil false)))))
+  (is-clj (= (parse-clj `(I Int (~'Not Num)))
+             -nothing))
+  ;(is-clj (= (negate-sub Num Int)
+  ;           (parse-clj 'Int)))
+  (is-clj (both-subtype? (parse-clj `(I Num (~'Not Int)))
+                         (parse-clj `Num))))
+
+;(I Num (Not Int))
+;
+;(I Num (Not Int))
+;
+;(clj (unp (negate-sub (U nil Num) Int)))
+;(clj (unp (negate-sub Int Num)))
+;(clj (unp (negate-sub (U nil Int) Num)))
+;
+;(deftest negate-sub-test
+;  (is-clj (negate-sub (HMap :mandatory {:a Int})
+;                      (HMap :mandatory {:a Num}))))
+;
+;(clj (negate-sub Int Num))
+;(clj (negate-sub Num Int))
+;
+;(clj (unparse-type
+;       (In (parse-clj 'Num)
+;           (parse-clj '(Not Num)))))
+;
 
 ;    (is-tc-e 
 ;      (let [f (fn [{:keys [a] :as m} :- '{:a (U nil Num)}] :- '{:a Num} 
