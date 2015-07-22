@@ -761,6 +761,8 @@ clojure.string/reverse [String -> String]
 clojure.string/trim [String -> String]
 clojure.string/trimr [String -> String]
 clojure.string/triml [String -> String]
+clojure.string/escape [String (Map Any Any) -> String]
+clojure.string/split-lines [String -> (Vec String)]
 
 clojure.test/function? [Any -> Boolean]
 clojure.test/assert-any [Any Any -> Any]
