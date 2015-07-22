@@ -20,7 +20,8 @@
             [clojure.core.typed.check.recur-utils :as recur-u]
             [clojure.core.typed.util-vars :as vs]
             [clojure.core.typed.subtype :as sub]
-            [clojure.core.typed.check.utils :as cu]))
+            [clojure.core.typed.check.utils :as cu]
+            [clojure.set :as set]))
 
 ;check method is under a particular Function, and return inferred Function
 ; if ignore-rng is true, otherwise return expression with original expected type.
@@ -52,7 +53,8 @@
   #_(prn "checking syntax:" (ast-u/emit-form-fn method))
   ;(prn "check-fn-method1" "ignore-rng" ignore-rng)
   (u/p :check/check-fn-method1
-  (let [body ((ast-u/method-body-kw) method)
+  (let [function-unique-locals (atom @lex/*used-unique-locals*)
+        body ((ast-u/method-body-kw) method)
         required-params (ast-u/method-required-params method)
         rest-param (ast-u/method-rest-param method)
 
@@ -225,5 +227,9 @@
                     (ast-u/reconstruct-arglist crequired-params crest-param))
         _ (assert (vector? (:params cmethod)))
         _ (assert (every? (comp r/TCResult? u/expr-type) (:params cmethod)))]
+      
+     (when (not (empty? (set/difference @lex/*used-unique-locals* @function-unique-locals)))
+       ; I know the function body has a unique local in it
+       )
      {:ftype ftype
       :cmethod cmethod})))
