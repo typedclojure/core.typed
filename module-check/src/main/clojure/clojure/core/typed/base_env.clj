@@ -126,7 +126,7 @@ clojure.java.io/IOFactory
 (delay-and-cache-env ^:private init-var-env
   (reset-alias-env!)
   (merge
-   (common/parse-clj-ann-map common/common-var-annotations)
+   (common/parse-clj-ann-map @common/common-var-annotations)
    (h/var-mappings
      this-ns
 
@@ -659,8 +659,21 @@ clojure.core/symbol
          [(U nil String) String -> Symbol])
 
 clojure.core/keyword
-     (IFn [(U Keyword Symbol String) -> Keyword]
-         [String String -> Keyword])
+     (IFn [(U Keyword Symbol String) -> Keyword 
+           :object {:id 0 :path [Keyword]}
+           :filters {:then tt
+                     :else ff}]
+          [nil -> nil 
+           :object {:id 0 :path [Keyword]}
+           :filters {:then ff
+                     :else tt}]
+          [Any -> (U nil Keyword) 
+           :object {:id 0 :path [Keyword]}
+           :filters {:then (is (U Keyword Symbol String) 0)
+                     :else (! (U Keyword Symbol String) 0)}]
+          [String String -> Keyword
+           :filters {:then tt
+                     :else ff}])
 
 clojure.core/find-keyword
      (IFn [(U Keyword Symbol String) -> (Option Keyword)]

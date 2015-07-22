@@ -4,7 +4,7 @@
             [clojure.core.typed.name-env :as nme-env]
             [clojure.core.typed.parse-unparse :as prs]
             [clojure.core.typed.type-rep :as r]
-            [clojure.math.combinatorics :as comb]
+            [clojure.core.typed.deps.clojure.math.combinatorics :as comb]
             [clojure.core.typed.ns-deps-utils :as dep-u]
             [clojure.core.typed.free-ops :as free-ops]
             [clojure.core.typed.util-vars :as uvar]
@@ -61,6 +61,10 @@
           collect-asts
           collect-ns]}
    (p/p :collect-phase-utils/collect-ns
+   (if (already-collected? nsym)
+     (do #_(println (str "Already collected " nsym ", skipping"))
+         #_(flush)
+         nil)
      ; assume we're collecting this namespace, but only collect
      ; dependencies if they appear to refer to clojure.core.tyoed
      (do (collected-ns! nsym)
@@ -76,7 +80,7 @@
            (p/p :collect/collect-form
               (collect-asts asts)))
          (println (str "Finished collecting " nsym))
-         (flush)))))
+         (flush))))))
 
 (defn assert-expr-args [{:keys [args] :as expr} cnts]
   {:pre [(set? cnts)]}

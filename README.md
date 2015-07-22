@@ -6,12 +6,12 @@ Optional typing in Clojure, as a library.
 
 ## Releases and Dependency Information
 
-Latest stable release is 0.3.0-alpha5.
+Latest stable release is 0.3.8.
 
 Leiningen dependency information:
 
 ```clojure
-[org.clojure/core.typed "0.3.0-alpha5"]
+[org.clojure/core.typed "0.3.8"]
 
 ...
 ; for very recent releases
@@ -26,7 +26,7 @@ Maven dependency information:
 <dependency>
   <groupId>org.clojure</groupId>
   <artifactId>core.typed</artifactId>
-  <version>0.3.0-alpha5</version>
+  <version>0.3.8</version>
   <!-- slim jar -->
   <!-- <classifier>slim</classifier> -->
 </dependency>
@@ -37,7 +37,7 @@ using the slim jar in production.
 
 ## Compatibility
 
-`core.typed` supports Clojure 1.6.0 and JDK 1.7+.
+`core.typed` supports Clojure 1.7.0 and JDK 1.7+.
 
 ## [Talk] Clojure Conj 2012
 
@@ -117,6 +117,7 @@ Thanks to the following people for contributing to core.typed:
 * Minori Yamashita (ympbyc)
 * Kyle Kingsbury (aphyr)
 * Nathan Sorenson
+* Tobias Kortkamp (t6)
 
 ## Sponsors
 
@@ -200,3 +201,89 @@ Java and .NET applications. Take a look at YourKit's leading software products:
 Copyright © Ambrose Bonnaire-Sergeant, Rich Hickey & contributors.
 
 Licensed under the EPL (see the file epl.html).
+
+### tools.analyzer
+
+Copyright © 2013-2015 Nicola Mometto, Rich Hickey & contributors.
+
+Distributed under the Eclipse Public License, the same as Clojure.
+
+### tools.analyzer.jvm
+
+Copyright © 2013-2015 Nicola Mometto, Rich Hickey & contributors.
+
+Distributed under the Eclipse Public License, the same as Clojure.
+
+### jvm.tools.analyzer
+
+Copyright © Ambrose Bonnaire-Sergeant, Rich Hickey & contributors.
+
+Licensed under the EPL (see the file epl.html).
+
+### data.priority-map
+
+Copyright (C) 2013 Mark Engelberg
+
+Distributed under the Eclipse Public License, the same as Clojure.
+
+### math.combinatorics
+
+Distributed under the Eclipse Public License, the same as Clojure.
+
+### tools.namespace
+
+Copyright © 2012 Stuart Sierra All rights reserved. The use and distribution terms for this software are covered by the Eclipse Public License 1.0 which can be found in the file epl-v10.html at the root of this distribution. By using this software in any fashion, you are agreeing to be bound by the terms of this license. You must not remove this notice, or any other, from this software.
+
+### tools.reader
+
+Copyright © 2013-2015 Nicola Mometto, Rich Hickey & contributors.
+
+Licensed under the EPL. (See the file epl.html.)
+
+### core.contracts
+
+Copyright (c) Rich Hickey, Michael Fogus and contributors, 2012. All rights reserved. The use and distribution terms for this software are covered by the Eclipse Public License 1.0 (http://opensource.org/licenses/eclipse-1.0.php) which can be found in the file epl-v10.html at the root of this distribution. By using this software in any fashion, you are agreeing to be bound bythe terms of this license. You must not remove this notice, or any other, from this software.
+
+### core.unify
+
+Copyright (c) Rich Hickey and Michael Fogus, 2012. All rights reserved. The use and distribution terms for this software are covered by the Eclipse Public License 1.0 (http://opensource.org/licenses/eclipse-1.0.php) which can be found in the file epl-v10.html at the root of this distribution. By using this software in any fashion, you are agreeing to be bound bythe terms of this license. You must not remove this notice, or any other, from this software.
+
+### core.cache
+
+Copyright (c) Rich Hickey, Michael Fogus and contributors, 2012. All rights reserved. The use and distribution terms for this software are covered by the Eclipse Public License 1.0 (http://opensource.org/licenses/eclipse-1.0.php) which can be found in the file epl-v10.html at the root of this distribution. By using this software in any fashion, you are agreeing to be bound bythe terms of this license. You must not remove this notice, or any other, from this software.
+
+### core.memoize
+
+Copyright (c) Rich Hickey and Michael Fogus, 2012, 2013. All rights reserved. The use and distribution terms for this software are covered by the Eclipse Public License 1.0 (http://opensource.org/licenses/eclipse-1.0.php) which can be found in the file epl-v10.html at the root of this distribution. By using this software in any fashion, you are agreeing to be bound bythe terms of this license. You must not remove this notice, or any other, from this software.
+
+### ASM
+
+Copyright (c) 2000-2011 INRIA, France Telecom
+All rights reserved.
+
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions
+are met:
+
+1. Redistributions of source code must retain the above copyright
+   notice, this list of conditions and the following disclaimer.
+
+2. Redistributions in binary form must reproduce the above copyright
+   notice, this list of conditions and the following disclaimer in the
+   documentation and/or other materials provided with the distribution.
+
+3. Neither the name of the copyright holders nor the names of its
+   contributors may be used to endorse or promote products derived from
+   this software without specific prior written permission.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE
+LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF
+THE POSSIBILITY OF SUCH DAMAGE.

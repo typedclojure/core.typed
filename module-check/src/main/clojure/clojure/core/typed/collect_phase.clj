@@ -36,12 +36,13 @@
             [clojure.core.typed.method-param-nilables :as param-nil]
             [clojure.core.typed.subtype :as sub]
             [clojure.repl :as repl]
-            [clojure.math.combinatorics :as comb]
-            [clojure.tools.namespace.track :as track]
-            [clojure.tools.namespace.dir :as dir]
-            [clojure.tools.namespace.dependency :as ndep]
-            [clojure.tools.namespace.parse :as ns-parse]
-            [clojure.tools.namespace.file :as ns-file]
+            [clojure.core.typed.profiling :as profile]
+            [clojure.core.typed.deps.clojure.math.combinatorics :as comb]
+            [clojure.core.typed.deps.clojure.tools.namespace.track :as track]
+            [clojure.core.typed.deps.clojure.tools.namespace.dir :as dir]
+            [clojure.core.typed.deps.clojure.tools.namespace.dependency :as ndep]
+            [clojure.core.typed.deps.clojure.tools.namespace.parse :as ns-parse]
+            [clojure.core.typed.deps.clojure.tools.namespace.file :as ns-file]
             [clojure.core :as core]))
 
 (t/tc-ignore
@@ -99,8 +100,10 @@
   (let [prs-ns (dep-u/ns-form-name ns-form)
         deps   (dep-u/ns-form-deps ns-form)
         tdeps (set (filter dep-u/should-check-ns? deps))]
+    ;; is this line needed?
     (dep/add-ns-deps prs-ns tdeps)
-    (doseq [dep tdeps]
+    (doseq [dep deps
+            :when (dep-u/should-collect-ns? dep)]
       (if vs/*in-check-form*
         ;; to keep compatibility with 0.2.x namespaces,
         ;; collect namespaces that would have worked in 0.2.x but don't now.
@@ -258,6 +261,11 @@
                      (prs/parse-type typesyn))]
     ;var already interned via macroexpansion
     (nme-env/add-type-name qsym alias-type)
+    (profile/when-profile
+      (when (or (r/HeterogeneousMap? alias-type)
+                (and (r/Union? alias-type)
+                     (every? r/HeterogeneousMap? (:types alias-type))))
+        (profile/p :collect/defalias-is-HMap)))
     (when-let [tfn (decl/declared-kind-or-nil qsym)]
       (when-not (sub/subtype? alias-type tfn) 
         (err/int-error (str "Declared kind " (prs/unparse-type tfn)

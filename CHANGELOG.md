@@ -1,10 +1,114 @@
-# 0.3.0-SNAPSHOT
+# 0.3.8 - 21 July 2015
 
-- Breaking change:
+<a href='http://dev.clojure.org/jira/browse/CTYP/fixforversion/10555'>JIRA Release notes</a>
+
+Release Notes - core.typed - Version 0.3.8
+
+This release contains mainly bug fixes. The typed `defn` now supports
+a metadata map and `:arglists` metadata (<a href='http://dev.clojure.org/jira/browse/CTYP-168'>CTYP-168</a>).
+
+Thanks to Tobian Kortkamp for contributing a patch.
+    
+<h2>        Defect
+</h2>
+<ul>
+<li>[<a href='http://dev.clojure.org/jira/browse/CTYP-27'>CTYP-27</a>] -         clojure.lang.RT/nth&#39;s type doesn&#39;t currently allow nil as the first argument
+</li>
+<li>[<a href='http://dev.clojure.org/jira/browse/CTYP-80'>CTYP-80</a>] -         Issue with filter subtyping/simplification
+</li>
+<li>[<a href='http://dev.clojure.org/jira/browse/CTYP-203'>CTYP-203</a>] -         Unreproducable internal error
+</li>
+<li>[<a href='http://dev.clojure.org/jira/browse/CTYP-212'>CTYP-212</a>] -         Can&#39;t create a promise of the same type as a record field
+</li>
+<li>[<a href='http://dev.clojure.org/jira/browse/CTYP-234'>CTYP-234</a>] -         Setting :collect-only attribute for a namespace does not collect type aliases
+</li>
+</ul>
+    
+<h2>        Enhancement
+</h2>
+<ul>
+<li>[<a href='http://dev.clojure.org/jira/browse/CTYP-113'>CTYP-113</a>] -         Better documentation for override-method
+</li>
+<li>[<a href='http://dev.clojure.org/jira/browse/CTYP-168'>CTYP-168</a>] -         Support metadata map and :arglists in clojure.core.typed/defn
+</li>
+</ul>
+    
+<h2>        Task
+</h2>
+<ul>
+<li>[<a href='http://dev.clojure.org/jira/browse/CTYP-248'>CTYP-248</a>] -         Move lexical environment to an easily accessible location 
+</li>
+</ul>
+
+
+# 0.3.{1-7} - 10 July 2015
+
+## Inlined all dependencies
+
+`org.clojure/core.typed` now has no external dependencies.
+They are all copied with a flat prefix to `clojure.core.typed.deps.*`.
+
+The current versions of copied libraries are in `project.clj`,
+prefixed by `^:source-dep`.
+
+## Dropped Clojure 1.6 support
+
+`core.typed` should work fine with 1.6 for a while, but I might start
+using some Clojure 1.7 features and change the base-env to annotate
+Clojure 1.7.0 core vars.
+
+## Add back AOT class files
+
+The standard `org.clojure/core.typed` jar has AOT classes for `core.typed`
+and its dependencies. 
+Beforehand, AOT files for old CLJS versions was causing havoc.
+This is hopefully less of a problem now &mdash;
+since all dependencies are in `clojure.core.typed.deps.*`, 
+it's easy to create a filer to delete these extra files.
+
+`[org.clojure/core.typed "0.3.7" :classifier "slim"]` gives you just
+the Clojure sources.
+
+## Support quoted '"string" syntax for string singletons (Val "string")
+
+```
+(ann M (U '{:op '"left" :left Int}
+          '{:op '"right" :right Bool}))
+```
+
+## `keyword` now accepts `Any` and is smarter
+
+- [Commit 1](https://github.com/clojure/core.typed/commit/39bef22f2a4955ed19d9c1314f8661245211042b)
+- [Commit 2](https://github.com/clojure/core.typed/commit/b60ebf31b9873bdddd3e1cd604a8a00dd7d1ebd3)
+
+```clojure
+(ann M (U '{:op '"left" :left Int}
+          '{:op '"right" :right Bool}))
+
+(ann f [M -> Any])
+(defmulti f (fn [m :- M] (keyword (:op m))))
+(defmethod f :left [{:keys [left]}] (inc left))
+(defmethod f :right [{:keys [right]}] (not right))
+```
+
+## Other changes
+
+- Fix: `def` expressions now check their expected types
+- Revert 0.3.0 change: `check-ns` now always eagerly checks transitive namespaces
+- Add various tracing and metrics for POPL submission
+
+# 0.3.0 - 25 June 2015
+
+- Breaking change: (REVERTED 0.3.1)
   - all `check-ns` operations now avoid rechecking transitive dependencies.
     To explicitly recheck dependencies use the `:clean` keyword parameter.
 
-- Fix CTYP-214
+- Fix [CTYP-214](http://dev.clojure.org/jira/browse/CTYP-214)
+- support quoted type syntax with string literals
+  - '"a" == (Val "a")
+- `clojure.core/keyword` annotation is now more permissive.
+- add `keyword` path element
+  - see `keyword-pe-test` for new idioms
 
 # 0.3.0-alpha5 - 2 June 2015
 
@@ -15,8 +119,8 @@
 - support .cljc files in `load`
 - warn if :no-check is being removed from a var
 - annotate
-- clojure.repl/print-doc
-- complete.core annotations
+  - clojure.repl/print-doc
+  - complete.core annotations
 
 # 0.3.0-alpha3 - 30 May 2015
 

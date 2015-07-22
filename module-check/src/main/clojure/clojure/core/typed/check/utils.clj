@@ -1,6 +1,7 @@
 (ns ^:skip-wiki clojure.core.typed.check.utils
   (:require [clojure.core.typed :as t]
             [clojure.core.typed.utils :as u]
+            [clojure.core.typed.analyze-clj :as ana]
             [clojure.core.typed.profiling :as p]
             [clojure.core.typed.ns-deps :as ns-deps]
             [clojure.core.typed.ns-deps-utils :as ns-depsu]
@@ -22,7 +23,8 @@
             [clojure.core.typed.method-return-nilables :as mtd-ret-nil]
             [clojure.core.typed.filter-rep :as fl]
             [clojure.core.typed.filter-ops :as fo]
-            [clojure.core.typed.subtype :as sub])
+            [clojure.core.typed.subtype :as sub]
+            [clojure.core.typed.ast-utils :as ast-u])
   (:import (clojure.lang MultiFn)))
 
 (alter-meta! *ns* assoc :skip-wiki true)
@@ -276,42 +278,29 @@
   (or (protocol-implementation-type datatype method-sig)
       (extend-method-expected datatype (instance-method->Function method-sig))))
 
-(defn FieldExpr->Field [{c :class field-name :field :keys [op] :as expr}]
+;; TODO integrate reflecte-validated into run-passes
+(defn FieldExpr->Field [expr]
   {:pre []
-   :post [(instance? clojure.reflect.Field %)]}
-  (when (and c 
-             (#{:static-field :instance-field} op))
-    (let [fs (->> (reflect-u/reflect c)
-                  :members
-                  (filter #(instance? clojure.reflect.Field %))
-                  (filter #(#{field-name} (:name %))))]
-      (assert (#{1} (count fs)))
-      (first fs))))
+   :post [(or (instance? clojure.reflect.Field %)
+              (nil? %))]}
+  (-> expr
+      ana/reflect-validated
+      :reflected-field)) 
 
-(defn MethodExpr->Method [{c :class method-name :method :keys [op args] :as expr}]
+(defn MethodExpr->Method [expr]
   {:pre []
    :post [(or (nil? %) (instance? clojure.reflect.Method %))]}
-  (when (and c 
-             (#{:static-call :instance-call} op))
-    (let [ms (->> (reflect-u/reflect c)
-                  :members
-                  (filter #(instance? clojure.reflect.Method %))
-                  (filter #(#{method-name} (:name %)))
-                  (filter (fn [{:keys [parameter-types]}]
-                            (#{(map (comp reflect-u/reflect-friendly-sym :tag) args)} parameter-types))))]
-      ;(prn "MethodExpr->Method" c ms (map :tag args))
-      (first ms))))
+  (-> expr
+      ana/reflect-validated
+      :reflected-method))
 
-(defn NewExpr->Ctor [{c :class :keys [op args] :as expr}]
-  {:pre [(#{:new} op)]
+(defn NewExpr->Ctor [expr]
+  {:pre []
    :post [(or (instance? clojure.reflect.Constructor %)
               (nil? %))]}
-  (let [cs (->> (reflect-u/reflect c)
-                :members
-                (filter #(instance? clojure.reflect.Constructor %))
-                (filter #(#{(map (comp reflect-u/reflect-friendly-sym :tag) args)} (:parameter-types %))))]
-    ;(prn "NewExpr->Ctor" cs)
-    (first cs)))
+  (-> expr
+      ana/reflect-validated
+      :reflected-ctor))
 
 ;FIXME I think this hurts more than it helps
 ;[Type (Seqable t/Sym) -> Type]
@@ -454,48 +443,53 @@
 (defn check-ns-and-deps*
   "Type check a namespace and its dependencies.
   Assumes type annotations in each namespace
-  has already been collected.
-  
-  Always checks the given namespaces, however skips dependencies
-  that are in *already-checked*."
-  ([nsym {:keys [ast-for-ns check-asts check-ns]}]
+  has already been collected."
+  ([nsym {:keys [ast-for-ns
+                 check-asts
+                 check-ns]}]
    {:pre [(symbol? nsym)]
     :post [(nil? %)]}
    (u/p :check/check-ns-and-deps
-    (let [deps (u/p :check/ns-immediate-deps 
-                 (ns-deps/typed-deps nsym))]
-      (checked-ns! nsym)
-      ;check deps added with typed-deps
-      (doseq [dep deps
-              :when (not (already-checked? dep))]
-        (check-ns dep))
-      ;check normal dependencies
-      (doseq [dep (ns-depsu/deps-for-ns nsym)
-              :when (and (ns-depsu/should-check-ns? nsym)
-                         (not (already-checked? dep)))]
-        (check-ns dep))
-      ; ignore ns declaration
-      (let [ns-form (ns-depsu/ns-form-for-ns nsym)
-            check? (boolean (some-> ns-form ns-depsu/should-check-ns-form?))]
-        (if-not check?
-          (do (println (str "Not checking " nsym 
-                            (cond
-                              (not ns-form) " (ns form missing)"
-                              (ns-depsu/collect-only-ns? ns-form) " (tagged :collect-only in ns metadata)"
-                              (not (ns-depsu/requires-tc? ns-form)) " (does not depend on clojure.core.typed)")))
-              (flush))
-          (let [start (. System (nanoTime))
-                asts (u/p :check/gen-analysis (ast-for-ns nsym))
-                _ (println "Start checking" nsym)
-                _ (flush)
-                casts (check-asts asts)
-                _ (assert (== (count casts) (count asts)))
-                _ (when-let [checked-asts vs/*checked-asts*]
-                    (swap! checked-asts assoc nsym casts))
-                _ (println "Checked" nsym "in" (/ (double (- (. System (nanoTime)) start)) 1000000.0) "msecs")
-                _ (flush)
-                ]
-            nil)))))))
+   (let []
+     (cond 
+       (already-checked? nsym) (do
+                                 ;(println (str "Already checked " nsym ", skipping"))
+                                 ;(flush)
+                                 nil)
+       :else
+       ; check deps
+       (let [deps (u/p :check/ns-immediate-deps 
+                    (ns-deps/typed-deps nsym))]
+         (checked-ns! nsym)
+         ;check deps added with typed-deps
+         (doseq [dep deps]
+           (check-ns dep))
+         ;check normal dependencies
+         (doseq [dep (ns-depsu/deps-for-ns nsym)
+                 :when (ns-depsu/should-check-ns? nsym)]
+           (check-ns dep))
+         ; ignore ns declaration
+         (let [ns-form (ns-depsu/ns-form-for-ns nsym)
+               check? (boolean (some-> ns-form ns-depsu/should-check-ns-form?))]
+           (if-not check?
+             (do (println (str "Not checking " nsym 
+                               (cond
+                                 (not ns-form) " (ns form missing)"
+                                 (ns-depsu/collect-only-ns? ns-form) " (tagged :collect-only in ns metadata)"
+                                 (not (ns-depsu/requires-tc? ns-form)) " (does not depend on clojure.core.typed)")))
+                 (flush))
+             (let [start (. System (nanoTime))
+                   asts (u/p :check/gen-analysis (ast-for-ns nsym))
+                   _ (println "Start checking" nsym)
+                   _ (flush)
+                   casts (check-asts asts)
+                   _ (assert (== (count casts) (count asts)))
+                   _ (when-let [checked-asts vs/*checked-asts*]
+                       (swap! checked-asts assoc nsym casts))
+                   _ (println "Checked" nsym "in" (/ (double (- (. System (nanoTime)) start)) 1000000.0) "msecs")
+                   _ (flush)
+                   ]
+         nil)))))))))
 
 (defn find-updated-locals [env1 env2]
   {:pre [(map? env1)

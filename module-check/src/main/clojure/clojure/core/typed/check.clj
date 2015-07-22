@@ -501,35 +501,46 @@
                                expected)))
         :else :default))))
 
-;; FIXME when updating tools.analyzer past 0.5.0, update :keyword-invoke fields
+(add-check-method :prim-invoke
+  [expr & [expected]]
+  (assoc (check (assoc expr :op :invoke))
+         :op :prim-invoke))
+
 (add-check-method :keyword-invoke
-  [{kw :fn :keys [args] :as expr} & [expected]]
+  [{kw :keyword :keys [target] :as expr} & [expected]]
   {:pre [(and (#{:const} (:op kw))
-              (keyword? (:val kw)))
-         (#{1 2} (count args))]
-   :post [(r/TCResult? (u/expr-type %))
-          (vector? (:args %))]}
+              (keyword? (:val kw)))]
+   :post [(r/TCResult? (u/expr-type %))]}
   (let [ckw (check kw)
-        cargs (mapv check args)]
+        ctarget (check target)]
     (assoc expr
-           :fn ckw
-           :args cargs
+           :keyword ckw
+           :target ctarget
            u/expr-type (invoke-kw/invoke-keyword
                          expr
                          (u/expr-type ckw)
-                         (u/expr-type (first cargs))
-                         (when (#{2} (count cargs))
-                           (u/expr-type (second cargs)))
+                         (u/expr-type ctarget)
+                         nil
                          expected))))
 
-; Will this play nicely with file mapping?
-(add-check-method :prim-invoke ; protocol methods
-  [expr & [expected]]
-  (check (assoc expr :op :invoke)))
+;; TODO refactor into own file
+(defn protocol-invoke [check-fn {:keys [protocol-fn target args] :as expr} expected]
+  (u/p :check/protocol-invoke
+  (let [cprotocol-fn (check-fn protocol-fn)
+        ctarget (check-fn target)
+        cargs (mapv check-fn args)
+        ftype (u/expr-type cprotocol-fn)
+        argtys (map u/expr-type (concat [ctarget] cargs))
+        actual (funapp/check-funapp cprotocol-fn (concat [ctarget] cargs) ftype argtys expected)]
+    (assoc expr
+           :target ctarget
+           :protocol-fn cprotocol-fn
+           :args cargs
+           u/expr-type actual))))
 
 (add-check-method :protocol-invoke ; protocol methods
   [expr & [expected]]
-  (check (assoc expr :op :invoke)))
+  (protocol-invoke check expr expected))
 
 ;binding
 ;FIXME use `check-normal-def`
@@ -1243,6 +1254,7 @@
             ctarget (check target)
             cdispatch-val-expr (check dispatch-val-expr)
             dispatch-type (mm/multimethod-dispatch-type mmsym)]
+        (p/p :check/checked-MultiFn-addMethod)
         (if-not dispatch-type
           (binding [vs/*current-env* env]
             (err/tc-delayed-error (str "Multimethod requires dispatch type: " mmsym
@@ -1419,12 +1431,34 @@
            :target ctarget
            u/expr-type (cu/error-ret expected))))
 
+(defn clojure-lang-call? [^String m]
+  (or 
+    (.startsWith m "clojure.lang")
+    (= m "java.lang.Class/getClassLoader")
+    (= m "java.lang.AssertionError")
+    (= m "java.io.StringWriter")
+    (= m "java.lang.Object/getClass")))
+
+
+(defmacro profile-inlining [chk-op source]
+  {:pre [(keyword? chk-op)]}
+  `(p/when-profile 
+     (let [mstr# ~source]
+       (when (clojure-lang-call? mstr#)
+         (u/trace mstr# " is inline" ~chk-op)
+         (u/p ~(keyword (str "check/" (name chk-op) "-clojure-lang-probably-inline")))))))
+
 (add-check-method :static-call
   [expr & [expected]]
   {:post [(-> % u/expr-type r/TCResult?)]}
   #_(prn "static-method")
   (u/trace 
-    "static Call: " (:method expr))
+    (let [inline? (-> (cu/MethodExpr->qualsym expr)
+                      str
+                      clojure-lang-call?)]
+      (str (when-not inline? "non-inlined ") "static Call: " (cu/MethodExpr->qualsym expr))))
+  (profile-inlining :static-call
+    (str (cu/MethodExpr->qualsym expr)))
   (let [spec (static-method-special expr expected)]
     (if (not= :default spec)
       spec
@@ -1436,6 +1470,13 @@
           (if (contains? % :args)
             (vector? (:args %))
             true)]}
+  (u/trace 
+    (let [inline? (-> (cu/MethodExpr->qualsym expr)
+                      str
+                      clojure-lang-call?)]
+      (str (when-not inline? "non-inlined ") "instance Call: " (cu/MethodExpr->qualsym expr))))
+  (profile-inlining :instance-call
+    (str (cu/MethodExpr->qualsym expr)))
   (let [spec (instance-method-special expr expected)]
     (if (not= :default spec)
       spec
@@ -1446,6 +1487,13 @@
   {:post [(-> % u/expr-type r/TCResult?)]}
   (binding [vs/*current-expr* expr]
     (let [field (cu/FieldExpr->Field expr)]
+      (u/trace 
+        (let [inline? (-> (:type field)
+                          str
+                          clojure-lang-call?)]
+          (str (when-not inline? "non-inlined ") "static field: " (:type field))))
+      (profile-inlining :static-field
+        (str (:type field)))
       (assert field)
       (assoc expr
              u/expr-type (below/maybe-check-below
@@ -1526,7 +1574,11 @@
                                         (fo/-not-filter-at inst-of (r/ret-o expr-tr))))
                          expected))))
 
-(defmulti new-special (fn [{:keys [class] :as expr} & [expected]] (coerce/ctor-Class->symbol class)))
+(defmulti new-special (fn [expr & [expected]]
+                        {:post [(symbol? %)]}
+                        (-> expr
+                            ast-u/new-op-class
+                            coerce/Class->symbol)))
 (u/add-defmethod-generator new-special)
 
 (add-new-special-method 'clojure.lang.MultiFn
@@ -1576,6 +1628,19 @@
   [{cls :class :keys [args env] :as expr} & [expected]]
   {:post [(vector? (:args %))
           (-> % u/expr-type r/TCResult?)]}
+  (u/trace 
+    (let [inline? (-> expr
+                      ast-u/new-op-class 
+                      coerce/Class->symbol
+                      str
+                      clojure-lang-call?)]
+      (str (when-not inline? "non-inlined ") "new Call: " (-> expr
+                                                              ast-u/new-op-class 
+                                                              coerce/Class->symbol))))
+  (profile-inlining :new
+    (str (-> expr
+             ast-u/new-op-class 
+             coerce/Class->symbol)))
   (binding [vs/*current-expr* expr
             vs/*current-env* env]
     (let [ctor (cu/NewExpr->Ctor expr)
@@ -1585,7 +1650,7 @@
         :else
         (let [inst-types *inst-ctor-types*
               cls (ast-u/new-op-class expr)
-              clssym (coerce/ctor-Class->symbol cls)
+              clssym (coerce/Class->symbol cls)
               cargs (mapv check args)
               ctor-fn (or (@ctor-override/CONSTRUCTOR-OVERRIDE-ENV clssym)
                           (and (dt-env/get-datatype clssym)
@@ -1789,7 +1854,7 @@
                               (free-ops/with-free-mappings 
                                 (zipmap (map (comp r/F-original-name r/make-F) nms) 
                                         (map (fn [nm bnd] {:F (r/make-F nm) :bnds bnd}) nms bbnds))
-                                ;(prn "lexical env when checking method" method-nme lex/*lexical-env*)
+                                ;(prn "lexical env when checking method" method-nme (lex/lexical-env))
                                 ;(prn "frees when checking method" 
                                 ;     (into {} (for [[k {:keys [name]}] clojure.core.typed.tvar-env/*current-tvars*]
                                 ;                [k name])))
@@ -1857,7 +1922,7 @@
                                         (fo/-not-filter-at (apply c/Un val-ts)
                                                            (r/ret-o target-ret))
                                         fl/-top))
-                         env-default (update/env+ lex/*lexical-env* [neg-tst-fl] flag+)
+                         env-default (update/env+ (lex/lexical-env) [neg-tst-fl] flag+)
                          _ (when-not @flag+
                              ;; FIXME should we ignore this branch?
                              (u/tc-warning "Local became bottom when checking case default"))]

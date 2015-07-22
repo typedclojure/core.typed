@@ -11,6 +11,7 @@
             [clojure.core.typed.unsafe]
             [clojure.core.typed.init]
             [clojure.core.typed.utils :as u :refer [expr-type]]
+            [clojure.core.typed.profiling :as p :refer [profile]]
             [clojure.core.typed.errors :as err]
             [clojure.core.typed.current-impl :as impl]
             [clojure.core.typed.check :as chk]
@@ -42,6 +43,10 @@
             [clojure.core.typed.test.person]
             [clojure.core.typed.internal]
             [clojure.core.typed.path-type :refer :all]
+            [clojure.core.typed.ns-deps-utils :refer [should-collect-ns-form?
+                                                      should-check-ns-form?
+                                                      should-collect-ns?
+                                                      should-check-ns?]]
             [clojure.tools.trace :refer [trace-vars untrace-vars
                                          trace-ns untrace-ns]])
 ; we want clojure.lang.Seqable to be scoped here. 
@@ -1304,7 +1309,7 @@
         (inc a)))))
 
 (deftest for-test
-  (is-tc-e (check-ns 'clojure.core.typed.test.for))
+  (is (check-ns 'clojure.core.typed.test.for))
   (is-tc-e
     (for
       [a :- (U nil Number), [1 nil 2 3]
@@ -1635,13 +1640,13 @@
        (In (make-F 'foo1) (make-F 'foo2)))))
 
 
-;CTYP-27
-;(deftest nth-inline-test
-;  (is (cf (fn [s] (clojure.lang.RT/nth s 0 nil))
-;          (clojure.core.typed/All [x] (Fn #_[nil -> nil]
-;                       #_[(I (clojure.lang.Seqable x) (ExactCount 0)) -> nil]
-;                       [(I (clojure.lang.Seqable x) (CountRange 1)) -> x]
-;                       #_[(U nil  (clojure.lang.Seqable x)) -> (U nil  x)])))))
+(deftest CTYP-27-nth-inline-test
+  (is-tc-e (fn [s] (clojure.lang.RT/nth s 0 nil))
+           [nil -> nil])
+  (is-tc-e (fn [s] (nth s 0 nil))
+           [nil -> nil])
+  (is-tc-e #(inc (first [1 2 3])))
+  (is-tc-e #(let [[x & xs] [1 2 3]] (inc x))))
 
 (deftest invoke-tfn-test
   (is-clj (inst/manual-inst (parse-type `(All [[~'x :< (TFn [[~'x :variance :covariant]] Any)]]
@@ -2675,8 +2680,7 @@
 
 ; just a sanity check so keyword arguments don't accidentally break
 (deftest check-ns-kw-args-test
-  (is (check-ns 'clojure.core.typed.test.interop :collect-only true))
-  (is (check-ns 'clojure.core.typed.test.interop :clean true)))
+  (is (check-ns 'clojure.core.typed.test.interop :collect-only true)))
 
 ;(sub? (clojure.core.typed/All [x] (TFn [[a :variance :covariant]] clojure.core.typed/Any))
 ;      (Rec [m] (TFn [[a :variance :covariant]] m)))
@@ -4334,6 +4338,17 @@
                [-> nil :filters {:then ff :else tt} :flow ff])
     (is-tc-err (fn [a] (monitor-exit 1))
                [Any -> nil :filters {:then ff :else tt} :object {:id 0}]))
+  (testing "def"
+    (is-tc-e #(def a 1) [-> (Var1 (Val 1))])
+    (is-tc-err #(def a 1) [-> (Var1 (Val 2))])
+    (is-tc-e #(def a 1) 
+             [-> (Var1 (Val 1)) :filters {:then tt :else ff}])
+    (is-tc-err #(def a 1) 
+             [-> (Var1 (Val 1)) :filters {:then ff :else tt}])
+    (is-tc-err (fn [f] (def a 1))
+               [Any -> (Var1 (Val 1)) :filters {:then tt :else ff}
+                :object {:id 0}])
+    )
 )
 
 (deftest fn-type-parse-test
@@ -4904,6 +4919,277 @@
 (deftest seq-branch-test
   (is-tc-e (if (seq [1 2 3]) 1 nil)
            Num))
+
+(deftest quote-string-test
+  (is-tc-e "a" '"a")
+  (is-tc-err "a" '"b")
+  (is-tc-e "a" (Val "a")))
+
+(deftest keyword-pe-test
+  ;; with keywords
+  (is-tc-e (do 
+             (defalias M (U '{:op ':plus
+                              :plus Int}
+                            '{:op ':minus
+                              :minus Int}))
+             (let [m :- M, {:op :plus
+                            :plus 1}]
+               (if (-> m :op #{:plus})
+                 (inc (:plus m))
+                 (dec (:minus m))))))
+  ;; with strings, via keyword
+  (is-tc-e (do 
+             (defalias M (U '{:op '"plus"
+                              :plus Int}
+                            '{:op '"minus"
+                              :minus Int}))
+             (let [m :- M, {:op "plus"
+                            :plus 1}]
+               (if (-> m :op keyword #{:plus})
+                 (inc (:plus m))
+                 (dec (:minus m))))))
+  ;; defmulti dispatch
+  (is-tc-e (do 
+             (defalias M (U '{:op '"plus"
+                              :plus Int}
+                            '{:op '"minus"
+                              :minus Int}))
+             (ann f [M -> Int])
+             (defmulti f (fn [m :- M] (-> m :op keyword)))
+             (defmethod f :plus [m] (inc (:plus m)))
+             (defmethod f :minus [m] (inc (:minus m)))))
+  ;; polymorphic setting
+  (is-tc-e (map keyword '[a b c]))
+  ;; with symbols, via keyword
+  (is-tc-e (do 
+             (defalias M (U '{:op 'plus
+                              :plus Int}
+                            '{:op 'minus
+                              :minus Int}))
+             (let [m :- M, {:op 'plus
+                            :plus 1}]
+               (if (-> m :op keyword #{:plus})
+                 (inc (:plus m))
+                 (dec (:minus m))))))
+  ;; with keywords and nil, via keyword
+  (is-tc-e (do 
+             (defalias M (U '{:op ':plus
+                              :plus Int}
+                            '{:op nil
+                              :minus Int}))
+             (let [m :- M, {:op :plus
+                            :plus 1}]
+               (if (-> m :op keyword #{:plus})
+                 (inc (:plus m))
+                 (dec (:minus m))))))
+  (is-tc-e (do 
+             (defalias M (U '{:op Num
+                              :plus Int}
+                            '{:op Str
+                              :minus Int}))
+             (let [m :- M, {:op 1
+                            :plus 1}]
+               (if (-> m :op keyword not)
+                 (inc (:plus m))
+                 (dec (:minus m))))))
+  )
+
+(deftest keyword-path-type-test
+  (is-tc-e (keyword :a))
+  (is-tc-e (keyword (ann-form :a Kw)))
+  (is-tc-e (let [k (keyword (ann-form :a Kw))]
+             (name k)))
+  (is (=
+       (-val :a)
+       (path-type (-val 'a)
+                  [(KeywordPE-maker)])))
+  (is-tc-e (fn [k :- 'a] :- Kw
+             (let [i (keyword k)]
+               i)))
+  ; need symbol literals as objects
+  ;(is-tc-e (keyword 'a) ':a)
+  (is-tc-e (fn [k]
+             (let [i (keyword k)]
+               i))
+           (IFn ['a -> ':a]
+                ['a/b -> ':a/b]
+                ['"a" -> ':a]
+                ['"a/b" -> ':a/b]
+                [':a -> ':a]
+                [':a/b -> ':a/b]
+                [Sym -> Kw]
+                [Kw -> Kw]
+                [Str -> Kw]
+                [(U Sym Kw Str) -> Kw]
+                [nil -> nil]
+                [Any -> (U nil Kw)]))
+  (is-tc-e (fn [k :- Any] :- Kw
+             (let [i (keyword k)]
+               (assert (keyword? k))
+               i)))
+  (is-tc-e (fn [k :- Any] :- (U Kw Str Sym)
+             (let [i (keyword k)]
+               (assert (keyword? i))
+               k)))
+  (is-tc-err (fn [k :- Any] :- (U Kw Str)
+               (let [i (keyword k)]
+                 (assert (keyword? i))
+                 k)))
+  )
+
+
+(deftest profile-inline-test
+  ;; should have :check/instance-call-clojure-lang-probably-inline 1
+  (is (profile :info :bar
+               (tc-e
+                 #(.getName (java.io.File. "a")))
+               true))
+  ;; should have :check/instance-call-clojure-lang-probably-inline
+  (is (profile :info :bar
+               (tc-e
+                 #(nil? nil))
+               true))
+  ;; has :check/static-call-clojure-lang-probably-inline
+  (is (profile :info :bar
+               (tc-e
+                 (zero? 0))
+               true)))
+
+;; unclear what this is testing, but it's been fixed sometime after 0.2.11
+(deftest CTYP-80-test
+  (is-tc-e (do (defalias SLiteral (U Sym (Option (Seqable SLiteral))))
+
+               (ann s-check (Pred Symbol))
+               (defn s-check
+                 [x]
+                 (symbol? x))
+
+               (ann s-test [SLiteral -> SLiteral])
+               (defn s-test
+                 [sliteral]
+                 (if (s-check sliteral)
+                   'win
+                   (second sliteral))))))
+
+(defmacro typed-defn-check-meta [meta-fn & args]
+  (let [g (gensym "v")]
+    `(do (tc/defn ~g ~@args)
+         (~meta-fn (meta (var ~g))))))
+
+(defmacro named-typed-defn-check-meta [meta-fn nme & args]
+  (let [g (with-meta (gensym "v")
+                     (meta nme))]
+    `(do (tc/defn ~g ~@args)
+         (~meta-fn (meta (var ~g))))))
+
+(deftest CTYP-168-test
+  (testing ":arglists metadata is added with typed defn"
+    (is (typed-defn-check-meta
+          #(not= '([]) (:arglists %))
+          [a] a))
+    (is (typed-defn-check-meta
+          #(= '([a]) (:arglists %))
+          [a] a))
+    (is (typed-defn-check-meta
+          #(= '([a]) (:arglists %))
+          ([a] a)))
+    (is (typed-defn-check-meta
+          #(= '([a] [b c]) (:arglists %))
+          ([a] a) ([b c] c))))
+  (testing ":doc metadata works"
+    (is (typed-defn-check-meta
+          (comp #{"blah"} :doc)
+          "blah" [a] a)))
+  (testing "typed defn supports metadata map"
+    (is (typed-defn-check-meta
+          #(not (contains? % :foo))
+          [a] a))
+    (is (typed-defn-check-meta
+          #(and (= '([a]) (:arglists %))
+                (= 1 (:foo %)))
+          {:foo 1} [a] a))
+    (testing "metadata map is always merged last"
+      (is (typed-defn-check-meta
+            #(= '([]) (:arglists %))
+            {:arglists '([])} [a] a))
+      (is (typed-defn-check-meta
+            (comp #{"b"} :doc)
+            "a"
+            {:doc "b"} [a] a))
+      (is (named-typed-defn-check-meta
+            #(= 1 (:baz %))
+            ^{:baz 1} nme
+            [a] a))
+      (is (named-typed-defn-check-meta
+            #(= 2 (:baz %))
+            ^{:baz 1} nme
+            {:baz 2} [a] a)))))
+
+(deftest CTYP-212-test
+  (is-tc-e
+    (do
+      (ann-record MyRecord [p :- (Promise Int)])
+
+      (defrecord MyRecord [p])
+
+      (defn foo []
+        (let [x :- (Promise Int) (promise)])))))
+
+(defn should-check-or-collect [nf]
+  (clj
+    (set (concat
+           (when (should-collect-ns-form? nf)
+             [:collect])
+           (when (should-check-ns-form? nf)
+             [:check])))))
+
+(defn should-check-or-collect-file [nsym]
+  (clj
+    (set (concat
+           (when (should-collect-ns? nsym)
+             [:collect])
+           (when (should-check-ns? nsym)
+             [:check])))))
+
+(deftest should-collect-or-check-ns-form-test
+  (testing "does not depend on core.typed, don't collect or check"
+    (is-clj
+      (= #{}
+         (should-check-or-collect
+           '(ns foo))
+         (should-check-or-collect
+           '(ns foo
+              {:core.typed {:collect-only true}}))
+         (should-check-or-collect-file
+           'clojure.core.typed.test.dont-check-me))))
+  (testing ":collect-only should collect but not check"
+    (is-clj
+      (= #{:collect}
+         (should-check-or-collect
+           '(ns foo
+              {:core.typed {:collect-only true}}
+              (:require [clojure.core.typed])))
+         (should-check-or-collect-file
+           'clojure.core.typed.test.CTYP-234.dep))))
+  (testing "plain :require of clojure.core.typed should collect and check"
+    (is-clj
+      (= #{:collect :check}
+         (should-check-or-collect
+           '(ns foo
+              (:require [clojure.core.typed])))
+         (should-check-or-collect-file
+           'clojure.core.typed.test.CTYP-234.core)))))
+
+(deftest CTYP-234-test
+  (is (check-ns 'clojure.core.typed.test.CTYP-234.core)))
+
+(deftest CTYP-203-test
+  (is-tc-e
+    (do
+      (defalias BaseValidationSchema
+        '[Boolean (HMap :complete? false)])
+
+      (ann-form [true {}] BaseValidationSchema))))
 
 ;    (is-tc-e 
 ;      (let [f (fn [{:keys [a] :as m} :- '{:a (U nil Num)}] :- '{:a Num} 

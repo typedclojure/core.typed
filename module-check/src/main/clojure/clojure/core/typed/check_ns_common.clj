@@ -4,41 +4,34 @@
             [clojure.core.typed.reset-caches :as reset-caches]
             [clojure.core.typed.collect-phase :as collect-clj]
             [clojure.core.typed.contract-utils :as con]
+            [clojure.core.typed.utils :as u]
             [clojure.core.typed.check :as chk-clj]
             [clojure.core.typed.file-mapping :as file-map]
             [clojure.core.typed.var-env :as var-env]
             [clojure.core.typed.util-vars :as vs]
+            [clojure.core.typed.lex-env :as lex-env]
             [clojure.core.typed.errors :as err]
             [clojure.core.typed.current-impl :as impl]
+            [clojure.core.typed.ns-deps-utils :as ns-deps-u]
             [clojure.java.io :as io]
-            [clojure.core.cache :as cache]
-            [clojure.jvm.tools.analyzer :as jta])
+            [clojure.core.typed.deps.clojure.core.cache :as cache]
+            [clojure.core.typed.deps.clojure.tools.analyzer.jvm.utils :as jvm-u])
   (:import (clojure.lang ExceptionInfo)))
 
-;; Take keywords: 
-;;  Mandatory
-;; - :already-checked   an atom of a set of namespace symbols that should be skipped
-;;                      on the next check-ns
-;; - :collect-ns        a function that takes a namespace symbol and collects annotations
-;;                      from the corresponding file
-;; - :check-ns          a function that takes a namespace symbol and type checks the corresponding
-;;                      file
-;;
-;;  Optional
-;; - :clean             if true, resets the type environment and recheck all namespace
-;;                      dependencies
-;; Returns a map with keys:
+(defn cljs-reader [nsym]
+  (let [f ((impl/v 'cljs.analyzer/ns->relpath) nsym)
+        res (if (re-find #"^file://" f) (java.net.URL. f) (io/resource f))]
+    (assert res (str "Can't find " f " in classpath"))
+    (io/reader res)))
+
+;; returns a map with keys
 ;; - :delayed errors    a vector of ExceptionInfo instances representing type errors
 ;;
 ;; Optional
 ;; - :file-mapping      a map from namespace symbols to vectors of AST nodes
 ;;                      Added if true :file-mapping keyword is passed as an option
 (defn check-ns-info
-  [impl ns-or-syms & {:keys [collect-only trace profile file-mapping already-checked clean
-                             collect-ns check-ns]}]
-  {:pre [(con/atom? already-checked)
-         (ifn? collect-ns)
-         (ifn? check-ns)]}
+  [impl ns-or-syms & {:keys [collect-only trace profile file-mapping]}]
   (p/profile-if profile
     (let [start (. System (nanoTime))]
       (reset-caches/reset-caches)
@@ -52,26 +45,29 @@
                              [ns-or-syms]
                              ns-or-syms))]
         (impl/with-full-impl impl
-          (when clean
-            (reset! already-checked #{})
-            (reset-env/reset-envs!))
           (binding [vs/*delayed-errors* (err/-init-delayed-errors)
-                    vs/*already-collected* (atom @already-checked) ;; collect seems wasteful now
-                    vs/*already-checked*   already-checked
+                    vs/*already-checked* (atom #{})
                     vs/*trace-checker* trace
                     vs/*analyze-ns-cache* (cache/soft-cache-factory {})
                     ; we only use this if we have exactly one namespace passed
                     vs/*checked-asts* (when (#{impl/clojure} impl)
                                         (when (== 1 (count nsym-coll))
-                                          (atom {})))]
+                                          (atom {})))
+                    vs/*already-collected* (atom #{})
+                    vs/*lexical-env* (lex-env/init-lexical-env)]
             (let [terminal-error (atom nil)]
+              (reset-env/reset-envs!)
+              ;(reset-caches)
               ;; handle terminal type error
               (try
                 ;-------------------------
                 ; Collect phase
                 ;-------------------------
-                (doseq [nsym nsym-coll]
-                  (collect-ns nsym))
+                (let [collect-ns (impl/impl-case
+                                   :clojure collect-clj/collect-ns
+                                   :cljs    (impl/v 'clojure.core.typed.collect-cljs/collect-ns))]
+                  (doseq [nsym nsym-coll]
+                    (collect-ns nsym)))
                 (let [ms (/ (double (- (. System (nanoTime)) start)) 1000000.0)
                       collected (if-let [c vs/*already-collected*]
                                   @c
@@ -83,19 +79,31 @@
                 ; Check phase
                 ;-------------------------
                 (when-not collect-only
-                  (doseq [nsym nsym-coll]
-                    (check-ns nsym))
+                  (let [check-ns (impl/impl-case
+                                   :clojure chk-clj/check-ns-and-deps
+                                   :cljs    (impl/v 'clojure.core.typed.check-cljs/check-ns))]
+                    (doseq [nsym nsym-coll]
+                      (check-ns nsym)))
                   (let [vs (var-env/vars-with-unchecked-defs)]
                     (binding [*out* *err*]
-                      (let [printed-hint? (atom false)]
-                        (doseq [v vs]
-                          (println "WARNING: Type Checker: Definition missing:" v 
-                                   (when-not @printed-hint?
-                                     "\nHint: Use :no-check metadata with ann if this is an unchecked var"))
-                          (flush)
-                          (reset! printed-hint? true)))))
+                      (doseq [v vs]
+                        (println "WARNING: Type Checker: Definition missing:" v 
+                                 "\nHint: Use :no-check metadata with ann if this is an unchecked var")
+                        (flush))))
                   (let [ms (/ (double (- (. System (nanoTime)) start)) 1000000.0)
-                        checked (some-> vs/*already-checked* deref)]
+                        checked (some-> vs/*already-checked* deref)
+                        _ (when (#{impl/clojure} impl)
+                            (u/trace 
+                              (binding [*print-length* nil]
+                                (let [checked (set (filter ns-deps-u/should-check-ns? checked))]
+                                  (str "Checked namespaces: " checked
+                                       ", " (apply + (for [nsym checked]
+                                                       (with-open [rdr (io/reader 
+                                                                         (impl/impl-case
+                                                                           :clojure (jvm-u/ns-url nsym)
+                                                                           :cljs    (cljs-reader nsym)))]
+                                                         (count (line-seq rdr)))))
+                                       " lines")))))]
                     (println "Checked" (count checked) "namespaces "
                              "in" ms "msecs")
                     (flush)))
