@@ -814,6 +814,17 @@ clojure.main/repl-prompt [-> Any]
 clojure.main/repl [-> Any]
 clojure.main/main [-> nil]
 
+clojure.walk/keywordize-keys [Any -> Any]
+clojure.walk/macroexpand-all [Any -> Any]
+clojure.walk/postwalk [Any Any -> Any]
+clojure.walk/postwalk-demo [Any -> Any]
+clojure.walk/postwalk-replace [(U (Vec Any) (Map Any Any)) Any -> Any]
+clojure.walk/prewalk [Any Any -> Any]
+clojure.walk/prewalk-demo [Any -> Any]
+clojure.walk/prewalk-replace [(U (Vec Any) (Map Any Any)) Any -> Any]
+clojure.walk/stringify-keys [Any -> Any]
+clojure.walk/walk [Any Any (Vec Any) -> (List Any)]
+
 
 clojure.core/interpose (All [x] (IFn [x (Option (Seqable x)) -> (ASeq x)]))
 clojure.core/interleave (All [x] [(Option (Seqable x)) (Option (Seqable x)) (Option (Seqable x)) * -> (ASeq x)])
