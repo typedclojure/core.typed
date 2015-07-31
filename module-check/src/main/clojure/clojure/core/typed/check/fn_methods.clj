@@ -64,15 +64,16 @@
 
 (defn check-Function
   "Check individual Function type against all methods"
-  [mthods {:keys [dom rest drest kws] :as f} {:keys [recur-target-fn]}]
+  [mthods {:keys [dom rest drest kws] :as f} opt]
   {:pre [((every-pred methods? seq) mthods)
-         (r/Function? f)
-         ((some-fn nil? ifn?) recur-target-fn)]
+         (r/Function? f)]
    :post [(methods? %)]}
   ;(prn "check-Function" f)
   (let [ndom (count dom)
-        maybe-check (fn [method]
-                      {:pre [(method? method)]
+        maybe-check (fn [f method {:keys [recur-target-fn]}]
+                      {:pre [(r/Function? f)
+                             (method? method)
+                             ((some-fn nil? ifn?) recur-target-fn)]
                        :post [((some-fn nil? method?) %)]}
                       (when-let [fe (expected-for-method method f)]
                         ;(prn "inner expected in check-Function" fe)
@@ -83,7 +84,7 @@
                           (assert (method? cmethod))
                           cmethod)))
         ms (->> mthods
-                (map maybe-check)
+                (map #(maybe-check f % opt))
                 (filter identity)
                 vec)]
     ;(prn "checked ms" (count ms))
