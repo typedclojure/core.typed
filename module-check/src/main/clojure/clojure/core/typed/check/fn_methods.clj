@@ -62,6 +62,20 @@
         (== ndom fixed-arity) f
         :else nil))))
 
+(defn maybe-check [f method {:keys [recur-target-fn]}]
+  {:pre [(r/Function? f)
+         (method? method)
+         ((some-fn nil? ifn?) recur-target-fn)]
+   :post [((some-fn nil? method?) %)]}
+  (when-let [fe (expected-for-method method f)]
+    ;(prn "inner expected in check-Function" fe)
+    (let [{:keys [cmethod]} (fn-method1/check-fn-method1
+                              method 
+                              fe
+                              :recur-target-fn recur-target-fn)]
+      (assert (method? cmethod))
+      cmethod)))
+
 (defn check-Function
   "Check individual Function type against all methods"
   [mthods {:keys [dom rest drest kws] :as f} opt]
@@ -70,19 +84,6 @@
    :post [(methods? %)]}
   ;(prn "check-Function" f)
   (let [ndom (count dom)
-        maybe-check (fn [f method {:keys [recur-target-fn]}]
-                      {:pre [(r/Function? f)
-                             (method? method)
-                             ((some-fn nil? ifn?) recur-target-fn)]
-                       :post [((some-fn nil? method?) %)]}
-                      (when-let [fe (expected-for-method method f)]
-                        ;(prn "inner expected in check-Function" fe)
-                        (let [{:keys [cmethod]} (fn-method1/check-fn-method1
-                                                  method 
-                                                  fe
-                                                  :recur-target-fn recur-target-fn)]
-                          (assert (method? cmethod))
-                          cmethod)))
         ms (->> mthods
                 (map #(maybe-check f % opt))
                 (filter identity)
