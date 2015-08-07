@@ -815,8 +815,12 @@ clojure.pprint/pprint [Any -> Any]
 
 clojure.main/demunge [String -> String]
 clojure.main/repl-prompt [-> Any]
+clojure.main/repl-caught [Exception -> Any]
+clojure.main/repl-exception [Exception -> Any]
+clojure.main/root-cause [Exception -> Exception]
 clojure.main/repl [-> Any]
 clojure.main/main [-> nil]
+clojure.main/load-script[String -> Any]
 
 clojure.walk/keywordize-keys [Any -> Any]
 clojure.walk/macroexpand-all [Any -> Any]
