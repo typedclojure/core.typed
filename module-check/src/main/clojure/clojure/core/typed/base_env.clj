@@ -793,10 +793,10 @@ clojure.java.browse/browse-url [Any -> Boolean]
 clojure.java.io/delete-file [String -> Boolean]
 
 clojure.stacktrace/e [-> (U nil Any)]
-clojure.stacktrace/print-cause-trace [Any -> Any]
-clojure.stacktrace/print-stack-trace [Any -> Any]
-clojure.stacktrace/print-throwable [Any -> Any]
-clojure.stacktrace/root-cause [Any -> Any]
+clojure.stacktrace/print-cause-trace [Exception -> Any]
+clojure.stacktrace/print-stack-trace [Exception -> Any]
+clojure.stacktrace/print-throwable [Exception -> Any]
+clojure.stacktrace/root-cause [Exception -> Exception]
 
 clojure.reflect/reflect [Any -> (Map Any Any)]
 
