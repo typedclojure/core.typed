@@ -843,6 +843,8 @@ clojure.zip/children [Any -> Any]
 clojure.zip/root[(Vec Any) -> Any]
 clojure.zip/rightmost [(Vec Any) -> (Vec Any)]
 clojure.zip/right[(Vec Any) -> (U nil Any)]
+clojure.zip/up [Any -> (U nil (Vec Any))]
+clojure.zip/rights[(Vec Any) -> (U nil Any)]
 
 
 clojure.core/interpose (All [x] (IFn [x (Option (Seqable x)) -> (ASeq x)]))
