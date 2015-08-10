@@ -46,8 +46,24 @@
 	     :requires[[clojure.zip :refer [children]]
 		       [clojure.zip :refer [vector-zip]]]))
 
+(deftest root-test
+  (is-tc-e (root [1 2]) Any
+	     :requires[[clojure.zip :refer [root]]])
+   (is-tc-err (root 1) Any
+	     :requires[[clojure.zip :refer [root]]]))
 
+(deftest rightmost-test
+  (is-tc-e (rightmost [1 2 3]) (Vec Any)
+            :requires[[clojure.zip :refer [rightmost]]])
+  (is-tc-err (rightmost [1 2 3]) String
+            :requires[[clojure.zip :refer [rightmost]]])
+  (is-tc-err (rightmost 1) (Vec Any)
+            :requires[[clojure.zip :refer [rightmost]]]))
 
-
-
-
+(deftest right-test
+  (is-tc-e (right [1 2 3]) (U nil Any)
+            :requires[[clojure.zip :refer [right]]])
+  (is-tc-err (right [1 2 3]) String
+            :requires[[clojure.zip :refer [right]]])
+  (is-tc-err (right 1) (U nil Any)
+            :requires[[clojure.zip :refer [right]]]))
