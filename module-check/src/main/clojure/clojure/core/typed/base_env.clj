@@ -840,6 +840,9 @@ clojure.zip/xml-zip [Any -> (Vec Any)]
 clojure.zip/node [(Vec Any) -> Any]
 clojure.zip/branch? [Any -> Boolean]
 clojure.zip/children [Any -> Any]
+clojure.zip/root[(Vec Any) -> Any]
+clojure.zip/rightmost [(Vec Any) -> (Vec Any)]
+clojure.zip/right[(Vec Any) -> (U nil Any)]
 
 
 clojure.core/interpose (All [x] (IFn [x (Option (Seqable x)) -> (ASeq x)]))
