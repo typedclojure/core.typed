@@ -67,3 +67,21 @@
             :requires[[clojure.zip :refer [right]]])
   (is-tc-err (right 1) (U nil Any)
             :requires[[clojure.zip :refer [right]]]))
+         
+(deftest up-test
+   (is-tc-e (up (vector-zip [1 2])) (U nil (Vec Any))
+	     :requires[[clojure.zip :refer [up]]
+		       [clojure.zip :refer [vector-zip]]])
+   (is-tc-err (up (vector-zip [1 2])) String
+	     :requires[[clojure.zip :refer [up]]
+		       [clojure.zip :refer [vector-zip]]]))
+
+(deftest rights-test
+  (is-tc-e (rights [1 2 3]) (U nil Any)
+            :requires[[clojure.zip :refer [rights]]])
+  (is-tc-err (rights [1 2 3]) String
+            :requires[[clojure.zip :refer [rights]]])
+  (is-tc-err (rights 1) (U nil Any)
+            :requires[[clojure.zip :refer [rights]]]))
+
+
