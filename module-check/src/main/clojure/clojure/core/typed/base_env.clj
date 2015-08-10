@@ -833,10 +833,13 @@ clojure.walk/prewalk-replace [(U (Vec Any) (Map Any Any)) Any -> Any]
 clojure.walk/stringify-keys [Any -> Any]
 clojure.walk/walk [Any Any (Vec Any) -> (List Any)]
 
+clojure.zip/zipper [ Any Any Any Any -> (Vec Any)]
 clojure.zip/seq-zip [Any -> (Vec Any)]
 clojure.zip/vector-zip [Any -> (Vec Any)]
 clojure.zip/xml-zip [Any -> (Vec Any)]
 clojure.zip/node [(Vec Any) -> Any]
+clojure.zip/branch? [Any -> Boolean]
+clojure.zip/children [Any -> Any]
 
 
 clojure.core/interpose (All [x] (IFn [x (Option (Seqable x)) -> (ASeq x)]))
