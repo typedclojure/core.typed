@@ -56,9 +56,6 @@
   {(the-var 'clojure.core.typed.env/*checker*)
    (clj-checker)
 
-   (the-var 'clojure.core.typed.ns-deps/*current-deps*)
-   (v 'clojure.core.typed.ns-deps/CLJ-TYPED-DEPS)
-
    (the-var 'clojure.core.typed.declared-kind-env/*current-declared-kinds*)
    (v 'clojure.core.typed.declared-kind-env/CLJ-DECLARED-KIND-ENV) 
    (the-var 'clojure.core.typed.datatype-env/*current-datatype-env*)
@@ -79,9 +76,6 @@
 (defn cljs-bindings []
   {(the-var 'clojure.core.typed.env/*checker*)
    (cljs-checker)
-   
-   (the-var 'clojure.core.typed.ns-deps/*current-deps*)
-   (v 'clojure.core.typed.ns-deps/CLJS-TYPED-DEPS)
 
    (the-var 'clojure.core.typed.declared-kind-env/*current-declared-kinds*)
    (v 'clojure.core.typed.declared-kind-env/CLJS-DECLARED-KIND-ENV) 
