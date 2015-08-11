@@ -54,10 +54,7 @@
 
 (defn clj-bindings []
   {(the-var 'clojure.core.typed.env/*checker*)
-   (clj-checker)
-
-   (the-var 'clojure.core.typed.datatype-ancestor-env/*current-dt-ancestors*)
-   (v 'clojure.core.typed.datatype-ancestor-env/CLJ-DT-ANCESTOR-ENV)})
+   (clj-checker)})
 
 (defmacro with-clojure-impl [& body]
   `(with-impl clojure
