@@ -47,11 +47,14 @@
      (binding [*current-impl* ~impl]
        ~@body)))
 
-(def clj-checker (delay ((v 'clojure.core.typed.env/init-checker))))
+(defonce clj-checker-atom (delay ((v 'clojure.core.typed.env/init-checker))))
+
+(defn clj-checker []
+  (force clj-checker-atom))
 
 (defn clj-bindings []
   {(the-var 'clojure.core.typed.env/*checker*)
-   (force clj-checker)
+   (clj-checker)
 
    (the-var 'clojure.core.typed.name-env/*current-name-env*)
    (v 'clojure.core.typed.name-env/CLJ-TYPE-NAME-ENV)
@@ -81,11 +84,14 @@
      (with-bindings (clj-bindings)
        ~@body)))
 
-(def cljs-checker (delay ((v 'clojure.core.typed.env/init-checker))))
+(defonce cljs-checker-atom (delay ((v 'clojure.core.typed.env/init-checker))))
+
+(defn cljs-checker []
+  (force cljs-checker-atom))
 
 (defn cljs-bindings []
   {(the-var 'clojure.core.typed.env/*checker*)
-   (force cljs-checker)
+   (cljs-checker)
    
    (the-var 'clojure.core.typed.name-env/*current-name-env*)
    (v 'clojure.core.typed.name-env/CLJS-TYPE-NAME-ENV)

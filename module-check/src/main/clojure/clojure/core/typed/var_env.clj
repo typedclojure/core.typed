@@ -18,7 +18,10 @@
 (defonce ^:dynamic *current-used-vars* nil)
 (defonce ^:dynamic *current-checked-var-defs* nil)
 
-(defonce CLJ-VAR-ANNOTATIONS (atom {} :validator (con/hash-c? (every-pred symbol? namespace) (some-fn delay? r/Type?))))
+(defn clj-var-annotations []
+  (get @(impl/clj-checker) current-var-annotations-kw {}))
+
+;(defonce CLJ-VAR-ANNOTATIONS (atom {} :validator (con/hash-c? (every-pred symbol? namespace) (some-fn delay? r/Type?))))
 (defonce CLJ-NOCHECK-VAR? (atom #{} :validator (con/set-c? (every-pred symbol? namespace))))
 (defonce CLJ-USED-VARS (atom #{} :validator (con/set-c? (every-pred symbol? namespace))))
 (defonce CLJ-CHECKED-VAR-DEFS (atom #{} :validator (con/set-c? (every-pred symbol? namespace))))
