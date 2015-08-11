@@ -27,14 +27,19 @@
 (defn clj-used-vars []
   (get @(impl/clj-checker) current-used-vars-kw {}))
 
+(def var-annotations-con (con/hash-c? (every-pred symbol? namespace) (some-fn delay? r/Type?)))
+(def nocheck-var-con (con/set-c? (every-pred symbol? namespace)))
+(def used-vars-con (con/set-c? (every-pred symbol? namespace)))
+(def checked-var-defs-con (con/set-c? (every-pred symbol? namespace)))
+
 ;(defonce CLJ-VAR-ANNOTATIONS (atom {} :validator (con/hash-c? (every-pred symbol? namespace) (some-fn delay? r/Type?))))
 ;(defonce CLJ-NOCHECK-VAR? (atom #{} :validator (con/set-c? (every-pred symbol? namespace))))
-(defonce CLJ-USED-VARS (atom #{} :validator (con/set-c? (every-pred symbol? namespace))))
+;(defonce CLJ-USED-VARS (atom #{} :validator (con/set-c? (every-pred symbol? namespace))))
 (defonce CLJ-CHECKED-VAR-DEFS (atom #{} :validator (con/set-c? (every-pred symbol? namespace))))
 
 (defonce CLJS-VAR-ANNOTATIONS (atom {} :validator (con/hash-c? (every-pred symbol? namespace) r/Type?)))
 (defonce CLJS-NOCHECK-VAR? (atom #{} :validator (con/set-c? (every-pred symbol? namespace))))
-(defonce CLJS-USED-VARS (atom #{} :validator (con/set-c? (every-pred symbol? namespace))))
+;(defonce CLJS-USED-VARS (atom #{} :validator (con/set-c? (every-pred symbol? namespace))))
 (defonce CLJS-CHECKED-VAR-DEFS (atom #{} :validator (con/set-c? (every-pred symbol? namespace))))
 
 (defonce CLJS-JSVAR-ANNOTATIONS (atom {} :validator (con/hash-c? symbol? r/Type?)))
@@ -62,7 +67,8 @@
   (get (env/deref-checker) current-nocheck-var?-kw #{}))
 
 (defn used-vars []
-  @(current-used-vars))
+  {:post [(set? %)]}
+  (get (env/deref-checker) current-used-vars-kw #{}))
 
 (defn checked-vars []
   @(current-checked-var-defs))
@@ -93,7 +99,7 @@
   nil)
 
 (defn add-used-var [sym]
-  (swap! (current-used-vars) conj sym)
+  (env/swap-checker! update current-used-vars-kw (fnil conj #{}) sym)
   nil)
 
 (defn add-checked-var-def [sym]
@@ -114,7 +120,7 @@
   nil)
 
 (defn reset-current-used-vars! [s]
-  (reset! (current-used-vars) s)
+  (env/swap-checker! assoc current-used-vars-kw s)
   nil)
 
 (defn reset-current-checked-var-defs! [s]

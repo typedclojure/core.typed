@@ -67,8 +67,8 @@
    ;(v 'clojure.core.typed.var-env/CLJ-VAR-ANNOTATIONS)
    ;(the-var 'clojure.core.typed.var-env/*current-nocheck-var?*)
    ;(v 'clojure.core.typed.var-env/CLJ-NOCHECK-VAR?)
-   (the-var 'clojure.core.typed.var-env/*current-used-vars*)
-   (v 'clojure.core.typed.var-env/CLJ-USED-VARS)
+   ;(the-var 'clojure.core.typed.var-env/*current-used-vars*)
+   ;(v 'clojure.core.typed.var-env/CLJ-USED-VARS)
    (the-var 'clojure.core.typed.var-env/*current-checked-var-defs*)
    (v 'clojure.core.typed.var-env/CLJ-CHECKED-VAR-DEFS) 
 
@@ -104,8 +104,8 @@
    ;(v 'clojure.core.typed.var-env/CLJS-VAR-ANNOTATIONS)
    ;(the-var 'clojure.core.typed.var-env/*current-nocheck-var?*)
    ;(v 'clojure.core.typed.var-env/CLJS-NOCHECK-VAR?)
-   (the-var 'clojure.core.typed.var-env/*current-used-vars*)
-   (v 'clojure.core.typed.var-env/CLJS-USED-VARS)
+   ;(the-var 'clojure.core.typed.var-env/*current-used-vars*)
+   ;(v 'clojure.core.typed.var-env/CLJS-USED-VARS)
    (the-var 'clojure.core.typed.var-env/*current-checked-var-defs*)
    (v 'clojure.core.typed.var-env/CLJS-CHECKED-VAR-DEFS) 
 
