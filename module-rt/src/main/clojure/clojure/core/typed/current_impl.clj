@@ -56,8 +56,8 @@
   {(the-var 'clojure.core.typed.env/*checker*)
    (clj-checker)
 
-   (the-var 'clojure.core.typed.name-env/*current-name-env*)
-   (v 'clojure.core.typed.name-env/CLJ-TYPE-NAME-ENV)
+   ;(the-var 'clojure.core.typed.name-env/*current-name-env*)
+   ;(v 'clojure.core.typed.name-env/CLJ-TYPE-NAME-ENV)
    (the-var 'clojure.core.typed.protocol-env/*current-protocol-env*)
    (v 'clojure.core.typed.protocol-env/CLJ-PROTOCOL-ENV)
    (the-var 'clojure.core.typed.ns-deps/*current-deps*)
@@ -93,8 +93,8 @@
   {(the-var 'clojure.core.typed.env/*checker*)
    (cljs-checker)
    
-   (the-var 'clojure.core.typed.name-env/*current-name-env*)
-   (v 'clojure.core.typed.name-env/CLJS-TYPE-NAME-ENV)
+   ;(the-var 'clojure.core.typed.name-env/*current-name-env*)
+   ;(v 'clojure.core.typed.name-env/CLJS-TYPE-NAME-ENV)
    (the-var 'clojure.core.typed.protocol-env/*current-protocol-env*)
    (v 'clojure.core.typed.protocol-env/CLJS-PROTOCOL-ENV)
    (the-var 'clojure.core.typed.ns-deps/*current-deps*)
