@@ -11,11 +11,15 @@
   {})
 
 (defn init-checker []
-  (atom (empty-checker)))
+  (atom (empty-checker)
+        :validator map?))
 
 (defn deref-checker []
   {:post [(map? %)]}
   @(checker))
+
+(defn swap-checker! [& args]
+  (apply swap! (checker) args))
 
 (defmacro with-checker [c & body]
   `(binding [*checker* ~c]

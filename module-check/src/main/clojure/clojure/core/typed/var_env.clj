@@ -21,8 +21,14 @@
 (defn clj-var-annotations []
   (get @(impl/clj-checker) current-var-annotations-kw {}))
 
+(defn clj-nocheck-var? []
+  (get @(impl/clj-checker) current-nocheck-var?-kw {}))
+
+(defn clj-used-vars []
+  (get @(impl/clj-checker) current-used-vars-kw {}))
+
 ;(defonce CLJ-VAR-ANNOTATIONS (atom {} :validator (con/hash-c? (every-pred symbol? namespace) (some-fn delay? r/Type?))))
-(defonce CLJ-NOCHECK-VAR? (atom #{} :validator (con/set-c? (every-pred symbol? namespace))))
+;(defonce CLJ-NOCHECK-VAR? (atom #{} :validator (con/set-c? (every-pred symbol? namespace))))
 (defonce CLJ-USED-VARS (atom #{} :validator (con/set-c? (every-pred symbol? namespace))))
 (defonce CLJ-CHECKED-VAR-DEFS (atom #{} :validator (con/set-c? (every-pred symbol? namespace))))
 
@@ -32,11 +38,6 @@
 (defonce CLJS-CHECKED-VAR-DEFS (atom #{} :validator (con/set-c? (every-pred symbol? namespace))))
 
 (defonce CLJS-JSVAR-ANNOTATIONS (atom {} :validator (con/hash-c? symbol? r/Type?)))
-
-(defn current-nocheck-var? []
-  (let [env *current-nocheck-var?*]
-    (assert env "No var nocheck env bound")
-    env))
 
 (defn current-used-vars []
   (let [env *current-used-vars*]
@@ -57,7 +58,8 @@
   (get (env/deref-checker) current-var-annotations-kw {}))
 
 (defn var-no-checks []
-  @(current-nocheck-var?))
+  {:post [(set? %)]}
+  (get (env/deref-checker) current-nocheck-var?-kw #{}))
 
 (defn used-vars []
   @(current-used-vars))
@@ -70,7 +72,7 @@
     (when (not= old-t type)
       (println "WARNING: Duplicate var annotation: " sym)
       (flush)))
-  (swap! (env/checker) assoc-in [current-var-annotations-kw sym] type)
+  (env/swap-checker! assoc-in [current-var-annotations-kw sym] type)
   nil)
 
 (defn check-var? [sym]
@@ -83,11 +85,11 @@
   (contains? (used-vars) sym))
 
 (defn add-nocheck-var [sym]
-  (swap! (current-nocheck-var?) conj sym)
+  (env/swap-checker! update current-nocheck-var?-kw (fnil conj #{}) sym)
   nil)
 
 (defn remove-nocheck-var [sym]
-  (swap! (current-nocheck-var?) disj sym)
+  (env/swap-checker! update current-nocheck-var?-kw (fnil disj #{}) sym)
   nil)
 
 (defn add-used-var [sym]
@@ -104,11 +106,11 @@
                   (var-no-checks)))
 
 (defn reset-current-var-annotations! [m]
-  (swap! (env/checker) assoc current-var-annotations-kw m)
+  (env/swap-checker! assoc current-var-annotations-kw m)
   nil)
 
 (defn reset-current-nocheck-var?! [nocheck]
-  (reset! (current-nocheck-var?) nocheck)
+  (env/swap-checker! assoc current-nocheck-var?-kw nocheck)
   nil)
 
 (defn reset-current-used-vars! [s]
