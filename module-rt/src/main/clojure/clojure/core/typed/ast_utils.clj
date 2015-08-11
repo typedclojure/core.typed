@@ -19,10 +19,16 @@
             (require '[clojure.core.typed.util-cljs])
             ((impl/v 'clojure.core.typed.util-cljs/emit-form) expr))))
 
+(defn quote-expr-val [{:keys [op expr] :as q}]
+  {:pre [(or (and (#{:quote} op)
+                  (#{:const} (:op expr)))
+             (#{:const} op))]}
+  (if (#{:quote} op)
+    (:val expr)
+    (:val q)))
+
 (defn constant-expr [expr]
-  {:pre [(#{:quote} (:op expr))
-         (#{:const} (:op (:expr expr)))]}
-  (-> expr :expr :val))
+  (quote-expr-val expr))
 
 (defn do-statements-value [cexprs]
   ((impl/impl-case
@@ -46,13 +52,6 @@
 (defn constant-exprs [exprs]
   (map constant-expr exprs))
 
-(defn quote-expr-val [{:keys [op expr] :as q}]
-  {:pre [(or (and (#{:quote} op)
-                  (#{:const} (:op expr)))
-             (#{:const} op))]}
-  (if (#{:quote} op)
-    (:val expr)
-    (:val q)))
 
 (defn dummy-invoke-expr [fexpr args env]
   {:op :invoke

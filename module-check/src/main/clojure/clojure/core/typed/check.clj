@@ -1414,13 +1414,13 @@
   (assoc expr
          u/expr-type (local-result/local-result expr sym expected)))
 
-;; from clojure.tools.analyzer.passes.jvm.emit-form
+;; from clojure.core.typed.deps.clojure.tools.analyzer.passes.jvm.emit-form
 (defn class->sym [class]
   (if (symbol? class)
     class
     (symbol (.getName ^Class class))))
 
-;; from clojure.tools.analyzer.utils
+;; from clojure.core.typed.deps.clojure.tools.analyzer.utils
 (defn obj?
   "Returns true if x implements IObj"
   [x]

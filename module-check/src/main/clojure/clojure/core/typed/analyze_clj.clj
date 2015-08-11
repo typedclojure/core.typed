@@ -3,6 +3,7 @@
   (:require [clojure.core.typed.deps.clojure.tools.analyzer :as ta]
             [clojure.core.typed.deps.clojure.tools.analyzer.env :as ta-env]
             [clojure.core.typed.deps.clojure.tools.analyzer.jvm :as taj]
+            [clojure.core.typed.deps.clojure.tools.analyzer.jvm.single-pass :as single]
             [clojure.core.typed.deps.clojure.tools.analyzer.utils :as ta-utils]
             [clojure.core.typed.deps.clojure.tools.analyzer.passes :as passes]
             [clojure.core.typed.deps.clojure.tools.analyzer.passes.source-info :as source-info]
@@ -55,9 +56,10 @@
            ;ns-effect (clojure.core/in-ns name)
            ]
        `(do
-          ::T/special-collect
-          ::core/ns
-          {:form '~&form}
+          (do ::T/special-collect
+              ::core/ns
+              {:form '~&form}
+              nil)
           (T/tc-ignore
             (clojure.core/in-ns '~name)
             (with-loading-context
@@ -151,13 +153,10 @@
 
   Optional keyword arguments
    :eval-fn  Takes :eval-fn option that takes an option map and an AST and returns an 
-             evaluated and possibly type-checked AST.
-   :stop-analysis   an atom that, when set to true, will stop the next form from analysing.
-                    This is helpful if in a top-level do and one of the do statements 
-                    has a type error and is not evaluated."
+             evaluated and possibly type-checked AST."
   ([form] (analyze+eval form (taj/empty-env) {}))
   ([form env] (analyze+eval form env {}))
-  ([form env {:keys [eval-fn stop-analysis] :or {eval-fn eval-ast} :as opts}]
+  ([form env {:keys [eval-fn] :or {eval-fn eval-ast} :as opts}]
    {:pre [(map? env)]}
      (ta-env/ensure (taj/global-env)
        (taj/update-ns-map!) 
@@ -179,18 +178,14 @@
            ;; probably won't be an issue.
            (let [[statements ret] (ta-utils/butlast+last (rest mform))
                  statements-expr (mapv (fn [s] 
-                                         (if (some-> stop-analysis deref)
-                                           (unanalyzed-expr s)
-                                           (analyze+eval s (-> env
-                                                               (ta-utils/ctx :statement)
-                                                               (assoc :ns (ns-name *ns*)))
-                                                         (dissoc opts :expected))))
+                                         (analyze+eval s (-> env
+                                                             (ta-utils/ctx :ctx/statement)
+                                                             (assoc :ns (ns-name *ns*)))
+                                                       (dissoc opts :expected)))
                                        statements)
-                 ret-expr (if (some-> stop-analysis deref)
-                            (unanalyzed-expr ret)
-                            ;; NB: in TAJ 0.3.0 :ns doesn't do anything.
-                            ;; later versions rebind *ns*.
-                            (analyze+eval ret (assoc env :ns (ns-name *ns*)) opts))]
+                 ret-expr ;; NB: in TAJ 0.3.0 :ns doesn't do anything.
+                          ;; later versions rebind *ns*.
+                          (analyze+eval ret (assoc env :ns (ns-name *ns*)) opts)]
              (-> {:op         :do
                   :top-level  true
                   :form       mform
@@ -203,14 +198,12 @@
                   u/expr-type (u/expr-type ret-expr)
                   :raw-forms  raw-forms}
                source-info/source-info))
-           (merge (if (some-> stop-analysis deref)
-                    (unanalyzed-expr mform)
-                    ;; rebinds *ns* during analysis
-                    ;; FIXME unclear which map needs to have *ns*, especially post TAJ 0.3.0
-                    (eval-fn opts (taj/analyze mform (assoc env :ns (ns-name *ns*))
-                                               (-> opts 
-                                                   (dissoc :bindings-atom)
-                                                   (assoc-in [:bindings #'*ns*] *ns*)))))
+           (merge ;; rebinds *ns* during analysis
+                  ;; FIXME unclear which map needs to have *ns*, especially post TAJ 0.3.0
+                  (eval-fn opts (single/analyze mform (assoc env :ns (ns-name *ns*))
+                                             (-> opts 
+                                                 (dissoc :bindings-atom)
+                                                 (assoc-in [:bindings #'*ns*] *ns*))))
                   {:raw-forms raw-forms}))))))
 
 ;; reflect-validated from eastwood
@@ -410,14 +403,13 @@
          asts)))))
 
 (defn eval-ast [opts ast]
-  ;; based on jvm/analyze+eval
-  ;(let [frm (emit-form/emit-form ast)
-  ;      result (try (eval frm)  ;; eval the emitted form rather than directly the form to avoid double macroexpansion
-  ;                  (catch Exception e
-  ;                    (ExceptionThrown. e)))]
-  ;  (merge ast {:result result})))
-  (let [frm (emit-form/emit-form ast)
-        ;_ (prn "form" frm)
-        result (eval frm)]  ;; eval the emitted form rather than directly the form to avoid double macroexpansion
+  (let [
+        _ (prn "op" (:op ast))
+        _ (prn "form" (emit-form/emit-form ast))
+        result (if-let [eval-fn nil #_(:eval-fn ast)]
+                 (eval-fn) ;; single-pass
+                 (let [frm (emit-form/emit-form ast)
+                       _ (prn "op" (:op ast))
+                       _ (prn "form" frm)]
+                   (eval frm)))] ;; eval the emitted form rather than directly the form to avoid double macroexpansion
     (merge ast {:result result})))
-
