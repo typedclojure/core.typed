@@ -56,8 +56,6 @@
   {(the-var 'clojure.core.typed.env/*checker*)
    (clj-checker)
 
-   (the-var 'clojure.core.typed.declared-kind-env/*current-declared-kinds*)
-   (v 'clojure.core.typed.declared-kind-env/CLJ-DECLARED-KIND-ENV) 
    (the-var 'clojure.core.typed.datatype-env/*current-datatype-env*)
    (v 'clojure.core.typed.datatype-env/CLJ-DATATYPE-ENV) 
    (the-var 'clojure.core.typed.datatype-ancestor-env/*current-dt-ancestors*)
@@ -77,8 +75,6 @@
   {(the-var 'clojure.core.typed.env/*checker*)
    (cljs-checker)
 
-   (the-var 'clojure.core.typed.declared-kind-env/*current-declared-kinds*)
-   (v 'clojure.core.typed.declared-kind-env/CLJS-DECLARED-KIND-ENV) 
    (the-var 'clojure.core.typed.datatype-env/*current-datatype-env*)
    (v 'clojure.core.typed.datatype-env/CLJS-DATATYPE-ENV)
    (the-var 'clojure.core.typed.jsnominal-env/*current-jsnominal-env*)
