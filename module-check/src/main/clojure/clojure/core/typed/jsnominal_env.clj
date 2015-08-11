@@ -26,7 +26,7 @@
   "A map of symbols of JSNomainalEntry's"
   (t/Map t/Sym JSNominalEntry))
 
-(t/ann *current-protocol-env* (t/U nil (t/Atom1 JSNominalEnv)))
+(t/ann *current-jsnominal-env* (t/U nil (t/Atom1 JSNominalEnv)))
 (defonce ^:dynamic *current-jsnominal-env* nil)
 
 (t/ann JSNOMINAL-ENV (t/Atom1 JSNominalEnv))
