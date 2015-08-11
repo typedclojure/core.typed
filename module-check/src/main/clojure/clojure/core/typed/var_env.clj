@@ -35,19 +35,14 @@
 ;(defonce CLJ-VAR-ANNOTATIONS (atom {} :validator (con/hash-c? (every-pred symbol? namespace) (some-fn delay? r/Type?))))
 ;(defonce CLJ-NOCHECK-VAR? (atom #{} :validator (con/set-c? (every-pred symbol? namespace))))
 ;(defonce CLJ-USED-VARS (atom #{} :validator (con/set-c? (every-pred symbol? namespace))))
-(defonce CLJ-CHECKED-VAR-DEFS (atom #{} :validator (con/set-c? (every-pred symbol? namespace))))
+;(defonce CLJ-CHECKED-VAR-DEFS (atom #{} :validator (con/set-c? (every-pred symbol? namespace))))
 
 (defonce CLJS-VAR-ANNOTATIONS (atom {} :validator (con/hash-c? (every-pred symbol? namespace) r/Type?)))
-(defonce CLJS-NOCHECK-VAR? (atom #{} :validator (con/set-c? (every-pred symbol? namespace))))
+;(defonce CLJS-NOCHECK-VAR? (atom #{} :validator (con/set-c? (every-pred symbol? namespace))))
 ;(defonce CLJS-USED-VARS (atom #{} :validator (con/set-c? (every-pred symbol? namespace))))
-(defonce CLJS-CHECKED-VAR-DEFS (atom #{} :validator (con/set-c? (every-pred symbol? namespace))))
+;(defonce CLJS-CHECKED-VAR-DEFS (atom #{} :validator (con/set-c? (every-pred symbol? namespace))))
 
 (defonce CLJS-JSVAR-ANNOTATIONS (atom {} :validator (con/hash-c? symbol? r/Type?)))
-
-(defn current-used-vars []
-  (let [env *current-used-vars*]
-    (assert env "No used var env bound")
-    env))
 
 (defn current-checked-var-defs []
   (let [env *current-checked-var-defs*]
@@ -71,7 +66,8 @@
   (get (env/deref-checker) current-used-vars-kw #{}))
 
 (defn checked-vars []
-  @(current-checked-var-defs))
+  {:post [(set? %)]}
+  (get (env/deref-checker) current-checked-var-defs-kw #{}))
 
 (defn add-var-type [sym type]
   (when-let [old-t ((var-annotations) sym)]
@@ -103,7 +99,7 @@
   nil)
 
 (defn add-checked-var-def [sym]
-  (swap! (current-checked-var-defs) conj sym)
+  (env/swap-checker! update current-checked-var-defs-kw (fnil conj #{}) sym)
   nil)
 
 (defn vars-with-unchecked-defs []
@@ -124,7 +120,7 @@
   nil)
 
 (defn reset-current-checked-var-defs! [s]
-  (reset! (current-checked-var-defs) s)
+  (env/swap-checker! assoc current-checked-var-defs-kw s)
   nil)
 
 (defn reset-var-type-env! [m nocheck]
