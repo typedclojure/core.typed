@@ -60,13 +60,14 @@
               ::core/ns
               {:form '~&form}
               nil)
+          (T/tc-ignore (clojure.core/in-ns '~name))
           (T/tc-ignore
-            (clojure.core/in-ns '~name)
             (with-loading-context
               ~@(when gen-class-call (list gen-class-call))
               ~@(when (and (not= name 'clojure.core) (not-any? #(= :refer-clojure (first %)) references))
                   `((clojure.core/refer '~'clojure.core)))
-              ~@(map process-reference references))
+              ~@(map process-reference references)))
+          (T/tc-ignore
             (if (.equals '~name 'clojure.core) 
               nil
               (do (dosync (commute @#'clojure.core/*loaded-libs* (T/inst conj T/Symbol T/Any) '~name)) nil)))
