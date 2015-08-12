@@ -23,7 +23,17 @@
   (env/swap-checker! assoc-in [alias-env-kw sym] t)
   nil)
 
-(defonce protocol-env (atom {}))
+(def protocol-env-kw ::protocol-env)
+
+(defn protocol-env []
+  (get (env/deref-checker) protocol-env-kw {}))
+
+(defn add-protocol-env [sym t]
+  {:pre [(symbol? sym)]
+   :post [(nil? %)]}
+  (env/swap-checker! assoc-in [protocol-env-kw sym] t)
+  nil)
+
 (defonce rclass-env (atom {}))
 (defonce datatype-env (atom {}))
 (defonce jsnominal-env (atom {}))

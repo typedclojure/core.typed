@@ -1973,11 +1973,12 @@ for checking namespaces, cf for checking individual forms."}
         qualsym (if (namespace varsym)
                   varsym
                   (symbol (str (ns-name *ns*)) (name varsym)))]
-    (swap! impl/protocol-env
-           assoc qualsym
-           {:name qualsym
-            :methods mth
-            :bnds vbnd})
+    (impl/with-clojure-impl
+      (impl/add-protocol-env
+        qualsym
+        {:name qualsym
+         :methods mth
+         :bnds vbnd}))
     `(ann-protocol* '~vbnd '~varsym '~mth)))
 
 (defn ^:skip-wiki
