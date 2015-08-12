@@ -4,7 +4,7 @@
 
 (defn checker []
   (let [c *checker*]
-    (assert (instance? clojure.lang.IAtom c) "No checker state")
+    (assert (instance? clojure.lang.IAtom c) (str "No checker state: " (pr-str c)))
     c))
 
 (defn empty-checker []
