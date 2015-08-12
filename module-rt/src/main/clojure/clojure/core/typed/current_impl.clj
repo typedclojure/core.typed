@@ -5,12 +5,14 @@
             [clojure.core.typed.env :as env]))
 
 (defmacro create-env
-  "For name n, creates defs for {n}, {n}-kw, and add-{n}."
+  "For name n, creates defs for {n}, {n}-kw, add-{n},
+  and reset-{n}!"
   [n]
   {:pre [(symbol? n)
          (not (namespace n))]}
   (let [kw-def (symbol (str n "-kw"))
-        add-def (symbol (str "add-" n))]
+        add-def (symbol (str "add-" n))
+        reset-def (symbol (str "reset-" n "!"))]
     `(do (def ~kw-def ~(keyword (str (ns-name *ns*)) (str n)))
          (defn ~n []
            {:post [(map? ~'%)]}
@@ -19,15 +21,18 @@
            {:pre [(symbol? sym#)]
             :post [(nil? ~'%)]}
            (env/swap-checker! assoc-in [~kw-def sym#] t#)
-           nil))))
+           nil)
+         (defn ~reset-def [m#]
+           (env/swap-checker! assoc ~kw-def m#)
+           nil)
+         nil)))
 
 (create-env var-env)
 (create-env alias-env)
 (create-env protocol-env)
 (create-env rclass-env)
 (create-env datatype-env)
-
-(defonce jsnominal-env (atom {}))
+(create-env jsnominal-env)
 
 (defn v [vsym]
   {:pre [(symbol? vsym)
@@ -92,10 +97,7 @@
   cljs-checker-atom)
 
 (defn cljs-bindings []
-  {#'env/*checker* (cljs-checker)
-
-   (the-var 'clojure.core.typed.jsnominal-env/*current-jsnominal-env*)
-   (v 'clojure.core.typed.jsnominal-env/JSNOMINAL-ENV)})
+  {#'env/*checker* (cljs-checker)})
 
 (defmacro with-cljs-impl [& body]
   `(with-impl clojurescript
