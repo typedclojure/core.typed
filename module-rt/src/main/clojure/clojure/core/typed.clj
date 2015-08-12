@@ -1214,10 +1214,11 @@ for checking namespaces, cf for checking individual forms."}
          (app-outer-context# parse-clj# t#)))))
 
 (defn ^:skip-wiki add-to-alias-env [form qsym t]
-  (swap! impl/alias-env assoc qsym 
-         (impl/with-impl impl/clojure
-           (with-current-location form
-             (delay-parse t))))
+  (impl/with-impl impl/clojure
+    (impl/add-alias-env
+      qsym
+      (with-current-location form
+        (delay-parse t))))
   nil)
 
 (defmacro

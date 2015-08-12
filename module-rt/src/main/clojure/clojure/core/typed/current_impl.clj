@@ -12,7 +12,17 @@
   (env/swap-checker! assoc-in [var-env-kw sym] t)
   nil)
 
-(defonce alias-env (atom {}))
+(def alias-env-kw ::alias-env)
+
+(defn alias-env []
+  (get (env/deref-checker) alias-env-kw {}))
+
+(defn add-alias-env [sym t]
+  {:pre [(symbol? sym)]
+   :post [(nil? %)]}
+  (env/swap-checker! assoc-in [alias-env-kw sym] t)
+  nil)
+
 (defonce protocol-env (atom {}))
 (defonce rclass-env (atom {}))
 (defonce datatype-env (atom {}))

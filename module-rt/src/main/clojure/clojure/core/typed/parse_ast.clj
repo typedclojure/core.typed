@@ -1045,7 +1045,7 @@
                                               dt? (contains? @impl/datatype-env csym)]
                                           {:op (if dt? :DataType :Class) :name csym})
                            (var? res) (let [vsym (coerce/var->symbol res)]
-                                        (if (contains? @impl/alias-env vsym)
+                                        (if (contains? (impl/alias-env) vsym)
                                           {:op :Name :name vsym}
                                           {:op :Protocol :name vsym}))
                            (symbol? sym)
