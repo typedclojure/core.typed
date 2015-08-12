@@ -2,6 +2,11 @@
 
 (def ^:dynamic *checker* nil)
 
+(defn checker-or-nil []
+  {:post [(or (instance? clojure.lang.IAtom %)
+              (nil? %))]}
+  *checker*)
+
 (defn checker []
   (let [c *checker*]
     (assert (instance? clojure.lang.IAtom c) (str "No checker state: " (pr-str c)))

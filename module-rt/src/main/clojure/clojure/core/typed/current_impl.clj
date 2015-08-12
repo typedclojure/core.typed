@@ -1,7 +1,8 @@
 ; untyped, clojure.core.typed depends on this namespace
 (ns clojure.core.typed.current-impl
   (:require [clojure.core.typed.profiling :as p]
-            [clojure.set :as set]))
+            [clojure.set :as set]
+            [clojure.core.typed.env :as env]))
 
 (defonce var-env (atom {}))
 (defonce alias-env (atom {}))
@@ -32,96 +33,106 @@
 (def clojure ::clojure)
 (def clojurescript ::clojurescript)
 
-(def any-impl ::any-impl)
+(def unknown ::unknown)
 
-(derive clojure any-impl)
-(derive clojurescript any-impl)
+(derive clojure unknown)
+(derive clojurescript unknown)
 
-(defonce ^:dynamic *current-impl* :unknown)
-(set-validator! #'*current-impl* keyword?)
+(def current-impl-kw ::current-impl)
+
+(defn current-impl []
+  {:post [(keyword? %)]}
+  (get (some-> (env/checker-or-nil) deref)
+       current-impl-kw unknown))
+
+(declare bindings-for-impl)
 
 (defmacro with-impl [impl & body]
-  `(do (assert ((set [~impl :unknown]) *current-impl*)
-               (str "Cannot overlay different core.typed implementations: " (pr-str *current-impl*)
-                    ", expected " (pr-str ~impl)))
-     (binding [*current-impl* ~impl]
-       ~@body)))
+  `(with-bindings (bindings-for-impl ~impl)
+     ~@body))
 
-(defonce clj-checker-atom (delay ((v 'clojure.core.typed.env/init-checker))))
+(defonce clj-checker-atom 
+  (doto (env/init-checker)
+    (swap! assoc current-impl-kw clojure)))
 
 (defn clj-checker []
-  (force clj-checker-atom))
+  clj-checker-atom)
 
 (defn clj-bindings []
-  {(the-var 'clojure.core.typed.env/*checker*)
-   (clj-checker)})
+  {#'env/*checker* (clj-checker)})
 
 (defmacro with-clojure-impl [& body]
   `(with-impl clojure
-     (with-bindings (clj-bindings)
-       ~@body)))
+     ~@body))
 
-(defonce cljs-checker-atom (delay ((v 'clojure.core.typed.env/init-checker))))
+(defonce cljs-checker-atom 
+  (doto (env/init-checker)
+    (swap! assoc current-impl-kw clojurescript)))
 
 (defn cljs-checker []
-  (force cljs-checker-atom))
+  {:post [(instance? clojure.lang.IAtom %)]}
+  cljs-checker-atom)
 
 (defn cljs-bindings []
-  {(the-var 'clojure.core.typed.env/*checker*)
-   (cljs-checker)
+  {#'env/*checker* (cljs-checker)
 
    (the-var 'clojure.core.typed.jsnominal-env/*current-jsnominal-env*)
    (v 'clojure.core.typed.jsnominal-env/JSNOMINAL-ENV)})
 
 (defmacro with-cljs-impl [& body]
   `(with-impl clojurescript
-     (with-bindings (cljs-bindings)
-       ~@body)))
+     ~@body))
+
+(defn impl-for []
+  {:clojure (cljs-checker)
+   :cljs (clj-checker)})
+
+;; TODO make this a map when bindings don't use the-var/v
+(defn bindings-for-impl [impl]
+  (cond
+    (= clojure impl) (clj-bindings)
+    (= clojurescript impl) (cljs-bindings)
+    :else {}))
 
 (defmacro with-full-impl [impl & body]
   `(with-impl ~impl
-     (with-bindings (impl-case
-                      :clojure (clj-bindings)
-                      :cljs (cljs-bindings))
-       ~@body)))
-
+     ~@body))
 
 (defn implementation-specified? []
-  ((complement #{:unknown}) *current-impl*))
+  ((complement #{unknown}) (current-impl)))
 
 (defn ensure-impl-specified []
   (assert (implementation-specified?) "No implementation specified"))
 
-(defn current-impl []
-  (ensure-impl-specified)
-  *current-impl*)
-
 (defn checking-clojure? []
   (ensure-impl-specified)
-  (= clojure *current-impl*))
+  (= clojure (current-impl)))
 
 (defn checking-clojurescript? []
   (ensure-impl-specified)
-  (= clojurescript *current-impl*))
+  (= clojurescript (current-impl)))
 
 (defn assert-clojure 
   ([] (assert-clojure nil))
-  ([msg] (assert (= clojure *current-impl*) (str "Clojure implementation only"
+  ([msg] (assert (= clojure (current-impl)) (str "Clojure implementation only"
                                                  (when (seq msg)
                                                    (str ": " msg))))))
 
 (defn assert-cljs []
-  (assert (= clojurescript *current-impl*) "Clojurescript implementation only"))
+  (assert (= clojurescript (current-impl)) "Clojurescript implementation only"))
 
+;; :clojure = ::clojure
+;; :cljs = ::clojurescript
+;; :unknown = ::unknown
 (defmacro impl-case [& {clj-case :clojure cljs-case :cljs unknown :unknown :as opts}]
   (assert (empty? (set/difference (set (keys opts)) #{:clojure :cljs :unknown}))
           "Incorrect cases to impl-case")
-  `(case *current-impl*
+  `(case (current-impl)
      ~clojure ~clj-case
      ~clojurescript ~cljs-case
      ~(if (contains? opts :unknown)
         unknown
-        `(assert nil (str "No case matched for impl-case " *current-impl*)))))
+        `(assert nil (str "No case matched for impl-case " (current-impl))))))
 
 (defn var->symbol [^clojure.lang.Var var]
   {:pre [(var? var)]

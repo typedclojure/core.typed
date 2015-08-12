@@ -13,7 +13,7 @@
 (t/ann *parse-type-in-ns* (t/U nil t/Sym))
 (defonce ^:dynamic *parse-type-in-ns* nil)
 
-(t/ann ^:no-check clojure.core.typed.current-impl/*current-impl* (t/U nil t/Kw))
+;(t/ann ^:no-check clojure.core.typed.current-impl/*current-impl* (t/U nil t/Kw))
 (t/ann ^:no-check clojure.core.typed.current-impl/current-impl [-> t/Kw])
 
 (t/ann parse-in-ns [-> t/Sym])
