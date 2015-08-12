@@ -327,7 +327,7 @@
      (with-bindings old-bindings
        ;(prn "analyze1 namespace" *ns*)
        (let [ana (analyze+eval form (or env (taj/empty-env))
-                               (merge-with merge opts {:bindings (thread-bindings)}))]
+                               (update opts :bindings merge (thread-bindings)))]
          ;; only record vars that were already bound
          (when bindings-atom
            (reset! bindings-atom (select-keys (get-thread-bindings) (keys old-bindings))))
@@ -404,10 +404,10 @@
          asts)))))
 
 (defn eval-ast [opts ast]
-  (let [
+  (let [_ (prn "*ns*" *ns*)
         _ (prn "op" (:op ast))
         _ (prn "form" (emit-form/emit-form ast))
-        result (if-let [eval-fn nil #_(:eval-fn ast)]
+        result (if-let [eval-fn #_nil (:eval-fn ast)]
                  (eval-fn) ;; single-pass
                  (let [frm (emit-form/emit-form ast)
                        _ (prn "op" (:op ast))
