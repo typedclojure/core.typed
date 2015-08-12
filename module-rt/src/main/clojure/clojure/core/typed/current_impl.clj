@@ -71,7 +71,7 @@
 (declare bindings-for-impl)
 
 (defmacro with-impl [impl & body]
-  `(with-bindings (bindings-for-impl ~impl)
+  `(with-bindings (get (bindings-for-impl) ~impl {})
      ~@body))
 
 (defonce clj-checker-atom 
@@ -107,12 +107,9 @@
   {:clojure (cljs-checker)
    :cljs (clj-checker)})
 
-;; TODO make this a map when bindings don't use the-var/v
-(defn bindings-for-impl [impl]
-  (cond
-    (= clojure impl) (clj-bindings)
-    (= clojurescript impl) (cljs-bindings)
-    :else {}))
+(defn bindings-for-impl []
+  {clojure (clj-bindings)
+   clojurescript (cljs-bindings)})
 
 (defmacro with-full-impl [impl & body]
   `(with-impl ~impl
