@@ -4,7 +4,14 @@
             [clojure.set :as set]
             [clojure.core.typed.env :as env]))
 
-(defonce var-env (atom {}))
+(def var-env-kw ::var-env)
+
+(defn add-var-env [sym t]
+  {:pre [(symbol? sym)]
+   :post [(nil? %)]}
+  (env/swap-checker! assoc-in [var-env-kw sym] t)
+  nil)
+
 (defonce alias-env (atom {}))
 (defonce protocol-env (atom {}))
 (defonce rclass-env (atom {}))

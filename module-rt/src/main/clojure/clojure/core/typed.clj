@@ -1735,7 +1735,8 @@ for checking namespaces, cf for checking individual forms."}
                         (:nocheck opts)))
         ast (with-current-location &form
               (delay-parse typesyn))]
-    (swap! impl/var-env assoc qsym ast)
+    (impl/with-impl impl/clojure
+      (impl/add-var-env qsym ast))
     `(ann* '~qsym '~typesyn '~check?)))
 
 (defmacro ann-many
