@@ -4,38 +4,29 @@
             [clojure.set :as set]
             [clojure.core.typed.env :as env]))
 
-(def var-env-kw ::var-env)
+(defmacro create-env
+  "For name n, creates defs for {n}, {n}-kw, and add-{n}."
+  [n]
+  {:pre [(symbol? n)
+         (not (namespace n))]}
+  (let [kw-def (symbol (str n "-kw"))
+        add-def (symbol (str "add-" n))]
+    `(do (def ~kw-def ~(keyword (str (ns-name *ns*)) (str n)))
+         (defn ~n []
+           {:post [(map? ~'%)]}
+           (get (env/deref-checker) ~kw-def {}))
+         (defn ~add-def [sym# t#]
+           {:pre [(symbol? sym#)]
+            :post [(nil? ~'%)]}
+           (env/swap-checker! assoc-in [~kw-def sym#] t#)
+           nil))))
 
-(defn add-var-env [sym t]
-  {:pre [(symbol? sym)]
-   :post [(nil? %)]}
-  (env/swap-checker! assoc-in [var-env-kw sym] t)
-  nil)
+(create-env var-env)
+(create-env alias-env)
+(create-env protocol-env)
+(create-env rclass-env)
+(create-env datatype-env)
 
-(def alias-env-kw ::alias-env)
-
-(defn alias-env []
-  (get (env/deref-checker) alias-env-kw {}))
-
-(defn add-alias-env [sym t]
-  {:pre [(symbol? sym)]
-   :post [(nil? %)]}
-  (env/swap-checker! assoc-in [alias-env-kw sym] t)
-  nil)
-
-(def protocol-env-kw ::protocol-env)
-
-(defn protocol-env []
-  (get (env/deref-checker) protocol-env-kw {}))
-
-(defn add-protocol-env [sym t]
-  {:pre [(symbol? sym)]
-   :post [(nil? %)]}
-  (env/swap-checker! assoc-in [protocol-env-kw sym] t)
-  nil)
-
-(defonce rclass-env (atom {}))
-(defonce datatype-env (atom {}))
 (defonce jsnominal-env (atom {}))
 
 (defn v [vsym]

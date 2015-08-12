@@ -1499,7 +1499,8 @@ for checking namespaces, cf for checking individual forms."}
 (init-aliases)
 
 (defn ^:private rclass-pred [rcls opts]
-  (swap! impl/rclass-env assoc (impl/Class->symbol rcls) opts))
+  (impl/with-clojure-impl
+    (impl/add-rclass-env (impl/Class->symbol rcls) opts)))
 
 (defmacro ^:private rclass-preds [& args]
   `(do
@@ -1812,13 +1813,13 @@ for checking namespaces, cf for checking individual forms."}
     (let [qname (if (some #{\.} (str dname))
                   dname
                   (symbol (str (namespace-munge *ns*) "." dname)))]
-      (swap! impl/datatype-env 
-             assoc 
-             qname
-             {:record? false
-              :name qname
-              :fields fields
-              :bnd vbnd}))
+      (impl/with-clojure-impl
+        (impl/add-datatype-env 
+          qname
+          {:record? false
+           :name qname
+           :fields fields
+           :bnd vbnd})))
     `(ann-datatype* '~vbnd '~dname '~fields '~opts)))
 
 (defn ^:skip-wiki
@@ -1897,13 +1898,13 @@ for checking namespaces, cf for checking individual forms."}
     (let [qname (if (some #{\.} (str dname))
                   dname
                   (symbol (str (namespace-munge *ns*) "." dname)))]
-      (swap! impl/datatype-env 
-             assoc 
-             qname
-             {:record? true
-              :name qname
-              :fields fields
-              :bnd vbnd}))
+      (impl/with-clojure-impl
+        (impl/add-datatype-env 
+          qname
+          {:record? true
+           :name qname
+           :fields fields
+           :bnd vbnd})))
     `(ann-record* '~vbnd '~dname '~fields '~opt)))
 
 
