@@ -83,5 +83,16 @@
             :requires[[clojure.zip :refer [rights]]])
   (is-tc-err (rights 1) (U nil Any)
             :requires[[clojure.zip :refer [rights]]]))
+           
+(deftest replace-test
+   (is-tc-e (replace (vector-zip [1 2 [3 4] 5]) 3)  (Vec Any)
+	     :requires[[clojure.zip :refer [replace]]
+		       [clojure.zip :refer [vector-zip]]])
+   (is-tc-err (replace (vector-zip [1 2 [3 4] 5]) 3)  String
+	     :requires[[clojure.zip :refer [replace]]
+		       [clojure.zip :refer [vector-zip]]])
+   (is-tc-err (replace 1 3)  (Vec Any)
+	     :requires[[clojure.zip :refer [replace]]
+		       [clojure.zip :refer [vector-zip]]]))
 
 
