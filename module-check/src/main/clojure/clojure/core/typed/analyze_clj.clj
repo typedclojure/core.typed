@@ -32,48 +32,13 @@
 (alter-meta! *ns* assoc :skip-wiki true)
 
 (def typed-macros
-  {#'clojure.core/ns 
+  {#'ns 
    (fn [&form &env name & references]
-     (let [process-reference
-           (fn [[kname & args]]
-             `(~(symbol "clojure.core" (clojure.core/name kname))
-                        ~@(map #(list 'quote %) args)))
-           docstring  (when (string? (first references)) (first references))
-           references (if docstring (next references) references)
-           name (if docstring
-                  (vary-meta name assoc :doc docstring)
-                  name)
-           metadata   (when (map? (first references)) (first references))
-           references (if metadata (next references) references)
-           name (if metadata
-                  (vary-meta name merge metadata)
-                  name)
-           gen-class-clause (first (filter #(= :gen-class (first %)) references))
-           gen-class-call
-           (when gen-class-clause
-             (list* `gen-class :name (.replace (str name) \- \_) :impl-ns name :main true (next gen-class-clause)))
-           references (remove #(= :gen-class (first %)) references)
-           ;ns-effect (clojure.core/in-ns name)
-           ]
-       `(do
-          (do ::T/special-collect
-              ::core/ns
-              {:form '~&form}
-              nil)
-          (T/tc-ignore (clojure.core/in-ns '~name))
-          (T/tc-ignore
-            (with-loading-context
-              ~@(when gen-class-call (list gen-class-call))
-              ~@(when (and (not= name 'clojure.core) (not-any? #(= :refer-clojure (first %)) references))
-                  `((clojure.core/refer '~'clojure.core)))
-              ~@(map process-reference references)))
-          (T/tc-ignore
-            (if (.equals '~name 'clojure.core) 
-              nil
-              (do (dosync (commute @#'clojure.core/*loaded-libs* (T/inst conj T/Symbol T/Any) '~name)) nil)))
-          ;; so core.typed knows `ns` always returns nil
-          nil)))
-   })
+     `(do ::T/special-collect
+          ::core/ns
+          '{:form ~&form}
+          (T/tc-ignore ~(apply #'ns &form &env name references))
+          nil))})
 
 ;; copied from tools.analyze.jvm to insert `typed-macros`
 (defn macroexpand-1
@@ -404,13 +369,18 @@
          asts)))))
 
 (defn eval-ast [opts ast]
-  (let [_ (prn "*ns*" *ns*)
-        _ (prn "op" (:op ast))
-        _ (prn "form" (emit-form/emit-form ast))
-        result (if-let [eval-fn #_nil (:eval-fn ast)]
+  (let [;_ (prn "*ns*" *ns*)
+        ;_ (prn "op" (:op ast))
+        ;_ (prn "form" (emit-form/emit-form ast))
+        result (if-let [eval-fn nil #_(:eval-fn ast)] ;; TODO dissociate :eval-fn when AST is rewritten
                  (eval-fn) ;; single-pass
                  (let [frm (emit-form/emit-form ast)
-                       _ (prn "op" (:op ast))
-                       _ (prn "form" frm)]
+                       ;_ (prn "op" (:op ast))
+                       ;_ (prn "*ns*" *ns*)
+                       ;_ (binding [*print-length* nil
+                       ;            *print-level* nil]
+                       ;    (prn "form" frm))
+                       ]
+                   ;(prn (resolve 'refer))
                    (eval frm)))] ;; eval the emitted form rather than directly the form to avoid double macroexpansion
     (merge ast {:result result})))
