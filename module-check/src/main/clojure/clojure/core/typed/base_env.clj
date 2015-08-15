@@ -846,6 +846,11 @@ clojure.zip/right[(Vec Any) -> (U nil Any)]
 clojure.zip/up [Any -> (U nil (Vec Any))]
 clojure.zip/rights[(Vec Any) -> (U nil Any)]
 clojure.zip/replace[(Vec Any) Any -> (Vec Any)]
+clojure.zip/up [(Vec Any) -> (U nil (Vec Any))]
+clojure.zip/down[(Vec Any) -> (U (Vec Any) nil)]
+clojure.zip/left[(Vec Any) -> (U (Vec Any) nil)]
+clojure.zip/lefts[(Vec Any) -> (U (Vec Any) nil)]
+clojure.zip/leftmost[(Vec Any) -> (U (Vec Any) nil)]
 
 
 clojure.core/interpose (All [x] (IFn [x (Option (Seqable x)) -> (ASeq x)]))
