@@ -523,7 +523,7 @@
   (analysis->map
     [expr env opt]
     (let [^java.lang.reflect.Method
-          rmethod (field Compiler$StaticMethodExpr method expr)
+          rmethod (field Compiler$InstanceMethodExpr method expr)
           method (when rmethod
                    (@#'reflect/method->map rmethod))
           target (merge (analysis->map (field Compiler$InstanceMethodExpr target expr) env opt)
@@ -594,7 +594,7 @@
   (analysis->map
     [expr env opt]
     (let [^java.lang.reflect.Field
-          rfield (field Compiler$StaticFieldExpr field expr)
+          rfield (field Compiler$InstanceFieldExpr field expr)
           mfield (when rfield
                    (@#'reflect/field->map rfield))
           target (merge (analysis->map (field Compiler$InstanceFieldExpr target expr) env opt)
