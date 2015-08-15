@@ -377,9 +377,9 @@
                  (let [frm (emit-form/emit-form ast)
                        ;_ (prn "op" (:op ast))
                        ;_ (prn "*ns*" *ns*)
-                       ;_ (binding [*print-length* nil
-                       ;            *print-level* nil]
-                       ;    (prn "form" frm))
+                       _ (binding [*print-length* nil
+                                   *print-level* nil]
+                           (prn "form" frm))
                        ]
                    ;(prn (resolve 'refer))
                    (eval frm)))] ;; eval the emitted form rather than directly the form to avoid double macroexpansion
