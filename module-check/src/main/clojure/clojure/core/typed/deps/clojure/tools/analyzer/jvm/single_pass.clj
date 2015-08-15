@@ -1,7 +1,7 @@
 (ns clojure.core.typed.deps.clojure.tools.analyzer.jvm.single-pass
   "Interface to clojure.lang.Compiler/analyze.
 
-  Entry point `analyze-path` and `analyze-one`"
+  Entry point `analyze`"
   (:refer-clojure :exclude [macroexpand])
   (:import (java.io LineNumberReader InputStreamReader PushbackReader)
            (clojure.lang RT LineNumberingPushbackReader Compiler$DefExpr Compiler$LocalBinding Compiler$BindingInit Compiler$LetExpr
@@ -40,14 +40,14 @@
   Otherwise, AST is unevaluated. Defaults to false."
   false)
 
-(declare analyze-one)
+(declare analyze*)
 
 (defn analyze
   ([form] (analyze form (ana.jvm/empty-env) {}))
   ([form env] (analyze form env {}))
   ([form env opts]
    (env/ensure (ana.jvm/global-env)
-     (-> (analyze-one (merge env (select-keys (meta form) [:line :column :ns :file])) form opts)
+     (-> (analyze* (merge env (select-keys (meta form) [:line :column :ns :file])) form opts)
          uniquify-locals))))
 
 (defn analyze-form
@@ -1451,38 +1451,52 @@
 (defmethod keyword->Context :ctx/return    [_] Compiler$C/RETURN)
 ;; :eval Compiler$C/EVAL
 
+;; requires clojure 1.7
+(defn ^:private analyzer-bindings-one [env]
+  {Compiler/LOADER (RT/makeClassLoader)
+   Compiler/SOURCE_PATH (or (:file env) "NO_SOURCE_PATH")
+   Compiler/SOURCE (or (:file env) "NO_SOURCE_PATH")
+   Compiler/METHOD nil
+   Compiler/LOCAL_ENV nil
+   Compiler/LOOP_LOCALS nil
+   Compiler/NEXT_LOCAL_NUM 0
+   #'*ns* (the-ns (:ns env))
+   RT/READEVAL true
+   Compiler/LINE_BEFORE (int (or (:line env) 1))
+   Compiler/LINE_AFTER (int (or (:line env) 1))
+   RT/UNCHECKED_MATH @RT/UNCHECKED_MATH
+   #'*warn-on-reflection* *warn-on-reflection*
+   Compiler/COLUMN_BEFORE (int (or (:column env) 1))
+   Compiler/COLUMN_AFTER (int (or (:column env) 1))
+   RT/DATA_READERS @RT/DATA_READERS})
+
 (defn- analyze*
   "Must be called after binding the appropriate Compiler and RT dynamic Vars."
   ([env form] (analyze* env form {}))
   ([env form opts]
    (let [context (keyword->Context (:context env))
+         env (merge env
+                    (when-let [file (and (not= *file* "NO_SOURCE_FILE")
+                                         *file*)]
+                      {:file file}))
          expr-ast (try
-                    (Compiler/analyze context form)
+                    (with-bindings (analyzer-bindings-one env)
+                      (Compiler/analyze context form))
                     (catch RuntimeException e
                       (throw (repl/root-cause e))))]
-     (with-bindings (merge {Compiler/LOADER     (RT/makeClassLoader)
-                            ;#'ana/macroexpand-1 macroexpand-1
+     (with-bindings (merge {;#'ana/macroexpand-1 macroexpand-1
                             ;#'ana/create-var    create-var
                             ;#'ana/parse         parse
                             ;#'ana/var?          var?
                             ;#'elides            (merge {:fn    #{:line :column :end-line :end-column :file :source}
                             ;                            :reify #{:line :column :end-line :end-column :file :source}}
                             ;                           elides)
-                            #'*ns*              (the-ns (:ns env))}
+                            ;#'*ns*              (the-ns (:ns env))
+                            }
                            (:bindings opts))
-       (-> (analysis->map expr-ast 
-                          (merge env
-                                 (when-let [file (and (not= *file* "NO_SOURCE_FILE")
-                                                      *file*)]
-                                   {:file file}))
-                          opts)
+       (-> (analysis->map expr-ast env opts)
            (assoc :top-level true
                   :eval-fn #(method-accessor (class expr-ast) 'eval expr-ast [])))))))
-
-(defn analyze-one
-  "Analyze a single form"
-  ([env form] (analyze-one env form {}))
-  ([env form opt] (analyze* env form opt)))
 
 (defn forms-seq
   "Lazy seq of forms in a Clojure or ClojureScript file."
