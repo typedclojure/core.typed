@@ -95,4 +95,45 @@
 	     :requires[[clojure.zip :refer [replace]]
 		       [clojure.zip :refer [vector-zip]]]))
 
+(deftest up-test
+   (is-tc-e (up [1 2 [3 4] 5] )  (U nil (Vec Any))
+	     :requires[[clojure.zip :refer [up]]])
+   (is-tc-err (up [1 2 [3 4] 5] )  String
+	     :requires[[clojure.zip :refer [up]]])
+   (is-tc-err (up 1 )  (U nil (Vec Any))
+	     :requires[[clojure.zip :refer [up]]]))
+
+(deftest down-test
+   (is-tc-e (down (zipper vector? seq 1 [1 3 4 ])) (U nil(Vec Any))
+	     :requires[[clojure.zip :refer [zipper]]
+                       [clojure.zip :refer [down]]])
+   (is-tc-err (down (zipper vector? seq 1 [1 3 4 ]))  String
+	     :requires[[clojure.zip :refer [zipper]]
+                       [clojure.zip :refer [down]]])
+   (is-tc-err (down 1) (U nil(Vec Any))
+	     :requires[[clojure.zip :refer [down]]]))
+
+(deftest left-test
+   (is-tc-e (left [1 2 [3 4] 5] )  (U nil (Vec Any))
+	     :requires[[clojure.zip :refer [left]]])
+   (is-tc-err (left [1 2 [3 4] 5] )  String
+	     :requires[[clojure.zip :refer [left]]])
+   (is-tc-err (left 1 )  (U nil (Vec Any))
+	     :requires[[clojure.zip :refer [left]]]))
+
+(deftest leftmost-test
+   (is-tc-e (leftmost [1 2 [3 4] 5] )  (U nil (Vec Any))
+	     :requires[[clojure.zip :refer [leftmost]]])
+   (is-tc-err (leftmost [1 2 [3 4] 5] )  String
+	     :requires[[clojure.zip :refer [leftmost]]])
+   (is-tc-err (leftmost 1 )  (U nil (Vec Any))
+	     :requires[[clojure.zip :refer [leftmost]]]))
+
+(deftest lefts-test
+   (is-tc-e (lefts [1 2 [3 4] 5] )  (U nil (Vec Any))
+	     :requires[[clojure.zip :refer [lefts]]])
+   (is-tc-err (lefts [1 2 [3 4] 5] )  String
+	     :requires[[clojure.zip :refer [lefts]]])
+   (is-tc-err (lefts 1 )  (U nil (Vec Any))
+	     :requires[[clojure.zip :refer [lefts]]]))
 
