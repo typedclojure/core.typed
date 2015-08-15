@@ -970,6 +970,7 @@
           form (get fn-method-forms (if rest-param
                                       (inc (count required-params))
                                       (count required-params)))
+          _ (prn "method" form)
           ;_ (prn "params-expr" (map :op params-expr))
           body-env (into (update-in env [:locals]
                                     merge (zipmap (map :name params-expr) (map u/dissoc-env params-expr)))
@@ -1034,13 +1035,13 @@
           menv (if this
                  (update-in menv [:locals] assoc (:name this) this)
                  menv)
-          variadic-method (when-let [variadic-method (.variadicMethod expr)]
-                            (analysis->map variadic-method menv (assoc opt :fn-method-forms fn-method-forms)))
-          methods-no-variadic (mapv #(analysis->map % menv (assoc opt :fn-method-forms fn-method-forms)) (.methods expr))
-          methods (into methods-no-variadic
-                        (when variadic-method
-                          [variadic-method]))
-          fixed-arities (seq (map :fixed-arity methods-no-variadic))
+          ;variadic-method (when-let [variadic-method (.variadicMethod expr)]
+          ;                  (analysis->map variadic-method menv (assoc opt :fn-method-forms fn-method-forms)))
+          methods (mapv #(analysis->map % menv (assoc opt :fn-method-forms fn-method-forms)) (.methods expr))
+          ;methods (into methods-no-variadic
+          ;              (when variadic-method
+          ;                [variadic-method]))
+          fixed-arities (seq (keep :fixed-arity methods))
           max-fixed-arity (when fixed-arities (apply max fixed-arities))
           tag (.getJavaClass expr)]
       (merge
@@ -1052,7 +1053,7 @@
                           [(emit-form/emit-form this)])
                         (map emit-form/emit-form methods)))
          :methods methods
-         :variadic? (boolean variadic-method)
+         :variadic? (boolean (.variadicMethod expr))
          :tag   tag
          :o-tag tag
          :max-fixed-arity max-fixed-arity
