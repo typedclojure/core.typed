@@ -135,6 +135,7 @@
                                      (if (= mform form)
                                        [mform (seq raw-forms)]
                                        (recur mform (conj raw-forms form))))))]
+         ;(prn "mform" mform)
          (if (and (seq? mform) (= 'do (first mform)) (next mform)
                   ;; if this is a typed special form like an ann-form, don't treat like
                   ;; a top-level do.

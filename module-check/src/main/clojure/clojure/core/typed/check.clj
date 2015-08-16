@@ -1365,7 +1365,7 @@
   [expr expected]
   (tc-ignore/check-tc-ignore check expr expected))
 
-(defmethod internal-special-form ::t/tag
+#_(defmethod internal-special-form ::t/tag
   [{[_ _ {{tag :tag} :val} :as statements] :statements :keys [ret] :as expr} expected]
   {:pre [(#{3} (count statements))]
    :post [(-> % u/expr-type r/TCResult?)]}
@@ -1378,17 +1378,17 @@
            u/expr-type (u/expr-type cret))))
 
 (defmethod internal-special-form ::t/fn
-  [{[_ _ {{fn-anns :ann} :val} :as statements] :statements fexpr :ret :keys [env] :as expr} expected]
+  [{:keys [env] :as expr} expected]
   ;(prn "check special :fn" expected)
   (prepare-check-fn env expr
     (special-fn/check-special-fn check expr expected)))
 
 (defmethod internal-special-form ::t/ann-form
-  [{[_ _ {{tsyn :type} :val} :as statements] :statements frm :ret, :keys [env], :as expr} expected]
+  [expr expected]
   (ann-form/check-ann-form check expr expected))
 
 (defmethod internal-special-form ::t/loop
-  [{[_ _ {{tsyns :ann} :val} :as statements] :statements frm :ret, :keys [env], :as expr} expected]
+  [expr expected]
   (special-loop/check-special-loop check expr expected))
 
 (defmethod internal-special-form :default
