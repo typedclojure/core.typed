@@ -208,8 +208,11 @@
             {:class cls, :field-name fld-name}))))))
 
 (defn get-method [ast]
+  ;(prn (:reflected-method ast))
   (let [cls (:class ast)
-        method-name (name (:method ast))
+        _ (assert (class? cls))
+        method-name (some-> (:method ast) name)
+        _ (assert method-name)
         arg-type-vec (mapv :tag (:args ast))
         arg-type-arr (into-array Class arg-type-vec)]
 ;;    (println (format "dbgx: get-method cls=%s method=%s arg-types=%s"
