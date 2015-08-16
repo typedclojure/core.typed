@@ -5214,7 +5214,10 @@
   (is (profile :info :bar
         (tc-e nil)))
   (is (profile :info :bar
-        (cf nil)))
+        (tc-e refer)))
+  (is (profile :info :bar
+        (time (cf (fn [{:keys [a]}] (inc a))
+                  ['{:a Int} -> Int]))))
   (is (binding [*ns* *ns*]
         (profile :info :bar
           (cf (ns foo (:require [clojure.core.typed :as t]))))))

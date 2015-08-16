@@ -3,6 +3,7 @@
   (:require [clojure.core.typed.deps.clojure.tools.analyzer :as ta]
             [clojure.core.typed.deps.clojure.tools.analyzer.env :as ta-env]
             [clojure.core.typed.deps.clojure.tools.analyzer.jvm :as taj]
+            [clojure.core.typed.deps.clojure.tools.analyzer.jvm.single-pass :as single]
             [clojure.core.typed.deps.clojure.tools.analyzer.utils :as ta-utils]
             [clojure.core.typed.deps.clojure.tools.analyzer.passes :as passes]
             [clojure.core.typed.deps.clojure.tools.analyzer.passes.source-info :as source-info]
@@ -31,46 +32,13 @@
 (alter-meta! *ns* assoc :skip-wiki true)
 
 (def typed-macros
-  {#'clojure.core/ns 
+  {#'ns 
    (fn [&form &env name & references]
-     (let [process-reference
-           (fn [[kname & args]]
-             `(~(symbol "clojure.core" (clojure.core/name kname))
-                        ~@(map #(list 'quote %) args)))
-           docstring  (when (string? (first references)) (first references))
-           references (if docstring (next references) references)
-           name (if docstring
-                  (vary-meta name assoc :doc docstring)
-                  name)
-           metadata   (when (map? (first references)) (first references))
-           references (if metadata (next references) references)
-           name (if metadata
-                  (vary-meta name merge metadata)
-                  name)
-           gen-class-clause (first (filter #(= :gen-class (first %)) references))
-           gen-class-call
-           (when gen-class-clause
-             (list* `gen-class :name (.replace (str name) \- \_) :impl-ns name :main true (next gen-class-clause)))
-           references (remove #(= :gen-class (first %)) references)
-           ;ns-effect (clojure.core/in-ns name)
-           ]
-       `(do
-          ::T/special-collect
+     `(do ::T/special-collect
           ::core/ns
-          {:form '~&form}
-          (T/tc-ignore
-            (clojure.core/in-ns '~name)
-            (with-loading-context
-              ~@(when gen-class-call (list gen-class-call))
-              ~@(when (and (not= name 'clojure.core) (not-any? #(= :refer-clojure (first %)) references))
-                  `((clojure.core/refer '~'clojure.core)))
-              ~@(map process-reference references))
-            (if (.equals '~name 'clojure.core) 
-              nil
-              (do (dosync (commute @#'clojure.core/*loaded-libs* (T/inst conj T/Symbol T/Any) '~name)) nil)))
-          ;; so core.typed knows `ns` always returns nil
-          nil)))
-   })
+          '{:form ~&form}
+          (T/tc-ignore ~(apply #'ns &form &env name references))
+          nil))})
 
 ;; copied from tools.analyze.jvm to insert `typed-macros`
 (defn macroexpand-1
@@ -151,13 +119,10 @@
 
   Optional keyword arguments
    :eval-fn  Takes :eval-fn option that takes an option map and an AST and returns an 
-             evaluated and possibly type-checked AST.
-   :stop-analysis   an atom that, when set to true, will stop the next form from analysing.
-                    This is helpful if in a top-level do and one of the do statements 
-                    has a type error and is not evaluated."
+             evaluated and possibly type-checked AST."
   ([form] (analyze+eval form (taj/empty-env) {}))
   ([form env] (analyze+eval form env {}))
-  ([form env {:keys [eval-fn stop-analysis] :or {eval-fn eval-ast} :as opts}]
+  ([form env {:keys [eval-fn] :or {eval-fn eval-ast} :as opts}]
    {:pre [(map? env)]}
      (ta-env/ensure (taj/global-env)
        (taj/update-ns-map!) 
@@ -170,6 +135,7 @@
                                      (if (= mform form)
                                        [mform (seq raw-forms)]
                                        (recur mform (conj raw-forms form))))))]
+         ;(prn "mform" mform)
          (if (and (seq? mform) (= 'do (first mform)) (next mform)
                   ;; if this is a typed special form like an ann-form, don't treat like
                   ;; a top-level do.
@@ -179,18 +145,14 @@
            ;; probably won't be an issue.
            (let [[statements ret] (ta-utils/butlast+last (rest mform))
                  statements-expr (mapv (fn [s] 
-                                         (if (some-> stop-analysis deref)
-                                           (unanalyzed-expr s)
-                                           (analyze+eval s (-> env
-                                                               (ta-utils/ctx :statement)
-                                                               (assoc :ns (ns-name *ns*)))
-                                                         (dissoc opts :expected))))
+                                         (analyze+eval s (-> env
+                                                             (ta-utils/ctx :ctx/statement)
+                                                             (assoc :ns (ns-name *ns*)))
+                                                       (dissoc opts :expected)))
                                        statements)
-                 ret-expr (if (some-> stop-analysis deref)
-                            (unanalyzed-expr ret)
-                            ;; NB: in TAJ 0.3.0 :ns doesn't do anything.
-                            ;; later versions rebind *ns*.
-                            (analyze+eval ret (assoc env :ns (ns-name *ns*)) opts))]
+                 ret-expr ;; NB: in TAJ 0.3.0 :ns doesn't do anything.
+                          ;; later versions rebind *ns*.
+                          (analyze+eval ret (assoc env :ns (ns-name *ns*)) opts)]
              (-> {:op         :do
                   :top-level  true
                   :form       mform
@@ -203,14 +165,12 @@
                   u/expr-type (u/expr-type ret-expr)
                   :raw-forms  raw-forms}
                source-info/source-info))
-           (merge (if (some-> stop-analysis deref)
-                    (unanalyzed-expr mform)
-                    ;; rebinds *ns* during analysis
-                    ;; FIXME unclear which map needs to have *ns*, especially post TAJ 0.3.0
-                    (eval-fn opts (taj/analyze mform (assoc env :ns (ns-name *ns*))
-                                               (-> opts 
-                                                   (dissoc :bindings-atom)
-                                                   (assoc-in [:bindings #'*ns*] *ns*)))))
+           (merge ;; rebinds *ns* during analysis
+                  ;; FIXME unclear which map needs to have *ns*, especially post TAJ 0.3.0
+                  (eval-fn opts (single/analyze mform (assoc env :ns (ns-name *ns*))
+                                             (-> opts 
+                                                 (dissoc :bindings-atom)
+                                                 (assoc-in [:bindings #'*ns*] *ns*))))
                   {:raw-forms raw-forms}))))))
 
 ;; reflect-validated from eastwood
@@ -249,8 +209,11 @@
             {:class cls, :field-name fld-name}))))))
 
 (defn get-method [ast]
+  ;(prn (:reflected-method ast))
   (let [cls (:class ast)
-        method-name (name (:method ast))
+        _ (assert (class? cls))
+        method-name (some-> (:method ast) name)
+        _ (assert method-name)
         arg-type-vec (mapv :tag (:args ast))
         arg-type-arr (into-array Class arg-type-vec)]
 ;;    (println (format "dbgx: get-method cls=%s method=%s arg-types=%s"
@@ -333,7 +296,7 @@
      (with-bindings old-bindings
        ;(prn "analyze1 namespace" *ns*)
        (let [ana (analyze+eval form (or env (taj/empty-env))
-                               (merge-with merge opts {:bindings (thread-bindings)}))]
+                               (update opts :bindings merge (thread-bindings)))]
          ;; only record vars that were already bound
          (when bindings-atom
            (reset! bindings-atom (select-keys (get-thread-bindings) (keys old-bindings))))
@@ -410,14 +373,18 @@
          asts)))))
 
 (defn eval-ast [opts ast]
-  ;; based on jvm/analyze+eval
-  ;(let [frm (emit-form/emit-form ast)
-  ;      result (try (eval frm)  ;; eval the emitted form rather than directly the form to avoid double macroexpansion
-  ;                  (catch Exception e
-  ;                    (ExceptionThrown. e)))]
-  ;  (merge ast {:result result})))
-  (let [frm (emit-form/emit-form ast)
-        ;_ (prn "form" frm)
-        result (eval frm)]  ;; eval the emitted form rather than directly the form to avoid double macroexpansion
+  (let [;_ (prn "*ns*" *ns*)
+        ;_ (prn "op" (:op ast))
+        ;_ (prn "form" (emit-form/emit-form ast))
+        result (if-let [eval-fn nil #_(:eval-fn ast)] ;; TODO dissociate :eval-fn when AST is rewritten
+                 (eval-fn) ;; single-pass
+                 (let [frm (emit-form/emit-form ast)
+                       ;_ (prn "op" (:op ast))
+                       ;_ (prn "*ns*" *ns*)
+                       ;_ (binding [*print-length* nil
+                       ;            *print-level* nil]
+                       ;    (prn "form" frm))
+                       ]
+                   ;(prn (resolve 'refer))
+                   (eval frm)))] ;; eval the emitted form rather than directly the form to avoid double macroexpansion
     (merge ast {:result result})))
-
