@@ -524,7 +524,7 @@
     [expr env opt]
     (let [^java.lang.reflect.Method
           rmethod (field Compiler$InstanceMethodExpr method expr)
-          _ (prn rmethod)
+          ;_ (prn rmethod)
           method (when rmethod
                    (@#'reflect/method->map rmethod))
           cls (some-> rmethod .getDeclaringClass)
