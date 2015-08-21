@@ -136,4 +136,15 @@
 	     :requires[[clojure.zip :refer [lefts]]])
    (is-tc-err (lefts 1 )  (U nil (Vec Any))
 	     :requires[[clojure.zip :refer [lefts]]]))
+	    
+(deftest append-child-test
+(is-tc-e (append-child (vector-zip [1 2]) 9) (Vec Any)	     
+                 :requires[[clojure.zip :refer [append-child]]
+		           [clojure.zip :refer [vector-zip]]])
+(is-tc-err (append-child (vector-zip [1 2]) 9) String	     
+                 :requires[[clojure.zip :refer [append-child]]
+		           [clojure.zip :refer [vector-zip]]]))
+(is-tc-err (append-child (vector-zip [1 2]) 9 ) (Vec Any)	     
+                 :requires[[clojure.zip :refer [append-child]]
+		           [clojure.zip :refer [vector-zip]]]))
 
