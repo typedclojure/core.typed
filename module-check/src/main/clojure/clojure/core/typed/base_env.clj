@@ -851,7 +851,7 @@ clojure.zip/down[(Vec Any) -> (U (Vec Any) nil)]
 clojure.zip/left[(Vec Any) -> (U (Vec Any) nil)]
 clojure.zip/lefts[(Vec Any) -> (U (Vec Any) nil)]
 clojure.zip/leftmost[(Vec Any) -> (U (Vec Any) nil)]
-
+clojure.zip/append-child[(Vec Any) Any -> (Vec Any)] 
 
 clojure.core/interpose (All [x] (IFn [x (Option (Seqable x)) -> (ASeq x)]))
 clojure.core/interleave (All [x] [(Option (Seqable x)) (Option (Seqable x)) (Option (Seqable x)) * -> (ASeq x)])
