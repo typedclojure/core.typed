@@ -137,14 +137,122 @@
    (is-tc-err (lefts 1 )  (U nil (Vec Any))
 	     :requires[[clojure.zip :refer [lefts]]]))
 	    
+
 (deftest append-child-test
 (is-tc-e (append-child (vector-zip [1 2]) 9) (Vec Any)	     
                  :requires[[clojure.zip :refer [append-child]]
 		           [clojure.zip :refer [vector-zip]]])
 (is-tc-err (append-child (vector-zip [1 2]) 9) String	     
                  :requires[[clojure.zip :refer [append-child]]
-		           [clojure.zip :refer [vector-zip]]]))
-(is-tc-err (append-child (vector-zip [1 2]) 9 ) (Vec Any)	     
-                 :requires[[clojure.zip :refer [append-child]]
-		           [clojure.zip :refer [vector-zip]]]))
+		           [clojure.zip :refer [vector-zip]]])
+(is-tc-err (append-child 1 9 ) (Vec Any)	     
+                 :requires[[clojure.zip :refer [append-child]]]))
+		       
+
+(deftest branch?-test
+(is-tc-e (branch? (vector-zip [1 2])) Boolean     
+                 :requires[[clojure.zip :refer [branch?]]
+		           [clojure.zip :refer [vector-zip]]])
+(is-tc-err (branch? (vector-zip [1 2])) String	     
+                 :requires[[clojure.zip :refer [branch?]]
+		           [clojure.zip :refer [vector-zip]]])
+(is-tc-err (branch? 1 ) Boolean 	     
+                 :requires[[clojure.zip :refer [branch?]]]))
+		           
+
+(deftest down-test
+(is-tc-e (down (vector-zip [1 2])) (U nil (Vec Any))	     
+                 :requires[[clojure.zip :refer [down]]
+		           [clojure.zip :refer [vector-zip]]])
+(is-tc-err (down (vector-zip [1 2])) String	     
+                 :requires[[clojure.zip :refer [down]]
+		           [clojure.zip :refer [vector-zip]]])
+(is-tc-err (down 1 ) (U nil (Vec Any)) 	     
+                 :requires[[clojure.zip :refer [down]]]))
+
+(deftest end?-test
+(is-tc-e (end? (vector-zip [1 2])) Boolean     
+                 :requires[[clojure.zip :refer [end?]]
+		           [clojure.zip :refer [vector-zip]]])
+(is-tc-err (end? (vector-zip [1 2])) String	     
+                 :requires[[clojure.zip :refer [end?]]
+		           [clojure.zip :refer [vector-zip]]])
+(is-tc-err (end? 1 ) Boolean 	     
+                 :requires[[clojure.zip :refer [end?]]]))
+
+(deftest insert-child-test
+(is-tc-e (insert-child (vector-zip [1 2]) 9) (Vec Any)	     
+                 :requires[[clojure.zip :refer [insert-child]]
+		           [clojure.zip :refer [vector-zip]]])
+(is-tc-err (insert-child (vector-zip [1 2]) 9) String	     
+                 :requires[[clojure.zip :refer [insert-child]]
+		           [clojure.zip :refer [vector-zip]]])
+(is-tc-err (insert-child 1 9 ) (Vec Any)	     
+                 :requires[[clojure.zip :refer [insert-child]]]))
+
+(deftest insert-left-test
+(is-tc-e (insert-left (down (vector-zip [1 22 3 5])) 6) (Vec Any)	     
+                 :requires[[clojure.zip :refer [insert-left]]
+		           [clojure.zip :refer [down]]
+		           [clojure.zip :refer [vector-zip]]])
+(is-tc-err (insert-left (down (vector-zip [1 22 3 5])) 6) String	     
+                 :requires[[clojure.zip :refer [insert-left]]
+                           [clojure.zip :refer [down]]
+		           [clojure.zip :refer [vector-zip]]])
+(is-tc-err (insert-left 1 9 ) (Vec Any)	     
+                 :requires[[clojure.zip :refer [insert-left]]]))
+
+(deftest insert-right-test
+(is-tc-e (insert-right (down (vector-zip [1 22 3 5])) 6) (Vec Any)	     
+                 :requires[[clojure.zip :refer [insert-right]]
+		           [clojure.zip :refer [down]]
+		           [clojure.zip :refer [vector-zip]]])
+(is-tc-err (insert-right (down (vector-zip [1 22 3 5])) 6) String	     
+                 :requires[[clojure.zip :refer [insert-right]]
+                           [clojure.zip :refer [down]]
+		           [clojure.zip :refer [vector-zip]]])
+(is-tc-err (insert-right 1 9 ) (Vec Any)	     
+                 :requires[[clojure.zip :refer [insert-right]]]))
+
+(deftest next-test
+(is-tc-e (next (vector-zip [1 2])) (Vec Any)     
+                 :requires[[clojure.zip :refer [next]]
+		           [clojure.zip :refer [vector-zip]]])
+(is-tc-err (next (vector-zip [1 2])) String	     
+                 :requires[[clojure.zip :refer [next]]
+		           [clojure.zip :refer [vector-zip]]])
+(is-tc-err (next 1 ) (Vec Any) 	     
+                 :requires[[clojure.zip :refer [next]]]))
+
+(deftest prev-test
+(is-tc-e (prev (vector-zip [1 2])) (U (Vec Any) nil)    
+                 :requires[[clojure.zip :refer [prev]]
+		           [clojure.zip :refer [vector-zip]]])
+(is-tc-err (prev (vector-zip [1 2])) String	     
+                 :requires[[clojure.zip :refer [prev]]
+		           [clojure.zip :refer [vector-zip]]])
+(is-tc-err (prev 1 ) (U (Vec Any) nil)	     
+                 :requires[[clojure.zip :refer [prev]]]))
+
+(deftest path-test
+(is-tc-e (path (vector-zip [1 2])) (U (Vec Any) nil)    
+                 :requires[[clojure.zip :refer [path]]
+		           [clojure.zip :refer [vector-zip]]])
+(is-tc-err (path (vector-zip [1 2])) String	     
+                 :requires[[clojure.zip :refer [path]]
+		           [clojure.zip :refer [vector-zip]]])
+(is-tc-err (path 1 ) (U (Vec Any) nil)	     
+                 :requires[[clojure.zip :refer [path]]]))
+
+(deftest remove-test
+(is-tc-e (remove (down (vector-zip [1 22 3 5]))) (Vec Any)	     
+                 :requires[[clojure.zip :refer [remove]]
+		           [clojure.zip :refer [down]]
+		           [clojure.zip :refer [vector-zip]]])
+(is-tc-err (remove (down (vector-zip [1 22 3 5]))) String	     
+                 :requires[[clojure.zip :refer [remove]]
+                           [clojure.zip :refer [down]]
+		           [clojure.zip :refer [vector-zip]]])
+(is-tc-err (remove 1  ) (Vec Any)	     
+                 :requires[[clojure.zip :refer [remove]]]))
 
