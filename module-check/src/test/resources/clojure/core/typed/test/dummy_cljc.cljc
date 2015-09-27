@@ -1,2 +1,2 @@
-(ns clojure.core.typed.test.dummy_cljc
+(ns clojure.core.typed.test.dummy-cljc
   (:require [clojure.core.typed :as t]))
