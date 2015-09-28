@@ -7,12 +7,13 @@
 
 (defn suggest-type-hints [m-or-f targett argtys & {:keys [constructor-call]}]
   {:pre [((some-fn nil? r/Type?) targett)
-         (every? r/Type? argtys)]}
+         (every? r/Type? argtys)]
+   :post [((some-fn nil? string?) %)]}
   (let [targett (when targett
                   (c/fully-resolve-type targett))
         cls (cond
               constructor-call (coerce/symbol->Class constructor-call)
-              :else (cu/Type->Class targett))]
+              targett (cu/Type->Class targett))]
     (when cls
       (let [r (reflect-u/reflect cls)
             {methods clojure.reflect.Method
