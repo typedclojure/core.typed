@@ -5220,6 +5220,17 @@
           (cf (ns foo (:require [clojure.core.typed :as t]))))))
   (is (tc-e (ns foo) nil)))
 
+(deftest CTYP-272-test
+  (is-tc-e
+    (pos? (rem 1 2)))
+  (is-tc-e
+    (defn foo
+      [x :- Num
+       y :- Num]
+      (pos? (rem x y))))
+  (is-tc-e (pos? 1))
+  (is-tc-e (rem 1 1)))
+
 ;    (is-tc-e 
 ;      (let [f (fn [{:keys [a] :as m} :- '{:a (U nil Num)}] :- '{:a Num} 
 ;                {:pre [(number? a)]} 
