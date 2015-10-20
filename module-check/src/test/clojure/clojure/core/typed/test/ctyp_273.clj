@@ -4,8 +4,6 @@
 
 (deftest recur-intersection-test
   (is-tc-e (fn [x]
-             (if (keyword? x)
-               true
-               (recur :kw)))
+             (recur :kw))
            (IFn [Kw -> Boolean]
                 [Int -> Boolean])))
