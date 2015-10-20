@@ -16,7 +16,7 @@
                  [org.clojure/jvm.tools.analyzer "0.6.1" :exclusions [org.clojure/clojure 
                                                                       org.clojure/clojurescript]]
                  ^:source-dep 
-                 [org.clojure/tools.analyzer.jvm "0.6.8-20150729.223640-25" :exclusions [org.ow2.asm/asm-all]]
+                 [org.clojure/tools.analyzer.jvm "0.6.8-20150927.061428-42" :exclusions [org.ow2.asm/asm-all]]
                  ^:source-dep 
                  [org.ow2.asm/asm-all "4.2" :classifier "sources"]
                  ^:source-dep
@@ -38,7 +38,7 @@
 
   ; fireplace repl middleware
   :repl-options {:nrepl-middleware [#_cemerick.piggieback/wrap-cljs-repl
-                                    #_clojure.core.typed.repl/wrap-clj-repl]}
+                                    clojure.core.typed.repl/wrap-clj-repl]}
 
   :plugins [[lein-typed "0.3.1"]
             #_[thomasa/mranderson "0.4.4-ambrosebs-SNAPSHOT"]]
