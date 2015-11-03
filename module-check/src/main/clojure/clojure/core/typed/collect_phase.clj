@@ -37,12 +37,12 @@
             [clojure.core.typed.subtype :as sub]
             [clojure.repl :as repl]
             [clojure.core.typed.profiling :as profile]
-            [clojure.core.typed.deps.clojure.math.combinatorics :as comb]
-            [clojure.core.typed.deps.clojure.tools.namespace.track :as track]
-            [clojure.core.typed.deps.clojure.tools.namespace.dir :as dir]
-            [clojure.core.typed.deps.clojure.tools.namespace.dependency :as ndep]
-            [clojure.core.typed.deps.clojure.tools.namespace.parse :as ns-parse]
-            [clojure.core.typed.deps.clojure.tools.namespace.file :as ns-file]
+            [clojure.math.combinatorics :as comb]
+            [clojure.tools.namespace.track :as track]
+            [clojure.tools.namespace.dir :as dir]
+            [clojure.tools.namespace.dependency :as ndep]
+            [clojure.tools.namespace.parse :as ns-parse]
+            [clojure.tools.namespace.file :as ns-file]
             [clojure.core :as core]))
 
 (t/tc-ignore

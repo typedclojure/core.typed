@@ -9,8 +9,8 @@
             [clojure.core.typed.check-below :as below]
             [clojure.core.typed.abo :as abo]
             [clojure.core.typed.analyze-clj :as ana-clj]
-            [clojure.core.typed.deps.clojure.tools.analyzer.passes.jvm.validate :as validate]
-            [clojure.core.typed.deps.clojure.tools.analyzer.passes.jvm.analyze-host-expr :as ana-host]
+            [clojure.tools.analyzer.passes.jvm.validate :as validate]
+            [clojure.tools.analyzer.passes.jvm.analyze-host-expr :as ana-host]
             [clojure.core.typed.array-ops :as arr-ops]
             [clojure.core.typed.ast-utils :as ast-u]
             [clojure.core.typed.assoc-utils :as assoc-u]
@@ -1461,13 +1461,13 @@
   (assoc expr
          u/expr-type (local-result/local-result expr sym expected)))
 
-;; from clojure.core.typed.deps.clojure.tools.analyzer.passes.jvm.emit-form
+;; from clojure.tools.analyzer.passes.jvm.emit-form
 (defn class->sym [class]
   (if (symbol? class)
     class
     (symbol (.getName ^Class class))))
 
-;; from clojure.core.typed.deps.clojure.tools.analyzer.utils
+;; from clojure.tools.analyzer.utils
 (defn obj?
   "Returns true if x implements IObj"
   [x]
