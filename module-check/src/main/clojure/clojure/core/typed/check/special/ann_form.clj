@@ -16,9 +16,13 @@
   {:pre [(#{3} (count statements))]}
   (let [[_ _ texpr] statements
         tsyn (ast-u/map-expr-at texpr :type)
+        _ (assert (and (seq? tsyn)
+                       ('#{quote} (first tsyn)))
+                  tsyn)
         parsed-t (binding [vs/*current-env* env
                            prs/*parse-type-in-ns* (cu/expr-ns expr)]
-                   (prs/parse-type tsyn))
+                   ;; unwrap quoted syntax with second
+                   (prs/parse-type (second tsyn)))
         cret (check frm 
                     (or (when expected
                           (assoc expected :t parsed-t))
