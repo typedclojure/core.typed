@@ -94,10 +94,11 @@
 
 (defmethod internal-collect-expr ::core/ns
   [{[_ _ {{ns-form :form} :val :as third-arg} :as statements] :statements fexpr :ret :as expr}]
-  (assert ns-form (str "No ns form found for " (cu/expr-ns expr)))
-  (assert ('#{clojure.core/ns ns} (first ns-form)))
   ;(prn "collecting ns form")
-  (let [prs-ns (dep-u/ns-form-name ns-form)
+  (let [ns-form (second ns-form)
+        _ (assert ns-form (str "No ns form found for " (cu/expr-ns expr)))
+        _ (assert ('#{clojure.core/ns ns} (first ns-form)) ns-form)
+        prs-ns (dep-u/ns-form-name ns-form)
         deps   (dep-u/ns-form-deps ns-form)
         tdeps (set (filter dep-u/should-check-ns? deps))]
     ;; is this line needed?
