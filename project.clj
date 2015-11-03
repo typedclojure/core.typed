@@ -14,8 +14,7 @@
                                                                org.clojure/clojurescript]]
                  [org.clojure/jvm.tools.analyzer "0.6.1" :exclusions [org.clojure/clojure 
                                                                       org.clojure/clojurescript]]
-                 [org.clojure/tools.analyzer.jvm "0.6.8-20150729.223640-25" :exclusions [org.ow2.asm/asm-all]]
-                 [org.ow2.asm/asm-all "4.2" :classifier "sources"]
+                 [org.clojure/tools.analyzer.jvm "0.6.8-20150729.223640-25"]
                  [org.clojure/tools.reader "0.9.2"]
                  [org.clojure/core.contracts "0.0.4" :exclusions [org.clojure/clojure]]
                  [org.clojure/math.combinatorics "0.1.1" :exclusions [org.clojure/clojure]]
