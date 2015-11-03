@@ -18,6 +18,7 @@
             [clojure.core.typed.check.fn-method-one :as fn-method-one]
             [clojure.core.typed.check.fn-methods :as fn-methods]
             [clojure.core.typed.check-below :as below]
+            [clojure.core.typed.current-impl :as impl]
             [clojure.core.typed.subtype :as sub]))
 
 (declare wrap-poly)
@@ -168,12 +169,18 @@
     (let [fn-anns-quoted (ast-u/map-expr-at fn-ann-expr :ann)
           poly-quoted    (ast-u/map-expr-at fn-ann-expr :poly)
           ;_ (prn "poly" poly)
-          _ (assert (and (seq? fn-anns-quoted)
-                         ('#{quote} (first fn-anns-quoted))))
-          _ (assert (and (seq? poly-quoted)
-                         ('#{quote} (first poly-quoted))))
-          fn-anns (second fn-anns-quoted)
-          poly (second poly-quoted)
+          _ (impl/impl-case
+              :clojure (do (assert (and (seq? fn-anns-quoted)
+                                    ('#{quote} (first fn-anns-quoted))))
+                           (assert (and (seq? poly-quoted)
+                                        ('#{quote} (first poly-quoted)))))
+              :cljs nil)
+          fn-anns (impl/impl-case
+                    :clojure (second fn-anns-quoted)
+                    :cljs fn-anns-quoted)
+          poly (impl/impl-case
+                 :clojure (second poly-quoted)
+                 :cljs poly-quoted)
           _ (assert (vector? fn-anns))
           self-name (cu/fn-self-name fexpr)
           _ (assert ((some-fn nil? symbol?) self-name)
