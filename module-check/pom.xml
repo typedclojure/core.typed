@@ -133,7 +133,7 @@
     <dependency>
       <groupId>org.clojure</groupId>
       <artifactId>tools.analyzer.jvm</artifactId>
-      <version>0.6.8-20150729.223640-25</version>
+      <version>0.6.8</version>
     </dependency>
     <dependency>
       <groupId>org.clojure</groupId>
