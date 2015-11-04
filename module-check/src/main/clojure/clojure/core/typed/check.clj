@@ -667,7 +667,7 @@
      (ast-u/dummy-const-expr ::t/ann-form env)
      (ast-u/dummy-const-expr 
        {:type (binding [vs/*verbose-types* true]
-                (prs/unparse-type t))}
+                `'~(prs/unparse-type t))}
        env)]
     expr
     env))
