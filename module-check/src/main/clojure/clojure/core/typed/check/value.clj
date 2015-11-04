@@ -27,8 +27,7 @@
   
   eg. ['a] is represented as [(quote a)] and evaluates to [a]"
   [val]
-  (eval `'~val)
-  #_(letfn [(unwrap-quote [val]
+  (letfn [(unwrap-quote [val]
             (if (and (seq? val)
                      ('#{quote} (first val)))
               (second val)
@@ -40,7 +39,10 @@
                      (assoc m (unwrap-quote k) (unwrap-quote v)))
                    {}
                    val)
-      :else val)))
+      :else (if (and (seq? val)
+                     ('#{quote} (first val)))
+              (second val)
+              val))))
 
 (defn check-value
   "Given a :const node and an expected type returns a new :const
