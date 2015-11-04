@@ -155,10 +155,10 @@
       (check expr expected))))
 
 (add-check-method :const [expr & [expected]] 
-  (value/check-value expr expected))
+  (value/check-value expr expected false))
 
 (add-check-method :quote [{:keys [expr] :as quote-expr} & [expected]] 
-  (let [cexpr (check expr expected)]
+  (let [cexpr (value/check-value expr expected true)]
     (assoc quote-expr
            :expr cexpr
            u/expr-type (u/expr-type cexpr))))
