@@ -31,16 +31,40 @@
   (map->Blame bls))
 
 
-(def int-c (make-contract :name 'int-c :first-order integer?))
-
-(defmacro contract [c x]
-  (let [b (make-blame :positive (str (ns-name *ns*))
-                      :negative (str "Not " (ns-name *ns*)))]
+(defmacro contract [c x b] ; take +ve -ve blame
+  (let [b (or b
+              (make-blame :positive (str (ns-name *ns*))
+                          :negative (str "Not " (ns-name *ns*))))]
     `(((:projection ~c) ~b) ~x)))
 
+(defn swap-blame [x] x) ;TODO
+
+(def int-c (make-contract :name 'int-c :first-order integer?))
+(defn ifn-c [c1 c2]
+  (make-contract
+    :name 'ifn-c
+    :first-order ifn?
+    :projection (fn [b]
+                  (fn [f]
+                    ; returning a contracted function
+                    (with-meta
+                      (fn [x]
+                        (contract c2
+                                  (f (contract c1 x (swap-blame b)))
+                                  b))
+                      nil
+                      #_(meta f))))))
+
+
 (deftest int-c-test
-  (is (= (contract int-c 1) 1))
-  (is (thrown? clojure.lang.ExceptionInfo (contract int-c nil))))
+  (is (= (contract int-c 1 nil) 1))
+  (is (thrown? clojure.lang.ExceptionInfo (contract int-c nil nil))))
+
+(deftest ifn-test
+  (is (= ((contract (ifn-c int-c int-c) (fn [x] x) nil) 1)
+         1))
+  (is (thrown? clojure.lang.ExceptionInfo
+               ((contract (ifn-c int-c int-c) (fn [x] x) nil) nil))))
 
 (comment
         )
