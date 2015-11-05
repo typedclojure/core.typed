@@ -9,22 +9,16 @@
             [clojure.core.typed.check-below :as below]
             [clojure.core.typed.subtype :as sub]
             [clojure.core.typed.filter-ops :as fo]
-            [clojure.core.typed.current-impl :as impl]
             [clojure.core.typed.filter-rep :as fl]))
 
 (defn check-ann-form
   [check {:keys [statements env] frm :ret :as expr} expected]
   {:pre [(#{3} (count statements))]}
   (let [[_ _ texpr] statements
-        tsyn-quoted (ast-u/map-expr-at texpr :type)
-        _ (impl/impl-case
-            :clojure (assert (and (seq? tsyn-quoted)
-                                  ('#{quote} (first tsyn-quoted)))
-                             tsyn-quoted)
-            :cljs nil)
-        tsyn (impl/impl-case
-               :clojure (second tsyn-quoted)
-               :cljs tsyn-quoted)
+        tsyn (ast-u/map-expr-at texpr :type)
+        _ (assert (and (seq? tsyn)
+                       ('#{quote} (first tsyn)))
+                  tsyn)
         parsed-t (binding [vs/*current-env* env
                            prs/*parse-type-in-ns* (cu/expr-ns expr)]
                    ;; unwrap quoted syntax with second
