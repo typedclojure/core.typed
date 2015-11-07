@@ -4,7 +4,7 @@ and functions for type checking Clojure code. check-ns is the interface
 for checking namespaces, cf for checking individual forms."}
   clojure.core.typed
   (:refer-clojure :exclude [type defprotocol #_letfn fn loop dotimes let for doseq
-                            defn atom ref
+                            defn atom ref cast
                             #_def #_filter #_remove])
   (:require [clojure.core :as core]
             [clojure.pprint :as pprint]
@@ -20,6 +20,7 @@ for checking namespaces, cf for checking individual forms."}
             [clojure.core.typed.special-form :as spec]
             [clojure.core.typed.import-macros :as import-m]
             [clojure.core.typed.macros :as macros]
+            [clojure.core.typed.contract :as con]
             [clojure.java.io :as io])
   (:import (clojure.lang Compiler)))
 
@@ -1190,7 +1191,7 @@ for checking namespaces, cf for checking individual forms."}
   [sym type]
   nil)
 
-(defmacro ^:private with-current-location
+(defmacro ^:skip-wiki with-current-location
   [form & body]
   `(let [form# ~form]
      (binding [vs/*current-env* {:ns {:name (ns-name *ns*)}
@@ -2345,6 +2346,14 @@ for checking namespaces, cf for checking individual forms."}
     `(pred* '~t
             '~(ns-name *ns*)
             ~((impl/v 'clojure.core.typed.type-contract/type-syntax->pred) t))))
+
+(defmacro cast
+  [t x]
+  (require '[clojure.core.typed.type-contract])
+  `(con/contract (with-current-location '~&form
+                   ;; this compiles code so needs to be in same phase
+                   ((impl/v '~'clojure.core.typed.type-contract/type-syntax->contract) '~t))
+                 ~x))
 
 (comment 
   (check-ns 'clojure.core.typed.test.example)
