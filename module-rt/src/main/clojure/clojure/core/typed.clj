@@ -2352,7 +2352,8 @@ for checking namespaces, cf for checking individual forms."}
   (require '[clojure.core.typed.type-contract])
   `(con/contract (with-current-location '~&form
                    ;; this compiles code so needs to be in same phase
-                   ((impl/v '~'clojure.core.typed.type-contract/type-syntax->contract) '~t))
+                   (binding [*ns* ~*ns*]
+                     ((impl/v '~'clojure.core.typed.type-contract/type-syntax->contract) '~t)))
                  ~x))
 
 (comment 
