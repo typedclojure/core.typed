@@ -2348,13 +2348,32 @@ for checking namespaces, cf for checking individual forms."}
             ~((impl/v 'clojure.core.typed.type-contract/type-syntax->pred) t))))
 
 (defmacro cast
-  [t x]
-  (require '[clojure.core.typed.type-contract])
-  `(con/contract (with-current-location '~&form
-                   ;; this compiles code so needs to be in same phase
-                   (binding [*ns* ~*ns*]
-                     ((impl/v '~'clojure.core.typed.type-contract/type-syntax->contract) '~t)))
-                 ~x))
+  "Cast a value to a type. Returns a new value that conforms
+  to the given type.
+  
+  Options:
+  - :positive   positive blame, symbol or string
+  - :negative   negative blame, symbol or string
+  - :line       line number, integer
+  - :column     column number, integer"
+  ([t x] `(cast ~t ~x {}))
+  ([t x opt]
+   (require '[clojure.core.typed.type-contract])
+   `(let [opt# ~opt]
+      (con/contract (with-current-location '~&form
+                      ;; this compiles code so needs to be in same phase
+                      (binding [*ns* ~*ns*]
+                        ((impl/v '~'clojure.core.typed.type-contract/type-syntax->contract) '~t)))
+                    ~x
+                    (con/make-blame
+                      :positive (or (:positive opt#)
+                                    '~(ns-name *ns*))
+                      :negative (or (:negative opt#)
+                                    (str "Not " '~(ns-name *ns*)))
+                      :line (or (:line opt#)
+                                ~(-> &form meta :line))
+                      :column (or (:column opt#)
+                                  ~(-> &form meta :column)))))))
 
 (comment 
   (check-ns 'clojure.core.typed.test.example)

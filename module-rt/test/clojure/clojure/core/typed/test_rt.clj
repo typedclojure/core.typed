@@ -82,13 +82,21 @@
   (is (= 1 (t/cast t/Int 1)))
   (is (= nil (t/cast nil nil)))
   (is (= 1 (t/cast t/Int 1)))
-  (is (thrown-blame? (t/cast t/Int nil)))
+  ;; unions
+  (is (thrown-blame? (t/cast t/Int nil 
+                             {:positive '+ve 
+                              :negative '-ve
+                              :line 20
+                              :column 30})))
   (is (= 1 (t/cast (t/U t/Int) 1)))
   (is (thrown-blame? (t/cast (t/U t/Int) nil)))
   (is (= 1 (t/cast (t/U (t/U t/Int)) 1)))
   (is (thrown-blame? (t/cast (t/U (t/U t/Int)) nil)))
+  ;; intersections
   (is (= 1 (t/cast (t/I t/Int) 1)))
   (is (thrown-blame? (t/cast (t/I t/Int) nil)))
   (is (= 1 (t/cast (t/I (t/I t/Int)) 1)))
+  (is (thrown-blame? (t/cast (t/I (t/I t/Int)) nil)))
+
   (is (thrown-blame? (t/cast (t/I (t/I t/Int)) nil)))
   )

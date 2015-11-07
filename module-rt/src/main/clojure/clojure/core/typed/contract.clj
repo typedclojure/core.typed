@@ -2,14 +2,16 @@
   (:require [clojure.test :refer :all]))
 
 (defrecord Contract [name first-order projection flat?])
-(defrecord Blame [positive negative location name contract])
+(defrecord Blame [positive negative name contract line column])
 
-(defn throw-blame [{:keys [positive negative] :as b}]
+(defn throw-blame [{:keys [positive negative line column] :as b}]
   (throw
     (ex-info
       (str "Positive blame: " positive "\n"
-           "Negative blame: " negative "\n")
-      (into {:blame true} b))))
+           "Negative blame: " negative "\n"
+           "Line: " line "\n"
+           "Column: " column "\n")
+      {:blame b})))
 
 (defn make-contract [& {:keys [name first-order projection flat?]
                         :or {flat? false}}]
@@ -35,13 +37,14 @@
 (defn make-blame [& {:as bls}]
   (map->Blame bls))
 
-(defmacro contract 
+(defmacro contract
   ([c x] `(contract ~c ~x nil))
   ([c x b]
-   (let [b (or b
-               (make-blame :positive (str (ns-name *ns*))
-                           :negative (str "Not " (ns-name *ns*))))]
-     `(((:projection ~c) ~b) ~x))))
+   `(((:projection ~c) 
+      (or ~b
+          (make-blame :positive ~(str (ns-name *ns*))
+                      :negative ~(str "Not " (ns-name *ns*)))))
+     ~x)))
 
 (defn swap-blame [x] 
   (-> x
@@ -159,8 +162,8 @@
   {:pre [(every? #(instance? Contract %) cs)]
    :post [(instance? Contract %)]}
   (let [{flat true hoc false} (group-by :flat? cs)
-        _ (prn "flat" (mapv :name flat))
-        _ (prn "hoc" (mapv :name hoc))
+        ;_ (prn "flat" (mapv :name flat))
+        ;_ (prn "hoc" (mapv :name hoc))
         flat-checks (apply some-fn (or (seq (map :first-order flat))
                                        ;; (U) always fails
                                        [(fn [_] false)]))
@@ -216,26 +219,3 @@
       (throw (ex-info 
                "Cannot create and-c contract with more than one higher-order contract"
                {:hoc (map :name hoc)})))))
-
-(deftest int-c-test
-  (is (= (contract int-c 1) 1))
-  (is (thrown? clojure.lang.ExceptionInfo (contract int-c nil))))
-
-(deftest ifn-test
-  (is (= ((contract (ifn-c [int-c] int-c) (fn [x] x)) 1)
-         1))
-  (is (thrown? clojure.lang.ExceptionInfo
-               ((contract (ifn-c [int-c] int-c) (fn [x] x)) nil))))
-
-(deftest Object-c-test
-  (is (= (contract Object-c 1) 1))
-  (is (thrown? clojure.lang.ExceptionInfo
-               (= (contract Object-c nil) 1))))
-
-(deftest val-c-test
-  (is (= (contract nil-c nil) nil))
-  (is (thrown? clojure.lang.ExceptionInfo (contract nil-c 1))))
-
-(deftest seqable-c-test
-  (is (= (contract (seqable-c int-c) (list 1 2 3)) (list 1 2 3)))
-  (is (thrown? clojure.lang.ExceptionInfo (doall (contract (seqable-c int-c) (list nil 2 3))))))
