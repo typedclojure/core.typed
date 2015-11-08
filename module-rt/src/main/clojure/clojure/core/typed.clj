@@ -2349,13 +2349,41 @@ for checking namespaces, cf for checking individual forms."}
 
 (defmacro cast
   "Cast a value to a type. Returns a new value that conforms
-  to the given type.
-  
+  to the given type, otherwise throws an error with blame.
+
+  eg. (cast Int 1)
+      ;=> 1
+
+      (cast Int nil)
+      ; Fail, <blame positive ...>
+
+      ((cast [Int -> Int] identity)
+       1)
+      ;=> 1
+
+      ((cast [Int -> Int] identity)
+       nil)
+      ; Fail, <blame negative ...>
+
+      (cast [Int -> Int] nil)
+      ; Fail, <blame positive ...>
+
+  (defalias Options
+    (HMap :optional {:positive (U Sym Str),
+                     :negative (U Sym Str)
+                     :file (U Str nil)
+                     :line (U Int nil)
+                     :column (U Int nil)}))
+
+  (IFn [Contract Any -> Any]
+       [Contract Any Options -> Any]
+
   Options:
-  - :positive   positive blame, symbol or string
-  - :negative   negative blame, symbol or string
-  - :line       line number, integer
-  - :column     column number, integer"
+  - :positive   positive blame, (U Sym Str)
+  - :negative   negative blame, (U Sym Str)
+  - :file       file name where contract is checked, (U Str nil)
+  - :line       line number where contract is checked, (U Int nil)
+  - :column     column number where contract is checked, (U Int nil)"
   ([t x] `(cast ~t ~x {}))
   ([t x opt]
    (require '[clojure.core.typed.type-contract])
@@ -2370,10 +2398,14 @@ for checking namespaces, cf for checking individual forms."}
                                     '~(ns-name *ns*))
                       :negative (or (:negative opt#)
                                     (str "Not " '~(ns-name *ns*)))
+                      :file (or (:file opt#)
+                                ~*file*)
                       :line (or (:line opt#)
-                                ~(-> &form meta :line))
+                                ~(or (-> &form meta :line)
+                                     @Compiler/LINE))
                       :column (or (:column opt#)
-                                  ~(-> &form meta :column)))))))
+                                  ~(or (-> &form meta :column)
+                                       @Compiler/COLUMN)))))))
 
 (comment 
   (check-ns 'clojure.core.typed.test.example)

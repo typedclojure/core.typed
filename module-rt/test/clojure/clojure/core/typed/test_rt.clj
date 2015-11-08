@@ -86,6 +86,7 @@
   (is (thrown-blame? (t/cast t/Int nil 
                              {:positive '+ve 
                               :negative '-ve
+                              :file "my/file.clj"
                               :line 20
                               :column 30})))
   (is (= 1 (t/cast (t/U t/Int) 1)))
