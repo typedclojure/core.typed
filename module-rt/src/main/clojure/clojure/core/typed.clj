@@ -2415,6 +2415,13 @@ for checking namespaces, cf for checking individual forms."}
                                               @Compiler/COLUMN))))))
          ~x))))
 
+(defn infer-untyped-vars
+  ([] (infer-untyped-vars (ns-name *ns*)))
+  ([nsym-or-ns]
+   (load-if-needed)
+   (impl/with-clojure-impl
+     ((impl/v 'clojure.core.typed.infer-vars/infer-untyped-vars) (ns-name nsym-or-ns)))))
+
 (comment 
   (check-ns 'clojure.core.typed.test.example)
 
