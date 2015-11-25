@@ -94,7 +94,7 @@
 
 (defmethod internal-collect-expr ::core/ns
   [{[_ _ third-arg :as statements] :statements fexpr :ret :as expr}]
-  (prn "collecting ns form" third-arg)
+  ;(prn "collecting ns form" third-arg)
   (let [_ (assert (= :const (:op third-arg)) (:op third-arg))
         ns-form (-> third-arg :form :form) ;; tools.analyzer, uses :const node
         _ (assert ns-form (str "No ns form found for " (cu/expr-ns expr)))

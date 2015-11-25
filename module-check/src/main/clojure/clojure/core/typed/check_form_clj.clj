@@ -10,6 +10,16 @@
             [clojure.core.typed.compiler-ast :as compiler]
             [clojure.core.typed.current-impl :as impl]))
 
+(def default-analyzer :core.typed)
+
+(def analyzers 
+  {:thread-bindings-fn {:t.a.jvm ana-clj/thread-bindings-taj
+                        :core.typed ana-clj/thread-bindings-compiler}
+   :macroexpand-1-var {:t.a.jvm #'ta/macroexpand-1
+                       :core.typed clojure.core.typed.Compiler/MACROEXPAND_ONE}
+   :analyze-fn {:t.a.jvm taj/analyze
+                :core.typed compiler/analyze}})
+
 (defn config-map
   ([] (config-map nil))
   ([ns-meta]
@@ -22,18 +32,15 @@
       :runtime-check-expr rt-chk/runtime-check-expr
       :eval-out-ast (partial ana-clj/eval-ast {})
       :emit-form emit-form/emit-form
-      :thread-bindings-fn (case analyzer
-                            :core.typed ana-clj/thread-bindings-compiler
-                            :t.a.jvm  ana-clj/thread-bindings-taj 
-                            ana-clj/thread-bindings-taj)
-      :macroexpand-1-var (case analyzer
-                           :core.typed clojure.core.typed.Compiler/MACROEXPAND_ONE
-                           :t.a.jvm #'ta/macroexpand-1
-                           #'ta/macroexpand-1)
-      :analyze-fn (case analyzer
-                    :core.typed compiler/analyze
-                    :t.a.jvm taj/analyze
-                    taj/analyze)})))
+      :thread-bindings-fn (let [m (:thread-bindings-fn analyzers)]
+                            (or (get m analyzer)
+                                (get m default-analyzer)))
+      :macroexpand-1-var (let [m (:macroexpand-1-var analyzers)]
+                            (or (get m analyzer)
+                                (get m default-analyzer)))
+      :analyze-fn (let [m (:analyze-fn analyzers)]
+                    (or (get m analyzer)
+                        (get m default-analyzer)))})))
 
 (defn check-form-info
   [form & opt]

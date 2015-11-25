@@ -83,7 +83,7 @@
    else returns form."
   ([form] (macroexpand-1 form (taj/empty-env)))
   ([form env]
-   (prn "macroexpand-1")
+   ;(prn "macroexpand-1")
      (ta-env/ensure (taj/global-env)
        (cond
 
