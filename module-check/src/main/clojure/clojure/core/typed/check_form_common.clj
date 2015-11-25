@@ -31,6 +31,8 @@
 ;;                  argument.
 ;; - :collect-expr  side-effecting function taking AST and collecting type annotations
 ;; - :check-expr    function taking AST and expected type and returns a checked AST.
+;; - :thread-bindings-fn   a zero argument function returning a map of initial Var bindings
+;;                         to install via `with-bindings` before analysis
 ;;
 ;;  Optional
 ;; - :eval-out-ast  function taking checked AST which evaluates it and returns the AST
@@ -40,6 +42,9 @@
 ;; - :emit-form     function from AST to equivalent form, returned in :out-form entry.
 ;; - :runtime-check-expr    function taking AST and expected type and returns an AST with inserted
 ;;                          runtime checks.
+;; - :analyze-fn    function taking form, environment and options, and returns an AST
+;;                  of 
+;; - :macroexpand-1-var   the Var to use as macroexpand-1
 ;;
 ;;  (From here, copied from clojure.core.typed/check-form-info)
 ;; Keyword arguments
@@ -71,7 +76,9 @@
   [{:keys [ast-for-form unparse-ns
            check-expr collect-expr eval-out-ast
            emit-form eval-out-ast env
-           runtime-check-expr]}
+           runtime-check-expr
+           analyze-fn thread-bindings-fn 
+           macroexpand-1-var]}
    form & {:keys [expected-ret expected type-provided? profile file-mapping
                   checked-ast no-eval bindings-atom]}]
   {:pre [((some-fn nil? con/atom?) bindings-atom)]}
@@ -128,6 +135,9 @@
                     (p/p :check-form/ast-for-form
                       (ast-for-form form
                                     {:bindings-atom bindings-atom
+                                     :analyze-fn analyze-fn
+                                     :macroexpand-1-var macroexpand-1-var
+                                     :thread-bindings-fn thread-bindings-fn
                                      :eval-fn eval-ast
                                      :expected expected
                                      :stop-analysis stop-analysis

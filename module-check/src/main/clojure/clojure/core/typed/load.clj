@@ -30,19 +30,21 @@
   "Loads a whole typed namespace, returns nil. Assumes the file is typed."
   ([filename] (load-typed-file filename (taj/empty-env) {}))
   ([filename env] (load-typed-file filename env {}))
-  ([filename env opts]
-   {:pre [(string? filename)]
+  ([filename-resource env opts]
+   {:pre [(string? filename-resource)]
     :post [(nil? %)]}
     (t/load-if-needed)
     (ta-env/ensure (p/p :typed-load/global-env
                         (taj/global-env))
      (let [[file-url filename]
-           (or (let [f (str filename ".clj")]
+           (or (let [f (str filename-resource ".clj")]
                  (when-let [r (io/resource f)]
                    [r f]))
-               (let [f (str filename ".cljc")]
+               (let [f (str filename-resource ".cljc")]
                  (when-let [r (io/resource f)]
-                   [r f])))]
+                   [r f])))
+           ns-meta (-> (ns-utils/ns-form-for-file filename)
+                       ns-utils/ns-meta)]
        (assert file-url (str "Cannot find file " filename))
        (binding [*ns*   *ns*
                  *file* filename]
@@ -54,7 +56,7 @@
                  opts (if (.endsWith ^String filename "cljc")
                         (assoc opts :read-cond :allow)
                         opts)
-                 config (assoc (chk-frm-clj/config-map)
+                 config (assoc (chk-frm-clj/config-map ns-meta)
                                :env env)]
              (impl/with-full-impl (:impl config)
                (loop []
