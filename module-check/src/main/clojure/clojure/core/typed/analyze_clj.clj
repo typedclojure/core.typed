@@ -397,7 +397,10 @@
                  (let [form (tr/read reader-opts reader)]
                    (if (not= eof form)
                      (let [a (analyze1 form (taj/empty-env)
-                                       {:eval-fn eval-ast})]
+                                       {:eval-fn eval-ast
+                                        :thread-bindings-fn thread-bindings-taj
+                                        :analyze-fn taj/analyze
+                                        :macroexpand-1-var #'ta/macroexpand-1})]
                        (recur (conj asts a)))
                      asts))))]
     asts))
