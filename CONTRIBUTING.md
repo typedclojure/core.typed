@@ -24,15 +24,15 @@ This guide should be followed to develop patches for core.typed.
 
 ## Idea
 
-If you have an idea that you would like to discuss, first post it on the [core.typed mailing list|https://groups.google.com/forum/#!topic/clojure-core-typed].
+If you have an idea that you would like to discuss, first post it on the [core.typed mailing list](https://groups.google.com/forum/#!topic/clojure-core-typed).
 
-For example, see [this post|https://groups.google.com/forum/#!topic/clojure-core-typed/ZEK2xbqBcb].
+For example, see [this post](https://groups.google.com/forum/#!topic/clojure-core-typed/ZEK2xbqBcb).
 
 ## JIRA Issue
 
 JIRA is the main bug tracker for core.typed, so all issues should be posted there.
 
-For example, [CTYP-305|http://dev.clojure.org/jira/browse/CTYP-305] is a good template to follow.
+For example, [CTYP-305](http://dev.clojure.org/jira/browse/CTYP-305) is a good template to follow.
 
 Here is the JIRA syntax to generate that issue:
 
@@ -160,7 +160,7 @@ git checkout -b ctyp-305 master
 
 *Pull request*:
 
-Send a pull request to [dev|https://github.com/typedclojure/core.typed] to trigger the TravisCI tests.
+Send a pull request to [dev](https://github.com/typedclojure/core.typed) to trigger the TravisCI tests.
 
 Push
 
@@ -173,7 +173,7 @@ git rebase master
 
 
 *Commit messages*:
-[a05205be|https://github.com/clojure/core.typed/commit/a05205be2a3869a7e7584fc5f0b08d1690a8a990]
+[a05205be](https://github.com/clojure/core.typed/commit/a05205be2a3869a7e7584fc5f0b08d1690a8a990)
 
 Example commit message.
 
