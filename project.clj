@@ -21,11 +21,7 @@
                  [org.clojure/tools.namespace "0.2.11"]
                  [org.clojure/core.cache "0.6.4"]
                  ]
-  ;; for tools.reader 0.9.2
-  :aot [#_.clojure.tools.reader.impl.ExceptionInfo
-        ;; for asm-all
-        #_.org.objectweb.asm.Type
-        #_.org.objectweb.asm.Opcodes]
+  ;:aot [clojure.core.typed.Compiler]
 
   ; fireplace repl middleware
   :repl-options {:nrepl-middleware [#_cemerick.piggieback/wrap-cljs-repl
@@ -43,7 +39,7 @@
 
   :repositories {"sonatype-oss-public" "https://oss.sonatype.org/content/groups/public/"}
 
-  ;:java-source-paths ["module-check/src/main/java"]
+  :java-source-paths ["module-check/src/main/java"]
   :source-paths ["module-check/src/main/clojure"
                  "module-check/src/main/cljs"
                  "module-rt/src/main/clojure"

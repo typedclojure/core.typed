@@ -10,6 +10,7 @@
             [clojure.tools.analyzer.passes.jvm.emit-form :as emit-form]
             [clojure.tools.analyzer.passes.trim :as trim]
             [clojure.tools.analyzer.passes.jvm.warn-on-reflection :as warn-reflect]
+            [clojure.core.typed.compiler-ast :as compiler]
             [clojure.tools.reader :as tr]
             [clojure.tools.reader.reader-types :as readers]
             [clojure.tools.analyzer.passes.jvm.validate :as validate]
@@ -76,12 +77,13 @@
           nil)))
    })
 
-;; copied from tools.analyze.jvm to insert `typed-macros`
+;; copied from tools.analyzer.jvm to insert `typed-macros`
 (defn macroexpand-1
   "If form represents a macro form or an inlineable function,returns its expansion,
    else returns form."
   ([form] (macroexpand-1 form (taj/empty-env)))
   ([form env]
+   ;(prn "macroexpand-1")
      (ta-env/ensure (taj/global-env)
        (cond
 
@@ -150,27 +152,34 @@
 
    Useful when analyzing whole files/namespaces.
   
-  Mandatory keyword arguments
+  Mandatory keyword options
    :expected Takes :expected option, the expected static type or nil.
 
-  Optional keyword arguments
+  Optional keyword options
    :eval-fn  Takes :eval-fn option that takes an option map and an AST and returns an 
              evaluated and possibly type-checked AST.
    :stop-analysis   an atom that, when set to true, will stop the next form from analysing.
                     This is helpful if in a top-level do and one of the do statements 
-                    has a type error and is not evaluated."
+                    has a type error and is not evaluated.
+   :macroexpand-1-var  The Var object to rebind as macroexpand-1.
+   :analyze-fn   The analysis function."
   ([form] (analyze+eval form (taj/empty-env) {}))
   ([form env] (analyze+eval form env {}))
-  ([form env {:keys [eval-fn stop-analysis] :or {eval-fn eval-ast} :as opts}]
+  ([form env {:keys [eval-fn stop-analysis analyze-fn
+                     macroexpand-1-var]
+              :or {eval-fn eval-ast
+                   analyze-fn taj/analyze
+                   macroexpand-1-var #'ta/macroexpand-1} :as opts}]
    {:pre [(map? env)]}
+   (prn analyze-fn)
      (ta-env/ensure (taj/global-env)
        (taj/update-ns-map!) 
        ;(prn "analyze+eval" form *ns* (ns-aliases *ns*))
-       (let [[mform raw-forms] (binding [ta/macroexpand-1 (get-in opts [:bindings #'ta/macroexpand-1] 
-                                                                  ;; use custom macroexpand-1
-                                                                  macroexpand-1)]
+       (let [[mform raw-forms] (with-bindings {macroexpand-1-var (get-in opts [:bindings macroexpand-1-var] 
+                                                                         ;; use custom macroexpand-1
+                                                                         macroexpand-1)}
                                  (loop [form form raw-forms []]
-                                   (let [mform (ta/macroexpand-1 form env)]
+                                   (let [mform (macroexpand-1-var form env)]
                                      (if (= mform form)
                                        [mform (seq raw-forms)]
                                        (recur mform (conj raw-forms form))))))]
@@ -211,7 +220,7 @@
                     (unanalyzed-expr mform)
                     ;; rebinds *ns* during analysis
                     ;; FIXME unclear which map needs to have *ns*, especially post TAJ 0.3.0
-                    (eval-fn opts (taj/analyze mform (assoc env :ns (ns-name *ns*))
+                    (eval-fn opts (analyze-fn mform (assoc env :ns (ns-name *ns*))
                                                (-> opts 
                                                    (dissoc :bindings-atom)
                                                    (assoc-in [:bindings #'*ns*] *ns*)))))
@@ -321,23 +330,27 @@
 (defn run-passes [ast]
   (typed-schedule ast))
 
-(defn thread-bindings []
+(defn thread-bindings-taj []
   {#'ta/macroexpand-1 macroexpand-1
    #'taj/run-passes run-passes})
+
+(defn thread-bindings-compiler []
+  {clojure.core.typed.Compiler/MACROEXPAND_ONE macroexpand-1})
 
 ;; bindings is an atom that records any side effects during macroexpansion. Useful
 ;; for nREPL middleware.
 (defn analyze1
   ([form] (analyze1 form (taj/empty-env) {}))
   ([form env] (analyze1 form env {}))
-  ([form env {:keys [bindings-atom] :as opts}]
-   {:pre [((some-fn nil? con/atom?) bindings-atom)]}
+  ([form env {:keys [bindings-atom thread-bindings-fn] :as opts}]
+   {:pre [((some-fn nil? con/atom?) bindings-atom)
+          (ifn? thread-bindings-fn)]}
    (u/trace "Analyze1 form" *file* form)
    (let [old-bindings (or (some-> bindings-atom deref) {})]
      (with-bindings old-bindings
        ;(prn "analyze1 namespace" *ns*)
        (let [ana (analyze+eval form (or env (taj/empty-env))
-                               (merge-with merge opts {:bindings (thread-bindings)}))]
+                               (merge-with merge opts {:bindings (thread-bindings-fn)}))]
          ;; only record vars that were already bound
          (when bindings-atom
            (reset! bindings-atom (select-keys (get-thread-bindings) (keys old-bindings))))
@@ -384,7 +397,10 @@
                  (let [form (tr/read reader-opts reader)]
                    (if (not= eof form)
                      (let [a (analyze1 form (taj/empty-env)
-                                       {:eval-fn eval-ast})]
+                                       {:eval-fn eval-ast
+                                        :thread-bindings-fn thread-bindings-taj
+                                        :analyze-fn taj/analyze
+                                        :macroexpand-1-var #'ta/macroexpand-1})]
                        (recur (conj asts a)))
                      asts))))]
     asts))
@@ -422,7 +438,7 @@
   ;      result (try (eval frm)  ;; eval the emitted form rather than directly the form to avoid double macroexpansion
   ;                  (catch Exception e
   ;                    (ExceptionThrown. e)))]
-  ;  (merge ast {:result result})))
+  ;  (merge ast {:result result}))
   (let [frm (emit-form/emit-form ast)
         ;_ (prn "form" frm)
         result (eval frm)]  ;; eval the emitted form rather than directly the form to avoid double macroexpansion

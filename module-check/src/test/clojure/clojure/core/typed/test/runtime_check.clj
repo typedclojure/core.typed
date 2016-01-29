@@ -10,4 +10,7 @@
 ;(t/ann b t/Int)
 ;(def b nil)
 
+(t/ann b [t/Int :-> '{:a t/Int}])
+(def b inc)
+
 #(inc nil)
