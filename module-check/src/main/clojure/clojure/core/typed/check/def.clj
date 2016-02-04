@@ -18,12 +18,23 @@
 (defn init-provided? [expr]
   (contains? expr :init))
 
+(defn add-uncontracted-var-meta [m v]
+  (assoc-in m [:core.typed :uncontracted-var] v))
+
 ;[Expr (Option TCResult) -> Expr]
 (defn check-normal-def
   "Checks a def that isn't a macro definition."
   [check-fn {:keys [init env] :as expr} & [expected]]
-  {:post [(:init %)]}
-  (let [init-provided (init-provided? expr)
+  (let [gradually-typed? (impl/impl-case
+                           :clojure
+                           (let [m (meta (cu/expr-the-ns expr))] ;; FIXME `expr-the-ns` doesn't work for CLJS 
+                             (or 
+                               (= :core.typed/gradual (:lang m))
+                               (-> m
+                                   :core.typed
+                                   :gradual-exports)))
+                           :cljs nil)
+        init-provided (init-provided? expr)
         _ (assert init-provided)
         vsym (ast-u/def-var-name expr)
         warn-if-unannotated? (ns-opts/warn-on-unannotated-vars? (cu/expr-ns expr))
@@ -33,6 +44,109 @@
         ;_ (prn "check? var" vsym check?)
         cljs-ret (r/ret r/-any)]
     (cond
+      gradually-typed?
+      ;; define two var definitions: a contracted and uncontracted version
+      (let [internal-var (-> (:var expr)
+                             meta
+                             :core.typed
+                             :uncontracted-var)
+            _ (assert ((some-fn var? nil?) internal-var)
+                      ":uncontracted-var can only be a var or nil")
+            internal-name (if internal-var
+                            (.sym ^Var internal-var)
+                            (gensym (:name expr)))
+            _ (assert (symbol? internal-name))
+            ;; intern if needed
+            internal-var (if internal-var
+                           internal-var
+                           (intern (cu/expr-ns expr) internal-name))
+            _ (assert (var? internal-var))
+            ; Maintain temporary links before the :def's are evaluated. This helps
+            ; rewrite recursive definitions.
+            ;; link from uncontracted to contracted var
+            _ (alter-meta! internal-var 
+                           (fn [m]
+                             (assoc-in m [:core.typed :contracted-var] (:var expr))))
+            ;; link from contracted to uncontracted var
+            _ (alter-meta! (:var expr) 
+                           (fn [m]
+                             (assoc-in m [:core.typed :uncontracted-var] internal-var)))
+            cinit (if check?
+                    (binding [vs/*current-env* (:env init)
+                              vs/*current-expr* init]
+                      (check-fn init (when t
+                                       (r/ret t))))
+                    init)
+            ;; use inferred type if not annotation present
+            t (or t
+                  (when check?
+                    (-> (u/expr-type cinit)
+                        r/ret-t)))
+            _ (assert ((some-fn nil? r/Type?) t))]
+        ;; Rewrite
+        ;;   
+        ;;    (def ^{:special-meta :whatever} a "docstring" 1)
+        ;;
+        ;; to
+        ;; 
+        ;;    (do (def ^{:core.typed {:contracted-var #'a}}
+        ;;             a__gensym 
+        ;;             "docstring"
+        ;;             BODY)
+        ;;        (def ^{:special-meta :whatever} a 
+        ;;             "docstring"
+        ;;             (cast T a__gensym))
+        ;;        (alter-meta! #'a add-uncontracted-var-meta #'a__gensym)
+        ;;        #'a)
+        ;;
+        ;; where BODY is of type T.
+        (ast-u/dummy-do-expr
+          [(merge
+             {:op :def
+              :name internal-name
+              :var internal-var
+              :meta (assoc
+                      (ast-u/dummy-const-expr
+                        `{:core.typed {:contracted-var ~internal-var}}
+                        (:env cinit))
+                      :type :map)
+              :init cinit
+              :env (:env cinit)}
+             (when (:doc expr)
+               {:doc (:doc expr)}))
+           (assoc expr
+                  :init (if t
+                          (cu/add-cast (ast-u/dummy-var-expr
+                                         internal-var
+                                         (:env expr))
+                                       t
+                                       {:positive (str "Typed code in " (cu/expr-ns expr))
+                                        :negative (str "Not typed code in " (cu/expr-ns expr))})
+                          ;; if check? is false and there is no annotation then
+                          ;; the body type will not be inferred. Just treat the body as untyped code
+                          ;; and omit the cast.
+                          (ast-u/dummy-var-expr
+                            internal-var
+                            (:env expr))))
+           (ast-u/dummy-invoke-expr
+             (ast-u/dummy-var-expr
+               #'alter-meta!
+               (:env expr))
+             [(ast-u/dummy-the-var-expr
+                (:var expr)
+                (:env expr))
+              (ast-u/dummy-var-expr
+                #'add-uncontracted-var-meta
+                (:env expr))
+              (ast-u/dummy-the-var-expr
+                internal-var
+                (:env expr))]
+             (:env expr))]
+          (ast-u/dummy-the-var-expr
+            (:var expr)
+            (:env expr))
+          (:env expr)))
+
       ; check against an expected type
       (and check? t)
       (let [cinit (when init-provided

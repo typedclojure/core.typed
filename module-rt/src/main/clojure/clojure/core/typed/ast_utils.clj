@@ -92,12 +92,22 @@
    :name sym})
 
 (defn dummy-var-expr [vsym env]
-  (let [v (resolve vsym)]
+  {:pre [((some-fn var? symbol?) vsym)]}
+  (let [v (or (when (var? vsym)
+                vsym)
+              (resolve vsym))]
     (assert (var? v))
     {:op :var
      :env env
      :var v
-     :form vsym}))
+     :form (coerce/var->symbol v)}))
+
+(defn dummy-the-var-expr [v env]
+  {:pre [(var? v)]}
+  {:op :the-var
+   :env env
+   :var v
+   :form (coerce/var->symbol v)})
 
 (defn dummy-do-expr [statements ret env]
   {:op :do

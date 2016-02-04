@@ -194,15 +194,32 @@
   {:pre [(var? var)]}
   ;(prn " checking var" var)
   (binding [vs/*current-expr* expr]
-    (let [id (coerce/var->symbol var)
+    (let [uncontracted-var (-> var meta :core.typed :uncontracted-var)
+          _ (assert ((some-fn nil? var?) uncontracted-var)
+                    ":uncontracted-var entry must only contain nil or a Var")
+          id (coerce/var->symbol var)
           _ (when-not (var-env/used-var? id)
               (var-env/add-used-var id))
           vsym (coerce/var->symbol var)
           ut (var-env/get-untyped-var (cu/expr-ns expr) vsym)
-          t (var-env/lookup-Var-nofail vsym)]
+          t (var-env/lookup-Var-nofail vsym)
+          expr (cond
+                 ;; this is a contracted var, find and rewrite to the uncontracted version
+                 ;; We choose a static type to check it against later
+                 uncontracted-var
+                 (if (cu/should-rewrite?)
+                   (assoc expr
+                          :var uncontracted-var)
+                   (err/tc-delayed-error
+                     (str "Attempted to rewrite contract var " id ", but unable to rewrite"
+                          :return (assoc expr
+                                         u/expr-type (cu/error-ret expected)))))
+
+                 :else expr)]
       ;(prn " annotation" t)
       ;(prn " untyped annotation" ut)
       (cond
+        ;; we have an untyped var reference, generate a cast around it
         ut
         (if (cu/should-rewrite?)
           (assoc (cu/add-cast expr ut
@@ -216,6 +233,7 @@
             :return (assoc expr
                            u/expr-type (cu/error-ret expected)))))
 
+        ;; this is a normal typed var reference
         t
         (assoc expr
                u/expr-type (below/maybe-check-below

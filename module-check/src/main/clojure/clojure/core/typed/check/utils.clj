@@ -41,6 +41,12 @@
               (do (prn "WARNING: No associated ns for ClojureScript expr, defaulting to cljs.user")
                   'cljs.user))))
 
+(defn expr-the-ns [expr]
+  {:post [(instance? clojure.lang.Namespace %)]}
+  (impl/impl-case
+    :clojure (the-ns (expr-ns expr))
+    :cljs (throw (Exception. "FIXME expr-the-ns CLJS implementation"))))
+
 (defn KeyPE->Type [k]
   {:pre [(pe/KeyPE? k)]
    :post [(r/Type? %)]}

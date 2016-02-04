@@ -18,6 +18,10 @@
         (ns fancy-ns-form
           {:lang :new-impl})
       will use `my-load` to load the file.
+
+  :lang names that are namespace qualified only use their namespace portion to
+  dispatch. For example, :core.typed/gradual dispatches on the :core.typed
+  entry.
   "
   (:require [clojure.core.typed.ns-deps-utils :as ns-utils]))
 
@@ -72,15 +76,17 @@
       (when-not (= path (first @#'clojure.core/*pending-paths*))
         (with-bindings {#'clojure.core/*pending-paths* (conj @#'clojure.core/*pending-paths* path)}
           (let [base-resource-path (.substring path 1)
-                lang (or (file-lang (str base-resource-path ".clj"))
-                         (file-lang (str base-resource-path ".cljc")))
+                lang (-> (or (file-lang (str base-resource-path ".clj"))
+                             (file-lang (str base-resource-path ".cljc")))
+                         ns-utils/strip-lang)
                 disp (get-in lang-dispatch [lang :load] default-load1)]
             (disp base-resource-path)))))))
 
 (defn extensible-eval
   "Evaluates the form data structure (not text!) and returns the result."
   [form]
-  (let [lang (ns-lang *ns*)
+  (let [lang (-> (ns-lang *ns*)
+                 ns-utils/strip-lang)
         disp (get-in lang-dispatch [lang :eval] default-eval)]
     (disp form)))
 

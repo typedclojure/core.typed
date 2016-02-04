@@ -122,12 +122,21 @@
   {:post [(con/boolean? %)]}
   (boolean (-> (ns-meta rcode) :core.typed)))
 
+(defn strip-lang
+  "Use the namespace prefix if fully qualified.
+  :core.typed/gradual  resolves to  :core.typed."
+  [lang]
+  {:post [((some-fn keyword? nil?) %)]}
+  (or (some-> lang namespace keyword)
+      lang))
+
 (defn should-use-typed-load?
   "Returns true if typed load should be triggered for this namespace."
   [ns-form]
   {:post [(con/boolean? %)]}
-  (let [m (ns-meta ns-form)]
-    (and (= :core.typed (:lang m))
+  (let [m (ns-meta ns-form)
+        lang (strip-lang (:lang m))]
+    (and (= :core.typed lang)
          (not (-> m :core.typed :no-typed-load)))))
 
 (defn file-has-core-typed-metadata?
