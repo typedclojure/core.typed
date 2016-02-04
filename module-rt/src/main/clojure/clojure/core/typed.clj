@@ -105,7 +105,12 @@ for checking namespaces, cf for checking individual forms."}
   eg. (install #{:load})   ; installs `load`"
   ([] (install :all))
   ([features]
-   (typed-load/install features)))
+   (require '[clojure.core.typed.lang])
+   ((impl/v 'clojure.core.typed.lang/install) 
+    features)))
+
+;; install the :clojure.core.typed language
+(typed-load/install)
 
 ;=============================================================
 ; Special functions

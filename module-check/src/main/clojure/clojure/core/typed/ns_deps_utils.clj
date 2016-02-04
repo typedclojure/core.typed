@@ -122,12 +122,29 @@
   {:post [(con/boolean? %)]}
   (boolean (-> (ns-meta rcode) :core.typed)))
 
+(defn impl-from-lang [lang]
+  {:post [(or (keyword? %)
+              (nil? %))]}
+  (cond 
+    (keyword? lang) lang
+    (and (vector? lang)
+         (keyword? (nth lang 0))) (nth lang 0)))
+
+(defn is-typed-lang? [lang]
+  (or (= :core.typed lang)
+      (= :clojure.core.typed lang)))
+
+(defn legal-lang-form? [lang]
+  ((some-fn keyword? vector?)
+   lang))
+
 (defn should-use-typed-load?
   "Returns true if typed load should be triggered for this namespace."
   [ns-form]
   {:post [(con/boolean? %)]}
-  (let [m (ns-meta ns-form)]
-    (and (= :core.typed (:lang m))
+  (let [m (ns-meta ns-form)
+        lang (impl-from-lang (:lang m))]
+    (and (some-> lang is-typed-lang?)
          (not (-> m :core.typed :no-typed-load)))))
 
 (defn file-has-core-typed-metadata?
