@@ -8,8 +8,14 @@
 (defalias Node
   (U '{:op :val :val Any}
      '{:op :HMap :map (Map Kw Node)}
+     '{:op :HVec :vec (Vec Node)}
      '{:op :union :types (Set Node)}
-     '{:op :var :name Sym}))
+     '{:op :class :class Class}
+     '{:op :IFn :arities (Vec '{:op :IFn1
+                                :dom (Vec Node)
+                                :rng Node})}
+     '{:op :var :name Sym}
+     '{:op :Top}))
 
 ;(defalias RTInfo
 ;  "Used to summarise the types of values. The Vector's generally
@@ -32,36 +38,36 @@
 ; (Atom (Map Sym RTInfo))
 (def remember-var (atom {}))
 
-; [RTInfo :-> Any]
-(defn type-of-data [{:as m}]
+; RTInfo -> Node
+(defn rtinfo->type [m]
   (let [cls (when-let [cls (:class m)]
-              (set cls))
+              (map (fn [c]
+                     {:op :class :class c})
+                   cls))
         tfn (when-let [tfn (:fn m)]
-              (let [as (apply sorted-set
-                              (map
-                                (fn [[arity f]]
-                                  (conj (mapv (fn [n]
-                                                (type-of-data (get (:dom f) n)))
-                                              (range (count (:dom f))))
-                                        :->
-                                        (type-of-data (:rng f))))
-                                tfn))]
+              (let [as (mapv
+                         (fn [[arity f]]
+                           {:op :IFn1
+                            :dom (mapv (fn [n]
+                                         (rtinfo->type (get (:dom f) n)))
+                                       (range (count (:dom f))))
+                            :rng (rtinfo->type (:rng f))})
+                         tfn)]
                 (when (seq as)
-                  #{(if (== 1 (count as))
-                      (first as)
-                      (list* 'IFn as))})))
+                  #{{:op :IFn :arities as}})))
         tmap (when-let [tmap (:map m)]
                (let [vs (vals tmap)
                      ms (set
                           (map
                             (fn [m]
-                              `'~(into {}
-                                       (map (fn [[k v]]
-                                              [k (type-of-data v)]))
-                                       m))
+                              {:op :HMap
+                               :map (into {}
+                                          (map (fn [[k v]]
+                                                 [k (rtinfo->type v)]))
+                                          m)})
                             vs))]
                  (not-empty ms)))
-        tvec (when-let [tvec (:vec m)]
+        tvec nil #_(when-let [tvec (:vec m)]
                (let [vs (vals (:map m))]
                  (cond
                    (empty? vs)   nil
@@ -69,31 +75,55 @@
                    (== (count vs) 1)
                    #{(let [vv (first vs)]
                        `'~(mapv (fn [n]
-                                  (type-of-data (get vv n)))
+                                  (rtinfo->type (get vv n)))
                                 (range (count vv))))}
 
                    :else #{clojure.lang.IPersistentVector})))
+        _ (assert ((some-fn nil? set?) tvec))
         tvals (when-let [tvals (:val m)]
                 (set
                   (map (fn [t]
-                         (cond
-                           ((some-fn nil? false?) t) t
-                           (keyword? t) `'~t
-                           :else 'Any))
+                         {:op :val :val t})
                        tvals)))
         ts (into (set (or cls tvals)) 
                  (concat tvec tmap tfn))
         ;; remove IFn if we already know it's a function
         ts (if tfn
-             (disj ts clojure.lang.IFn)
+             (disj ts {:op :class :class clojure.lang.IFn})
              ts)]
     (cond
       (seq ts)
       (if (== (count ts) 1)
         (first ts)
-        (list* 'U ts))
+        {:op :union :types ts})
 
-      :else 'Any)))
+      :else {:op :Top})))
+
+; [Node :-> Any]
+(defn unparse-node [{:as m}]
+  (case (:op m)
+    :val (let [t (:val m)]
+           (cond
+             ((some-fn nil? false?) t) t
+             (keyword? t) `'~t
+             :else 'Any))
+    :union (list* 'U (map unparse-node (:types m)))
+    :HMap `'~(into {}
+                   (map (fn [[k v]]
+                          [k (unparse-node v)]))
+                   (:map m))
+    :IFn (let [as (map
+                    (fn [{:keys [dom rng]}]
+                      (conj (mapv unparse-node dom)
+                            :->
+                            (unparse-node rng)))
+                    (:arities m))]
+           (if (== 1 (count as))
+             (first as)
+             (list* 'IFn as)))
+    :class (:class m)
+    :Top 'Any
+    (assert nil (str "No unparse-node case: " m))))
 
 ;; Graph data structure
 ;;
@@ -116,6 +146,7 @@
     nil
     g))
 
+; Node Node -> Node
 (defn union [s t]
   (cond
     (and (#{:union} (:op s))
@@ -137,7 +168,7 @@
         {:op :union
          :types ts}))))
 
-; Graph Any -> '[Graph Node]
+; Graph Node -> '[Graph Node]
 (defn join [seen t]
   {:pre [(map? seen)
          (map? t)
@@ -148,7 +179,14 @@
   (prn "join" t)
   (letfn []
     (case (:op t)
-      (:val :union)
+      (:union)
+      (reduce 
+        (fn [[seen _] t]
+          (join seen t))
+        [seen t]
+        (:types t))
+
+      (:val :var)
       [seen t]
 
       ;; generate a new name for each entry's value, which is a unique node
@@ -275,7 +313,7 @@
 (defn ppres []
   (pprint (into {}
                 (map (fn [[k v]]
-                       [k (type-of-data v)]))
+                       [k (-> v rtinfo->type unparse-node)]))
                 @remember-var)))
 
 ; [Var :-> (U nil Any)]
