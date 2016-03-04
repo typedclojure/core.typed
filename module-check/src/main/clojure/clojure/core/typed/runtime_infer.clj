@@ -10,7 +10,8 @@
      '{:op :HMap :map (Map Kw Node)}
      '{:op :HVec :vec (Vec Node)}
      '{:op :union :types (Set Node)}
-     '{:op :class :class Class}
+     '{:op :class :class Class
+       :args (Vec Node)}
      '{:op :IFn :arities (Vec '{:op :IFn1
                                 :dom (Vec Node)
                                 :rng Node})}
@@ -40,10 +41,12 @@
 
 ; RTInfo -> Node
 (defn rtinfo->type [m]
+  {:pre [(not (:op m))]}
   (let [cls (when-let [cls (:class m)]
-              (map (fn [c]
-                     {:op :class :class c})
-                   cls))
+              (assert (vector? cls) cls)
+              (mapv (fn [c]
+                      {:op :class :class c})
+                    cls))
         tfn (when-let [tfn (:fn m)]
               (let [as (mapv
                          (fn [[arity f]]
@@ -67,26 +70,35 @@
                                           m)})
                             vs))]
                  (not-empty ms)))
-        tvec nil #_(when-let [tvec (:vec m)]
-               (let [vs (vals (:map m))]
+        tvec (when-let [tvec (:vec m)]
+               (let [vs (vals tvec)]
                  (cond
                    (empty? vs)   nil
 
                    (== (count vs) 1)
                    #{(let [vv (first vs)]
-                       `'~(mapv (fn [n]
-                                  (rtinfo->type (get vv n)))
-                                (range (count vv))))}
+                       {:op :HVec
+                        :vec (mapv (fn [n]
+                                     (rtinfo->type (get vv n)))
+                                   (range (count vv)))})}
 
-                   :else #{clojure.lang.IPersistentVector})))
+                   :else (let [vvs (apply concat vs)]
+                           #{{:op :class
+                              :class clojure.lang.IPersistentVector
+                              :args [(reduce union {:op :union :types #{}} (map rtinfo->type vvs))]}}))))
         _ (assert ((some-fn nil? set?) tvec))
         tvals (when-let [tvals (:val m)]
                 (set
                   (map (fn [t]
                          {:op :val :val t})
                        tvals)))
-        ts (into (set (or cls tvals)) 
-                 (concat tvec tmap tfn))
+        _ (assert ((some-fn nil? coll?) cls) cls)
+        _ (assert ((some-fn nil? coll?) tvals) tvals)
+        _ (assert ((some-fn nil? coll?) tmap) tmap)
+        _ (assert ((some-fn nil? coll?) tfn) tfn)
+        _ (assert ((some-fn nil? coll?) tvec) tvec)
+        ts (into (set (or cls tvals))
+                 (doall (concat tvec tmap tfn)))
         ;; remove IFn if we already know it's a function
         ts (if tfn
              (disj ts {:op :class :class clojure.lang.IFn})
@@ -102,12 +114,14 @@
 ; [Node :-> Any]
 (defn unparse-node [{:as m}]
   (case (:op m)
+    :var (:name m)
     :val (let [t (:val m)]
            (cond
              ((some-fn nil? false?) t) t
              (keyword? t) `'~t
              :else 'Any))
     :union (list* 'U (map unparse-node (:types m)))
+    :HVec `'~(mapv unparse-node (:vec m))
     :HMap `'~(into {}
                    (map (fn [[k v]]
                           [k (unparse-node v)]))
@@ -121,7 +135,12 @@
            (if (== 1 (count as))
              (first as)
              (list* 'IFn as)))
-    :class (:class m)
+    :class (let [cls (condp = (:class m)
+                       clojure.lang.IPersistentVector 'Vec
+                       (:class m))]
+             (if (:args m)
+               (list* cls (map unparse-node (:args m)))
+               cls))
     :Top 'Any
     (assert nil (str "No unparse-node case: " m))))
 
@@ -148,18 +167,54 @@
 
 ; Node Node -> Node
 (defn union [s t]
+  {:pre [(map? s)
+         (map? t)]
+   :post [(map? %)]}
   (cond
+    (and (#{:HVec} (:op s))
+         (#{:HVec} (:op t)))
+    {:op :class
+     :class clojure.lang.IPersistentVector
+     :args [(reduce union {:op :union :types #{}} (concat (:vec s) (:vec t)))]}
+
+    (and (#{:HVec} (:op s))
+         (#{:class} (:op t))
+         (#{clojure.lang.IPersistentVector} (:class t)))
+    {:op :class
+     :class clojure.lang.IPersistentVector
+     :args [(reduce union (-> t :args first) (:vec s))]}
+
+    (and (#{:HVec} (:op t))
+         (#{:class} (:op s))
+         (#{clojure.lang.IPersistentVector} (:class s)))
+    {:op :class
+     :class clojure.lang.IPersistentVector
+     :args [(reduce union (-> s :args first) (map rtinfo->type (:vec t)))]}
+
+    ;; preserve Top
+    (#{:Top} (:op s)) s
+    (#{:Top} (:op t)) t
+
     (and (#{:union} (:op s))
          (#{:union} (:op t)))
-    {:op :union
-     :types (set/union (:types s)
-                       (:types t))}
+    (let [ts (set/union (:types s)
+                        (:types t))]
+      (if (== 1 (count ts))
+        (first ts)
+        {:op :union
+         :types ts}))
 
     (#{:union} (:op s))
-    (update s :types conj t)
+    (let [ts (conj (:types s) t)]
+      (if (== 1 (count ts))
+        (first ts)
+        (assoc s :types ts)))
 
     (#{:union} (:op t))
-    (update t :types conj s)
+    (let [ts (conj (:types t) s)]
+      (if (== 1 (count ts))
+        (first ts)
+        (assoc t :types ts)))
 
     :else
     (let [ts (into #{} [s t])]
@@ -169,24 +224,32 @@
          :types ts}))))
 
 ; Graph Node -> '[Graph Node]
-(defn join [seen t]
+(defn decompose [seen t]
   {:pre [(map? seen)
          (map? t)
          (keyword? (:op t))]
    :post [(vector? %)
           (map? (first %))
           (map? (second %))]}
-  (prn "join" t)
   (letfn []
     (case (:op t)
+      (:HVec)
+      (reduce 
+        (fn [[seen u] t]
+          (let [[seen s] (decompose seen t)]
+            [seen (update u :vec conj s)]))
+        [seen {:op :HVec :vec []}]
+        (:vec t))
+
       (:union)
       (reduce 
-        (fn [[seen _] t]
-          (join seen t))
-        [seen t]
+        (fn [[seen u] t]
+          (let [[seen s] (decompose seen t)]
+            [seen (union s u)]))
+        [seen {:op :union :types #{}}]
         (:types t))
 
-      (:val :var)
+      (:val :var :class :Top)
       [seen t]
 
       ;; generate a new name for each entry's value, which is a unique node
@@ -197,8 +260,8 @@
             [seen m]
             (reduce-kv
               (fn [[seen m] k v]
-                (let [[seen v'] (join seen v)]
-                  [seen (update-in m 
+                (let [[seen v'] (decompose seen v)]
+                  [seen (update-in m
                                    [:map k]
                                    (fn [n]
                                      (cond
@@ -214,44 +277,73 @@
                         (when (= ks (-> v val :map keys set))
                           v)))
                     seen)
+            m'' m
             [seen m] (if e
                        ;; merge with existing `seen` map
                        (reduce-kv
                          (fn [[seen m] k v]
-                           (let [[seen v'] (join seen v)]
+                           (let [[seen v'] (decompose seen v)]
+                             ;; `k` is guaranteed to be present in `m`, since
+                             ;; (= (set (keys m)) (set (keys (:map (val e)))))
+                             ;; by the derivation of `e` above.
                              [seen (update-in m [:map k] union v')]))
                          [seen m]
                          (:map (val e)))
                        [seen m])
             nme (or (some-> e key)
                     (gensym (apply str "map-" 
-                                   (concat (apply interpose "-" (map name ks))
+                                   (concat (interpose "-" (map name ks))
                                            ["__"]))))
             seen (assoc seen nme m)]
         [seen {:op :var :name nme}])
 
-      (assert nil (str "Cannot join op: " (pr-str (:op t)))))))
+      (assert nil (str "Cannot decompose op: " (pr-str (:op t)))))))
+
+(defn feed [& egs]
+  (let [remember-var (atom {})
+        p 'path
+        v {:op :if
+           :test {:op :val
+                  :val nil}
+           :then {:op :if
+                  :test {:op :val
+                         :val 'a}
+                  :then {:op :val
+                         :val :a}
+                  :else {:op :val
+                         :val nil}}
+           :else {:op :val
+                  :val 1}}
+        _ (doseq [e egs]
+            (infer-val remember-var
+                       e
+                       [p]))
+        t (type-of-var remember-var p)]
+    (visualize
+      (first
+        (decompose {}
+                   t)))))
 
 (deftest simplify-test
-  (is (= (join {} {:op :val :val nil})
+  (is (= (decompose {} {:op :val :val nil})
          [{} {:op :val :val nil}]))
-  (is (= (join {'b {:op :HMap
-                    :map {:a {:op :val :val nil}}}}
-               {:op :HMap :map {:a {:op :val :val nil}}})
+  (is (= (decompose {'b {:op :HMap
+                         :map {:a {:op :val :val nil}}}}
+                    {:op :HMap :map {:a {:op :val :val nil}}})
          [{'b {:op :HMap
                :map {:a {:op :val :val nil}}}}
           {:op :var :name 'b}]))
-  (is (= (join {'b {:op :HMap,
-                    :map {:a {:op :val,
-                              :val nil}}}}
-               {:op :HMap
-                :map {:a 
-                      {:op :HMap
-                       :map {:a 
-                             {:op :HMap
-                              :map {:a 
-                                    {:op :val :val nil}}}}}}}
-               )
+  (is (= (decompose {'b {:op :HMap,
+                         :map {:a {:op :val,
+                                   :val nil}}}}
+                    {:op :HMap
+                     :map {:a 
+                           {:op :HMap
+                            :map {:a 
+                                  {:op :HMap
+                                   :map {:a 
+                                         {:op :val :val nil}}}}}}}
+                    )
          {'a {:op :val, :val nil}
           'b {:op :HMap,
               :map {:a {:op :union
@@ -259,41 +351,73 @@
                                  :name 'a}
                                 {:op :var,
                                  :name 'b}]}}}}))
-  (is (let [[seen v] (join {} {:a nil})]
-        (and (#{:var} (:op v))
-             (contains? seen (:name v)))))
-  (is (let [[seen v] (join {} {:op :HMap
-                               :map {:a 
-                                     {:op :HMap
-                                      :map {:a 
-                                            {:op :HMap
-                                             :map {:a 
-                                                   {:op :val :val nil}}}}}}})]
-        (and (#{:var} (:op v))
-             (contains? seen (:name v)))))
+  (is (decompose {} {:op :HMap
+                     :map {:a 
+                           {:op :val :val nil}}}))
+  (is (decompose {} {:op :HMap
+                     :map {:a 
+                           {:op :HMap
+                            :map {:a 
+                                  {:op :val :val nil}}}}}))
   (is (visualize
         (first
-          (join {}
-                {:op :if
-                 :test {:op :val
-                        :val nil}
-                 :then {:op :if
-                        :test {:op :val
-                               :val 'a}
-                        :then {:op :val
-                               :val :a}
-                        :else {:op :val
-                               :val nil}}
-                 :else {:op :val
-                        :val 1}})))))
+          (decompose {} {:op :HMap
+                         :map {:a 
+                               {:op :HMap
+                                :map {:a 
+                                      {:op :HMap
+                                       :map {:a 
+                                             {:op :val :val nil}}}}}}})))
+      )
+  (is (feed {:op :val :val nil}))
+
+  (is (feed {:a [1 2]}
+            {:a [1 2 3]}
+            ))
+
+  (is (feed 
+        {:op :val :val nil}
+        {:op :do
+         :body [{:op :val :val nil}
+                {:op :do
+                 :body [{:op :val :val nil}]}]}
+        #_{:op :do
+         :body [{:op :val :val nil}
+                {:op :val :val nil}]}
+        ))
+
+  (is (feed {:op :val :val nil}
+            {:op :val :val 1}
+            {:op :class :val 1}
+            ))
+  (is (feed {:op :if
+             :test {:op :val
+                    :val nil}
+             :then {:op :if
+                    :test {:op :val
+                           :val 'a}
+                    :then {:op :val
+                           :val :a}
+                    :else {:op :val
+                           :val nil}}
+             :else {:op :val
+                    :val 1}}))
+  )
 
 ; Node -> (Set Sym)
 (defn fv [v]
   (case (:op v)
     :val #{}
-    :HMap (apply set/union (-> v :map vals fv))
-    :union (apply set/union (-> v :types fv))
+    :HMap (apply set/union (map fv (-> v :map vals)))
+    :HVec (apply set/union (map fv (-> v :vec)))
+    :union (apply set/union (map fv (-> v :types)))
     :var #{(:name v)}
+    :IFn (apply set/union
+                (map (fn [f']
+                       (apply set/union 
+                              (fv (:rng f'))
+                              (map fv (:dom f'))))
+                     (:arities v)))
     #{}))
 
 ; Graph -> Any
@@ -307,7 +431,7 @@
                       (assoc g s (fv v)))
                     {}
                     gr)
-                  :node->descriptor (fn [n] {:label (str #_#_n ": " (-> n meta :val pr-str))})))
+                  :node->descriptor (fn [n] {:label (str n ":\n" (with-out-str (pprint (-> n meta :val unparse-node))))})))
 
 ; [:-> nil]
 (defn ppres []
@@ -316,9 +440,11 @@
                        [k (-> v rtinfo->type unparse-node)]))
                 @remember-var)))
 
-; [Var :-> (U nil Any)]
-(defn type-of-var [v]
-  (get @remember-var v))
+; [Sym :-> (U nil Any)]
+(defn type-of-var [remember-var v]
+  (let [r (get @remember-var v)]
+    (assert r (str "Variable " v " not found"))
+    (rtinfo->type r)))
 
 ; [Var :-> Sym]
 (defn var->symbol [^clojure.lang.Var v]
@@ -334,8 +460,8 @@
 
 ;(defalias Value Any)
 
-; [Value Path :-> Value]
-(defn infer-val [v path]
+; [(Atom (Map Sym RTInfo)) Value Path :-> Value]
+(defn infer-val [remember-var v path]
   {:pre [(vector? path)]}
   (cond
     ;; only accurate up to 20 arguments.
@@ -351,16 +477,17 @@
                 (let [blen (bounded-length args 20) ;; apply only realises 20 places
                       args (map-indexed
                              (fn [n v]
-                               (infer-val v (conj path :fn blen :dom n)))
+                               (infer-val remember-var v (conj path :fn blen :dom n)))
                              args)]
                   (infer-val
+                    remember-var
                     (apply v args)
                     (conj path :fn blen :rng)))))
 
     (vector? v) (let [len (count v)]
                   (reduce-kv
                     (fn [e k v]
-                      (let [v' (infer-val v (conj path :vec len k))]
+                      (let [v' (infer-val remember-var v (conj path :vec len k))]
                         (if (identical? v v')
                           e
                           (assoc e k v'))))
@@ -375,7 +502,7 @@
       (reduce
         (fn [m k]
           (let [orig-v (get m k)
-                v (infer-val orig-v (conj path :map g k))]
+                v (infer-val remember-var orig-v (conj path :map g k))]
             ;; only assoc if needed
             (if (identical? v orig-v)
               m
@@ -406,7 +533,7 @@
 
 (defn infer-var' [vr]
   {:pre [(var? vr)]}
-  (infer-val @vr [(var->symbol vr)]))
+  (infer-val remember-var @vr [(var->symbol vr)]))
 
 (defmacro infer-var [v]
   `(infer-var' (var ~v)))
