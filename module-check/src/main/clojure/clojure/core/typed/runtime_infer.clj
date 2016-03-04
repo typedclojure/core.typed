@@ -165,12 +165,50 @@
     nil
     g))
 
+(defn flatten-union [t]
+  (if (#{:union} t)
+    (:types t)
+    #{t}))
+
 ; Node Node -> Node
 (defn union [s t]
   {:pre [(map? s)
          (map? t)]
    :post [(map? %)]}
+  (prn 'Union (unparse-node s) (unparse-node t))
   (cond
+    ;; preserve Top
+    (#{:Top} (:op s)) s
+    (#{:Top} (:op t)) t
+
+    (or (#{:union} (:op s))
+        (#{:union} (:op t)))
+    (let [ss (or (when (#{:union} (:op s))
+                   (:types s))
+                 #{s})
+          tt (or (when (#{:union} (:op t))
+                   (:types t))
+                 #{t})
+          ts (reduce
+               (fn [ss t]
+                 (cond
+                   (#{:HVec} (:op t))
+                   (into #{} 
+                         (comp
+                           (map (fn [v]
+                                  (cond
+                                    (#{:HVec} (:op t)) (flatten-union (union v t))
+                                    :else #{v})))
+                           (mapcat identity))
+                         ss)
+                   :else (conj ss t)))
+               ss
+               tt)]
+      (if (== 1 (count ts))
+        (first ts)
+        {:op :union
+         :types ts}))
+
     (and (#{:HVec} (:op s))
          (#{:HVec} (:op t)))
     {:op :class
@@ -190,31 +228,6 @@
     {:op :class
      :class clojure.lang.IPersistentVector
      :args [(reduce union (-> s :args first) (map rtinfo->type (:vec t)))]}
-
-    ;; preserve Top
-    (#{:Top} (:op s)) s
-    (#{:Top} (:op t)) t
-
-    (and (#{:union} (:op s))
-         (#{:union} (:op t)))
-    (let [ts (set/union (:types s)
-                        (:types t))]
-      (if (== 1 (count ts))
-        (first ts)
-        {:op :union
-         :types ts}))
-
-    (#{:union} (:op s))
-    (let [ts (conj (:types s) t)]
-      (if (== 1 (count ts))
-        (first ts)
-        (assoc s :types ts)))
-
-    (#{:union} (:op t))
-    (let [ts (conj (:types t) s)]
-      (if (== 1 (count ts))
-        (first ts)
-        (assoc t :types ts)))
 
     :else
     (let [ts (into #{} [s t])]
@@ -372,6 +385,9 @@
   (is (feed {:op :val :val nil}))
 
   (is (feed {:a [1 2]}
+            {:a [1 2 3]}
+            ))
+  (is (feed {:a [{:a 1}]}
             {:a [1 2 3]}
             ))
 
