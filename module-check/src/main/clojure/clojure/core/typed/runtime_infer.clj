@@ -97,7 +97,7 @@
         _ (assert ((some-fn nil? coll?) tmap) tmap)
         _ (assert ((some-fn nil? coll?) tfn) tfn)
         _ (assert ((some-fn nil? coll?) tvec) tvec)
-        ts (into (set (or cls tvals))
+        ts (into (set (concat cls tvals))
                  (doall (concat tvec tmap tfn)))
         ;; remove IFn if we already know it's a function
         ts (if tfn
@@ -138,7 +138,7 @@
     :class (let [cls (condp = (:class m)
                        clojure.lang.IPersistentVector 'Vec
                        (:class m))]
-             (if (:args m)
+             (if (seq (:args m))
                (list* cls (map unparse-node (:args m)))
                cls))
     :Top 'Any
@@ -175,7 +175,7 @@
   {:pre [(map? s)
          (map? t)]
    :post [(map? %)]}
-  (prn 'Union (unparse-node s) (unparse-node t))
+  ;(prn 'Union (unparse-node s) (unparse-node t))
   (cond
     ;; preserve Top
     (#{:Top} (:op s)) s
@@ -227,7 +227,7 @@
          (#{clojure.lang.IPersistentVector} (:class s)))
     {:op :class
      :class clojure.lang.IPersistentVector
-     :args [(reduce union (-> s :args first) (map rtinfo->type (:vec t)))]}
+     :args [(reduce union (-> s :args first) (:vec t))]}
 
     :else
     (let [ts (into #{} [s t])]
@@ -244,6 +244,7 @@
    :post [(vector? %)
           (map? (first %))
           (map? (second %))]}
+  ;(prn "decompose" seen t)
   (letfn []
     (case (:op t)
       (:HVec)
@@ -255,7 +256,7 @@
         (:vec t))
 
       (:union)
-      (reduce 
+      (reduce
         (fn [[seen u] t]
           (let [[seen s] (decompose seen t)]
             [seen (union s u)]))
@@ -263,7 +264,7 @@
         (:types t))
 
       (:val :var :class :Top)
-      [seen t]
+      [(assoc seen (gensym "base") t) t]
 
       ;; generate a new name for each entry's value, which is a unique node
       ;; in our final graph
@@ -312,30 +313,82 @@
 
       (assert nil (str "Cannot decompose op: " (pr-str (:op t)))))))
 
-(defn feed [& egs]
+(defn plot-data [& egs]
   (let [remember-var (atom {})
         p 'path
-        v {:op :if
-           :test {:op :val
-                  :val nil}
-           :then {:op :if
-                  :test {:op :val
-                         :val 'a}
-                  :then {:op :val
-                         :val :a}
-                  :else {:op :val
-                         :val nil}}
-           :else {:op :val
-                  :val 1}}
         _ (doseq [e egs]
-            (infer-val remember-var
-                       e
-                       [p]))
+            (let [v (infer-val remember-var e [p])]
+              (cond
+                (fn? e) (doseq [vs (-> e meta :call-me)]
+                          (assert (vector? vs))
+                          (apply v vs)))))
         t (type-of-var remember-var p)]
-    (visualize
-      (first
-        (decompose {}
-                   t)))))
+    (decompose {} t)))
+
+(defn subst [v s]
+  (case (:op v)
+    :val v
+    :HMap (update v :map (fn [m]
+                           (reduce-kv
+                             (fn [m k v]
+                               (assoc m k (subst v s)))
+                             {}
+                             m)))
+    :class (update v :args (fn [m]
+                             (reduce-kv
+                               (fn [m k v]
+                                 (assoc m k (subst v s)))
+                               []
+                               m)))
+    :HVec (update v :vec (fn [m]
+                           (reduce-kv
+                             (fn [m k v]
+                               (assoc m k (subst v s)))
+                             []
+                             m)))
+    :union (update v :types (fn [m]
+                              (reduce
+                                (fn [m v]
+                                  (conj m (subst v s)))
+                                #{}
+                                m)))
+    :var (update v :name (fn [n]
+                           (get s n n)))
+    :IFn (update v :arities 
+                 (fn [as]
+                   (mapv
+                     (fn [a]
+                       (-> a
+                           (update :rng subst s)
+                           (update :dom
+                                   (fn [ds]
+                                     (mapv #(subst % s) ds)))))
+                     as)))))
+
+; Graph -> TypeSyntax
+(defn graph->rec-type [g]
+  {:pre [(map? g)
+         (every? symbol? (keys g))]}
+  (let [vr 'x
+        s (into {}
+                (map (fn [k]
+                       [k vr])
+                     (keys g)))]
+    (list 'Rec [vr]
+          (list* 'U (map (fn [t]
+                           (unparse-node (subst t s)))
+                         (vals g))))))
+
+(defn feed [& egs]
+  (visualize
+    (first
+      (apply plot-data egs))))
+
+(defn rec-from [& egs]
+  (->
+    (first
+      (apply plot-data egs))
+    graph->rec-type))
 
 (deftest simplify-test
   (is (= (decompose {} {:op :val :val nil})
@@ -372,25 +425,42 @@
                            {:op :HMap
                             :map {:a 
                                   {:op :val :val nil}}}}}))
-  (is (visualize
-        (first
-          (decompose {} {:op :HMap
-                         :map {:a 
-                               {:op :HMap
-                                :map {:a 
-                                      {:op :HMap
-                                       :map {:a 
-                                             {:op :val :val nil}}}}}}})))
-      )
+  (is 
+    (decompose {} {:op :HMap
+                   :map {:a 
+                         {:op :HMap
+                          :map {:a 
+                                {:op :HMap
+                                 :map {:a 
+                                       {:op :val :val nil}}}}}}}))
   (is (feed {:op :val :val nil}))
 
   (is (feed {:a [1 2]}
             {:a [1 2 3]}
             ))
+  (is (feed nil))
+  (is (rec-from nil))
+  (is (rec-from nil
+                 1))
   (is (feed {:a [{:a 1}]}
             {:a [1 2 3]}
             ))
-
+  (is (->
+        (rec-from {:a [{:a 1}]}
+                  {:a [1 2 3]}
+                  {:b [1 2 3]}
+                  {:b [1 2 3]}
+                  {:a {:b [1 2 3]}}
+                  {:b {:a [1 2 3]}}
+                  {:b {:b [1 2 3]}}
+                  )
+        pprint))
+  (is (->
+        (plot-data
+          ^{:call-me [[1]
+                      [2]
+                      [3]]}
+          (fn [x] (inc x)))))
   (is (feed 
         {:op :val :val nil}
         {:op :do
@@ -419,6 +489,7 @@
              :else {:op :val
                     :val 1}}))
   )
+
 
 ; Node -> (Set Sym)
 (defn fv [v]
@@ -489,16 +560,18 @@
                      (conj path :class)
                      (fnil conj [])
                      clojure.lang.IFn)
-              (fn [& args]
-                (let [blen (bounded-length args 20) ;; apply only realises 20 places
-                      args (map-indexed
-                             (fn [n v]
-                               (infer-val remember-var v (conj path :fn blen :dom n)))
-                             args)]
-                  (infer-val
-                    remember-var
-                    (apply v args)
-                    (conj path :fn blen :rng)))))
+              (with-meta
+                (fn [& args]
+                  (let [blen (bounded-length args 20) ;; apply only realises 20 places
+                        args (map-indexed
+                               (fn [n v]
+                                 (infer-val remember-var v (conj path :fn blen :dom n)))
+                               args)]
+                    (infer-val
+                      remember-var
+                      (apply v args)
+                      (conj path :fn blen :rng))))
+                (meta v)))
 
     (vector? v) (let [len (count v)]
                   (reduce-kv
@@ -537,7 +610,6 @@
              (fnil conj [])
              v)
       v)
-
 
     :else (do
             (swap! remember-var
