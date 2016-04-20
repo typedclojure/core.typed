@@ -225,3 +225,13 @@
               (assert (contains? m :params))
               (count (:params m)))))
 
+(defn walk-children [check {:keys [children] :as expr}]
+  (reduce
+    (fn [expr c]
+      (update expr c 
+              (fn [ce]
+                (if (vector? ce)
+                  (mapv check ce)
+                  (check ce)))))
+    expr
+    children))

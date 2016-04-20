@@ -2,7 +2,9 @@
   (:require [clojure.pprint :refer [pprint]]
             [clojure.set :as set]
             [clojure.test :refer :all]
-            [rhizome.viz :as viz]))
+            #_[rhizome.viz :as viz]
+            ;[clojure.core.typed.env :as env]
+            [clojure.core.typed.ast-utils :as ast]))
 
 #_
 (defalias Node
@@ -39,9 +41,15 @@
 ; (Atom (Map Sym RTInfo))
 (def remember-var (atom {}))
 
+(defn initial-graph []
+  {:graph {}})
+
+(declare union infer-val type?)
+
 ; RTInfo -> Node
 (defn rtinfo->type [m]
-  {:pre [(not (:op m))]}
+  {:pre [(not (:op m))]
+   :post [(type? %)]}
   (let [cls (when-let [cls (:class m)]
               (assert (vector? cls) cls)
               (mapv (fn [c]
@@ -111,8 +119,15 @@
 
       :else {:op :Top})))
 
+(defn type? [t]
+  (and (map? t)
+       (keyword? (:op t))))
+
+(declare unparse-node)
+
 ; [Node :-> Any]
-(defn unparse-node [{:as m}]
+(defn unparse-node' [{:as m}]
+  {:pre [(type? m)]}
   (case (:op m)
     :var (:name m)
     :val (let [t (:val m)]
@@ -120,7 +135,7 @@
              ((some-fn nil? false?) t) t
              (keyword? t) `'~t
              :else 'Any))
-    :union (list* 'U (map unparse-node (:types m)))
+    :union (list* 'U (set (map unparse-node (:types m))))
     :HVec `'~(mapv unparse-node (:vec m))
     :HMap `'~(into {}
                    (map (fn [[k v]]
@@ -144,6 +159,8 @@
     :Top 'Any
     (assert nil (str "No unparse-node case: " m))))
 
+(def ^:dynamic unparse-node unparse-node')
+
 ;; Graph data structure
 ;;
 ;;  nil + {:a nil} =>
@@ -153,28 +170,29 @@
 
 (def val? (some-fn nil? keyword? symbol? number?))
 
-; Graph Any -> (U nil Sym)
-(defn lookup-val [g v]
-  {:pre [(map? g)
-         (val? v)]
-   :post [((some-fn symbol? nil?) %)]}
-  (reduce-kv
-    (fn [m k v']
-      (when (= v' v)
-        (reduced k)))
-    nil
-    g))
+#_
+(defalias Graph
+  '{:graph (Map Sym Type)
+    :starting-node (U nil Sym)})
+
+(defn graph? [m]
+  (and (map? m)
+       (contains? m :starting-node)
+       ((some-fn nil? symbol?) (:starting-node m))
+       (map? (:graph m))))
 
 (defn flatten-union [t]
+  {:pre [(type? t)]
+   :post [(set? %)]}
   (if (#{:union} t)
     (:types t)
     #{t}))
 
 ; Node Node -> Node
 (defn union [s t]
-  {:pre [(map? s)
-         (map? t)]
-   :post [(map? %)]}
+  {:pre [(type? s)
+         (type? t)]
+   :post [(type? %)]}
   ;(prn 'Union (unparse-node s) (unparse-node t))
   (cond
     ;; preserve Top
@@ -238,12 +256,11 @@
 
 ; Graph Node -> '[Graph Node]
 (defn decompose [seen t]
-  {:pre [(map? seen)
-         (map? t)
-         (keyword? (:op t))]
+  {:pre [(graph? seen)
+         (type? t)]
    :post [(vector? %)
-          (map? (first %))
-          (map? (second %))]}
+          (graph? (first %))
+          (type? (second %))]}
   ;(prn "decompose" seen t)
   (letfn []
     (case (:op t)
@@ -264,7 +281,7 @@
         (:types t))
 
       (:val :var :class :Top)
-      [(assoc seen (gensym "base") t) t]
+      [(assoc-in seen [:graph (gensym "base")] t) t]
 
       ;; generate a new name for each entry's value, which is a unique node
       ;; in our final graph
@@ -290,7 +307,7 @@
                       (when (-> v val :op #{:HMap})
                         (when (= ks (-> v val :map keys set))
                           v)))
-                    seen)
+                    (:graph seen))
             m'' m
             [seen m] (if e
                        ;; merge with existing `seen` map
@@ -308,10 +325,12 @@
                     (gensym (apply str "map-" 
                                    (concat (interpose "-" (map name ks))
                                            ["__"]))))
-            seen (assoc seen nme m)]
+            seen (assoc-in seen [:graph nme] m)]
         [seen {:op :var :name nme}])
 
       (assert nil (str "Cannot decompose op: " (pr-str (:op t)))))))
+
+(declare type-of-var)
 
 (defn plot-data [& egs]
   (let [remember-var (atom {})
@@ -323,9 +342,12 @@
                           (assert (vector? vs))
                           (apply v vs)))))
         t (type-of-var remember-var p)]
-    (decompose {} t)))
+    (decompose {:starting-node nil
+                :graph {}} t)))
 
 (defn subst [v s]
+  {:pre [(type? v)]
+   :post [(type? %)]}
   (case (:op v)
     :val v
     :HMap (update v :map (fn [m]
@@ -365,20 +387,38 @@
                                      (mapv #(subst % s) ds)))))
                      as)))))
 
-; Graph -> TypeSyntax
-(defn graph->rec-type [g]
-  {:pre [(map? g)
-         (every? symbol? (keys g))]}
-  (let [vr 'x
-        s (into {}
-                (map (fn [k]
-                       [k vr])
-                     (keys g)))]
-    (list 'Rec [vr]
-          (list* 'U (map (fn [t]
-                           (unparse-node (subst t s)))
-                         (vals g))))))
+;; FIXME add the :starting-node key
+(defn starting-type [{:keys [starting-node graph] :as g}]
+  {:pre [(symbol? starting-node)
+         (contains? graph starting-node)]}
+  (get graph starting-node))
 
+; Graph -> TypeSyntax
+(defn graph->type [g]
+  {:pre [(graph? g)]}
+  (let [vr (gensym 'x)
+        seen (atom {})]
+    (binding [unparse-node (fn [t]
+                             (cond
+                               (= :var (:op t)) 
+                               (let [s @seen
+                                     nme (:name t)]
+                                 (cond 
+                                   (contains? s nme) (get s nme) ;; already bound by Rec, look up new name
+                                   :else (let [vsym (gensym)]
+                                           (swap! seen assoc vsym vsym)
+                                           (list 'Rec [vsym]
+                                                 (unparse-node (get (:graph g) nme))))))
+
+                               ;; custom :var unparse
+                               :else (unparse-node' t)))]
+      (list 'Rec [vr]
+            (unparse-node (starting-type g))))))
+
+#_
+(declare visualize)
+
+#_
 (defn feed [& egs]
   (visualize
     (first
@@ -388,11 +428,12 @@
   (->
     (first
       (apply plot-data egs))
-    graph->rec-type))
+    graph->type))
 
 (deftest simplify-test
-  (is (= (decompose {} {:op :val :val nil})
-         [{} {:op :val :val nil}]))
+  ;(is (= (decompose {} {:op :val :val nil})
+  ;       {:starting-node '
+  ;        {} {:op :val :val nil}]))
   (is (= (decompose {'b {:op :HMap
                          :map {:a {:op :val :val nil}}}}
                     {:op :HMap :map {:a {:op :val :val nil}}})
@@ -433,26 +474,40 @@
                                 {:op :HMap
                                  :map {:a 
                                        {:op :val :val nil}}}}}}}))
-  (is (feed {:op :val :val nil}))
+  ;(is (feed {:op :val :val nil}))
 
-  (is (feed {:a [1 2]}
-            {:a [1 2 3]}
-            ))
-  (is (feed nil))
+  ;(is (feed {:a [1 2]}
+  ;          {:a [1 2 3]}
+  ;          ))
+  ;(is (feed nil))
   (is (rec-from nil))
   (is (rec-from nil
                  1))
-  (is (feed {:a [{:a 1}]}
-            {:a [1 2 3]}
-            ))
+  #_
+
+  (is (plot-data nil
+                {:a nil}))
+  ;[{:starting-node nil, :graph {base49537 {:op :val, :val nil}, map-a__49538 {:op :HMap, :map {:a {:op :val, :val nil}}}, base49539 {:op :val, :val nil}}} {:op :union, :types #{{:op :var, :name map-a__49538} {:op :val, :val nil}}}]
+  (is (rec-from nil
+                {:a nil}))
+  ;; BAD
+  (is (rec-from nil
+                [1 2]
+                {:a nil}))
+  ;(is (feed {:a [{:a 1}]}
+  ;          {:a [1 2 3]}
+  ;          ))
   (is (->
-        (rec-from {:a [{:a 1}]}
+        (rec-from {:a 1}
+                  {:a {:a 1}})
+        pprint))
+  (is (->
+        (rec-from ;{:a [{:a 1}]}
                   {:a [1 2 3]}
-                  {:b [1 2 3]}
                   {:b [1 2 3]}
                   {:a {:b [1 2 3]}}
                   {:b {:a [1 2 3]}}
-                  {:b {:b [1 2 3]}}
+                  #_{:b {:b [1 2 3]}}
                   )
         pprint))
   (is (->
@@ -461,7 +516,7 @@
                       [2]
                       [3]]}
           (fn [x] (inc x)))))
-  (is (feed 
+  (is (pprint (rec-from 
         {:op :val :val nil}
         {:op :do
          :body [{:op :val :val nil}
@@ -470,24 +525,24 @@
         #_{:op :do
          :body [{:op :val :val nil}
                 {:op :val :val nil}]}
-        ))
+        )))
 
-  (is (feed {:op :val :val nil}
-            {:op :val :val 1}
-            {:op :class :val 1}
-            ))
-  (is (feed {:op :if
-             :test {:op :val
-                    :val nil}
-             :then {:op :if
-                    :test {:op :val
-                           :val 'a}
-                    :then {:op :val
-                           :val :a}
-                    :else {:op :val
-                           :val nil}}
-             :else {:op :val
-                    :val 1}}))
+  ;(is (feed {:op :val :val nil}
+  ;          {:op :val :val 1}
+  ;          {:op :class :val 1}
+  ;          ))
+  ;(is (feed {:op :if
+  ;           :test {:op :val
+  ;                  :val nil}
+  ;           :then {:op :if
+  ;                  :test {:op :val
+  ;                         :val 'a}
+  ;                  :then {:op :val
+  ;                         :val :a}
+  ;                  :else {:op :val
+  ;                         :val nil}}
+  ;           :else {:op :val
+  ;                  :val 1}}))
   )
 
 
@@ -508,27 +563,39 @@
     #{}))
 
 ; Graph -> Any
+#_
 (defn visualize [gr]
+  {:pre [(graph? gr)]}
   (viz/view-graph (map (fn [[v1 v2]]
                          (with-meta v1
                                     {:val v2}))
-                       gr)
+                       (:graph gr))
                   (reduce
                     (fn [g [s v]]
                       (assoc g s (fv v)))
                     {}
-                    gr)
+                    (:graph gr))
                   :node->descriptor (fn [n] {:label (str n ":\n" (with-out-str (pprint (-> n meta :val unparse-node))))})))
+
+(defn summary []
+  (into {}
+        (map (fn [[ns m]]
+               [ns
+                {:vars
+                 (into {}
+                       (map (fn [[k v]]
+                              [k (-> v rtinfo->type unparse-node)]))
+                       m)}]))
+        @remember-var))
 
 ; [:-> nil]
 (defn ppres []
-  (pprint (into {}
-                (map (fn [[k v]]
-                       [k (-> v rtinfo->type unparse-node)]))
-                @remember-var)))
+  (pprint (summary)))
 
-; [Sym :-> (U nil Any)]
+; [(Atom RTInfo) Sym :-> Type]
 (defn type-of-var [remember-var v]
+  {:pre [(symbol? v)]
+   :post [(type? %)]}
   (let [r (get @remember-var v)]
     (assert r (str "Variable " v " not found"))
     (rtinfo->type r)))
@@ -573,15 +640,17 @@
                       (conj path :fn blen :rng))))
                 (meta v)))
 
-    (vector? v) (let [len (count v)]
-                  (reduce-kv
-                    (fn [e k v]
-                      (let [v' (infer-val remember-var v (conj path :vec len k))]
-                        (if (identical? v v')
-                          e
-                          (assoc e k v'))))
-                    v
-                    v))
+    (and (vector? v) 
+         (satisfies? clojure.core.protocols/IKVReduce v)) ; MapEntry's are not IKVReduce
+    (let [len (count v)]
+      (reduce-kv
+        (fn [e k v]
+          (let [v' (infer-val remember-var v (conj path :vec len k))]
+            (if (identical? v v')
+              e
+              (assoc e k v'))))
+        v
+        v))
 
     ;; maps with keyword keys
     (and (or (instance? clojure.lang.PersistentHashMap v)
@@ -619,14 +688,68 @@
                    (class v))
             v)))
 
-(defn infer-var' [vr]
-  {:pre [(var? vr)]}
-  (infer-val remember-var @vr [(var->symbol vr)]))
+(def infer-var-key ::infer-var)
+
+(defn infer-var'
+  ([vr] (infer-var' remember-var vr *ns*))
+  ([remember-var vr ns]
+   {:pre [(var? vr)
+          (instance? clojure.lang.IAtom remember-var)]}
+   (infer-val remember-var @vr [(ns-name ns) (var->symbol vr)])))
 
 (defmacro infer-var [v]
   `(infer-var' (var ~v)))
 
+(def ns-exclusions
+  '#{clojure.core
+     clojure.core.typed
+     clojure.test
+     clojure.string})
 
+(defn check
+  "Assumes collect-expr is already called on this AST."
+  ([expr] (check expr nil))
+  ([expr expected]
+   (letfn []
+     (case (:op expr)
+       (:var) (let [vsym (var->symbol (:var expr))]
+                ;(prn "var" vsym)
+                (if (not (ns-exclusions (symbol (namespace vsym))))
+                  (do
+                    #_
+                    (println (str "Instrumenting " vsym " in " (ns-name *ns*) 
+                                  #_":" 
+                                  #_(-> expr :env :line)
+                                  #_(when-let [col (-> expr :env :column)]
+                                    ":" col)))
+                    {:op :invoke 
+                     :children [:fn :args]
+                     :form `(infer-var' (var ~vsym))
+                     :env (:env expr)
+                     :fn {:op :var
+                          :var #'infer-var'
+                          :form `infer-var'
+                          :env (:env expr)}
+                     :args [{:op :var
+                             :form `remember-var
+                             :env (:env expr)
+                             :var #'remember-var}
+                            {:op :the-var
+                             :form `(var ~vsym)
+                             :env (:env expr)
+                             :var (:var expr)}
+                            {:op :const
+                             :type :unknown
+                             :form *ns*
+                             :val *ns*
+                             :env (:env expr)}
+                            ]})
+                  expr))
+       (ast/walk-children check expr)))))
+
+(def runtime-infer-expr check)
+
+(comment
 (defn foo [a]
   (+ a 2))
 
@@ -767,3 +890,15 @@
 ((infer-var take-map) {:a {:a {:a {:a nil}}}})
 
 (ppres)
+
+(defn postfix [& words]
+  (reduce (fn [stack t]
+            (if (fn? t)
+              (let [[l r & m] stack]
+                (cons (t r l) m))
+              (cons t stack)))
+          [] 
+          words))
+
+(postfix 1 2 )
+)
