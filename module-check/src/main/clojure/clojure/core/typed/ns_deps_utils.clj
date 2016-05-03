@@ -7,6 +7,7 @@
             [clojure.core.typed.contract-utils :as con]
             [clojure.core.typed.errors :as err]
             [clojure.core.typed.current-impl :as impl]
+            [clojure.java.io :as io]
             [clojure.core.typed.internal :as internal]))
 
 ;; also in c.c.t.internal
