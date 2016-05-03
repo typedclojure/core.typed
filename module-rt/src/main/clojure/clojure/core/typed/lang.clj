@@ -19,7 +19,7 @@
           {:lang :new-impl})
       will use `my-load` to load the file.
   "
-  (:require [clojure.core.typed.ns-deps-utils :as ns-utils]))
+  (:require [clojure.core.typed.internal :as internal]))
 
 ; (Map Kw (HMap :optional {:eval [Any -> Any], 
 ;                          :load [Str -> nil]}))
@@ -43,9 +43,9 @@
 (defn file-lang
   "Returns the :lang entry in ns form in the given namespace."
   [res]
-  (some-> res 
-          ns-utils/ns-form-for-file 
-          ns-utils/ns-meta 
+  (some-> res
+          internal/ns-form-for-file
+          internal/ns-meta
           :lang))
 
 ; [Namespace -> Any]
