@@ -1,4 +1,5 @@
 (ns clojure.core.typed.test.CTYP-83-performance
+  {:lang :core.typed}
   (:require
     [clojure.core.typed :as t]))
 
