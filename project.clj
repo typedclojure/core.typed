@@ -7,15 +7,15 @@
                  [org.clojure/clojurescript "0.0-2268"]
                  [com.taoensso/timbre "2.1.2"]
                  [org.clojure/core.match "0.2.0-alpha12"]
-                 [org.clojure/core.async "0.2.371"]
+                 [org.clojure/core.async "0.2.374"]
                  [org.clojure/tools.trace "0.7.5" :exclusions [org.clojure/clojure]]
                  ; CLJS fireplace REPL
                  [com.cemerick/piggieback "0.1.3" :exclusions [org.clojure/tools.reader
                                                                org.clojure/clojurescript]]
                  [org.clojure/jvm.tools.analyzer "0.6.1" :exclusions [org.clojure/clojure 
                                                                       org.clojure/clojurescript]]
-                 [org.clojure/tools.analyzer.jvm "0.6.8"]
-                 [org.clojure/tools.reader "0.9.2"]
+                 [org.clojure/tools.analyzer.jvm "0.6.9"]
+                 [org.clojure/tools.reader "1.0.0-alpha1"]
                  [org.clojure/core.contracts "0.0.4" :exclusions [org.clojure/clojure]]
                  [org.clojure/math.combinatorics "0.1.1" :exclusions [org.clojure/clojure]]
                  [org.clojure/tools.namespace "0.2.11"]
@@ -32,7 +32,7 @@
                                     #_clojure.core.typed.repl/wrap-clj-repl]}
 
   :plugins [[lein-typed "0.3.1"]
-            [org.typedclojure/mranderson "0.4.4"]]
+            #_[org.typedclojure/mranderson "0.4.4"]]
   :core.typed {:check [clojure.core.typed.test.records]
                :check-cljs []}
 
@@ -56,7 +56,7 @@
                "module-rt/test/clojure"
                "module-rt/test/cljs"]
 
-  :profiles {:dev {:repl-options {:port 64499}}}
+  :profiles {:dev {:repl-options {:port 64524}}}
 
   :cljsbuild {:builds {}}
 

@@ -1,9 +1,9 @@
 (ns ^:skip-wiki clojure.core.typed.internal
   (:require [clojure.set :as set]
             [clojure.core.typed.errors :as err]
-            [clojure.core.typed.contract-utils :as con]))
-
-(alter-meta! *ns* assoc :skip-wiki true)
+            [clojure.core.typed.contract-utils :as con]
+            [clojure.java.io :as io]
+            [clojure.tools.namespace.file :as ns-file]))
 
 (defn take-when
   "When pred is true of the head of seq, return [head tail]. Otherwise
@@ -377,3 +377,30 @@
                                   (recur rst
                                          (conj actual-bvec v init))))))]
     {:let `(clojure.core/let ~actual-bvec ~@forms)}))
+
+(defn ns-form-for-file
+  "Returns the namespace declaration for the file, or
+  nil if not found"
+  [file]
+  (some-> (io/resource file)
+          ns-file/read-file-ns-decl))
+
+(defn ns-form-name
+  "Returns the symbol naming this namespace, with any
+  metadata attached."
+  [ns-form]
+  {:post [(symbol? %)]}
+  (let [ns-form (next ns-form)
+        [nsym ns-form] (take-when symbol? ns-form)
+        _ (when-not (symbol? nsym)
+            (err/int-error "Malformed ns form"))
+        [docstr ns-form]  (take-when string? ns-form)
+        [metamap ns-form] (take-when map? ns-form)]
+    (if (map? metamap)
+      (vary-meta nsym merge metamap)
+      nsym)))
+
+(defn ns-meta
+  "Returns the metadata map for this namespace"
+  [ns-form]
+  (meta (ns-form-name ns-form)))

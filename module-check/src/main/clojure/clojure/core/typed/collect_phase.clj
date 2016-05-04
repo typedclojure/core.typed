@@ -114,7 +114,7 @@
         (if vs/*in-check-form*
           ;; to keep compatibility with 0.2.x namespaces,
           ;; collect namespaces that would have worked in 0.2.x but don't now.
-          (when-not (some-> dep
+          nil #_(when-not (some-> dep
                             dep-u/ns-form-for-ns
                             dep-u/ns-has-core-typed-metadata?)
             (err/warn (str dep " does not have :core.typed metadata, only collecting annotations for core.typed 0.2.x compatibility"))

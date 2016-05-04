@@ -14,6 +14,7 @@
       use buffer (similar for other buffer constructors)
     "}
   clojure.core.typed.async
+  {:lang :core.typed}
   (:require [clojure.core.typed :refer [ann ann-datatype defalias inst ann-protocol
                                         AnyInteger tc-ignore Seqable TFn IFn Any I]
              :as t]

@@ -21,7 +21,6 @@ for checking namespaces, cf for checking individual forms."}
             [clojure.core.typed.import-macros :as import-m]
             [clojure.core.typed.macros :as macros]
             [clojure.core.typed.contract :as con]
-            [clojure.core.typed.load :as typed-load]
             [clojure.java.io :as io])
   (:import (clojure.lang Compiler)))
 
@@ -105,7 +104,8 @@ for checking namespaces, cf for checking individual forms."}
   eg. (install #{:load})   ; installs `load`"
   ([] (install :all))
   ([features]
-   (typed-load/install features)))
+   (require 'clojure.core.typed.load)
+   ((impl/v 'clojure.core.typed.load/install) features)))
 
 ;=============================================================
 ; Special functions

@@ -3,6 +3,7 @@
 
   Indirection is necessary to delay loading core.typed as long as possible."
   (:require [clojure.core.typed.load-if-needed :refer [load-if-needed]]
+            [clojure.core.typed.lang :as lang]
             [clojure.core.typed.current-impl :as impl]))
 
 ;; based on clojure.tools.analyzer.jvm/analyze-ns
@@ -48,22 +49,28 @@
   "Extend the :lang dispatch table with the :core.typed language"
   []
   {:post [(nil? %)]}
-  (load-if-needed)
-  ((impl/v 'clojure.core.typed.load1/install-typed-load)))
+  (alter-var-root #'lang/lang-dispatch
+                  (fn [m]
+                    (-> m 
+                        (assoc-in [:core.typed :load] #'typed-load1)
+                        (assoc-in [:core.typed :eval] #'typed-eval))))
+  nil)
 
 (defn monkey-patch-typed-load
   "Install the :core.typed :lang, and monkey patch `load`"
   []
   {:post [(nil? %)]}
-  (load-if-needed)
-  ((impl/v 'clojure.core.typed.load1/monkey-patch-typed-load)))
+  (install-typed-load)
+  (lang/monkey-patch-extensible-load)
+  nil)
 
 (defn monkey-patch-typed-eval
   "Install the :core.typed :lang, and monkey patch `eval`"
   []
   {:post [(nil? %)]}
-  (load-if-needed)
-  ((impl/v 'clojure.core.typed.load1/monkey-patch-typed-eval)))
+  (install-typed-load)
+  (lang/monkey-patch-extensible-eval)
+  nil)
 
 (defn install 
   "Install the :core.typed :lang. Takes an optional set of features
@@ -80,9 +87,14 @@
   ([features]
    {:pre [((some-fn set? #{:all}) features)]
     :post [(nil? %)]}
-   (load-if-needed)
-   ((impl/v 'clojure.core.typed.load1/install)
-    features)))
+   (lang/install features)
+   (when (or (= features :all)
+             (:load features))
+     (monkey-patch-typed-load))
+   (when (or (= features :all)
+             (:eval features))
+     (monkey-patch-typed-eval))
+   nil))
 
 (comment (find-resource "clojure/core/typed/test/load_file.clj")
          (typed-load "/clojure/core/typed/test/load_file.clj")

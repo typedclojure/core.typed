@@ -7,11 +7,10 @@
             [clojure.core.typed.contract-utils :as con]
             [clojure.core.typed.errors :as err]
             [clojure.core.typed.current-impl :as impl]
-            [clojure.core.typed.internal :as internal]
-            [clojure.java.io :as io]))
+            [clojure.java.io :as io]
+            [clojure.core.typed.internal :as internal]))
 
-(alter-meta! *ns* assoc :skip-wiki true)
-
+;; also in c.c.t.internal
 (defn ns-form-for-file
   "Returns the namespace declaration for the file, or
   nil if not found"
@@ -60,6 +59,7 @@
                       :cljs 'cljs.core.typed))
     false))
 
+;; also in c.c.t.internal
 (defn ns-form-name
   "Returns the symbol naming this namespace, with any
   metadata attached."
@@ -75,6 +75,7 @@
       (vary-meta nsym merge metamap)
       nsym)))
 
+;; also in c.c.t.internal
 (defn ns-meta
   "Returns the metadata map for this namespace"
   [ns-form]
