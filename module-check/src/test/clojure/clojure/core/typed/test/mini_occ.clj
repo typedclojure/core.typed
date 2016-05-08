@@ -23,13 +23,13 @@
 #_
 (defalias T
   "Types"
-  (U '{:T :fun, :params (Vec '{:name Sym :type T}), :return T}
-     '{:T :not, :type T}
-     '{:T :union, :types (Set T)}
-     '{:T :intersection, :types (Set T)}
-     '{:T :false}
-     '{:T :num}
-     '{:T :refine, :name Sym, :prop P}))
+  (U '{:T ':fun, :params (Vec '{:name Sym :type T}), :return T}
+     '{:T ':not, :type T}
+     '{:T ':union, :types (Set T)}
+     '{:T ':intersection, :types (Set T)}
+     '{:T ':false}
+     '{:T ':num}
+     '{:T ':refine, :name Sym, :prop P}))
 #_
 (defalias P
   "Propositions"
@@ -218,6 +218,10 @@
            :then {:name y, :E :var}, 
            :else {:name z, :E :var}}))
   (is (= (parse-exp '(x y z))
+         '{:E :app,
+           :fun {:name x, :E :var}, 
+           :args [{:name y, :E :var} {:name z, :E :var}]}))
+  (is (= (parse-exp '((lambda (x :- Any) x) y))
          '{:E :app,
            :fun {:name x, :E :var}, 
            :args [{:name y, :E :var} {:name z, :E :var}]}))
