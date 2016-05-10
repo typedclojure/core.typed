@@ -126,7 +126,8 @@
     key (key-path (second p) (nth p 2))
     rng (fn-rng-path (second p))
     dom (fn-dom-path (second p) (nth p 2))
-    var (var-path (second p))))
+    var (var-path (second p))
+    index (index-path (second p) (nth p 2))))
 
 (defn unparse-path-elem [p]
   (case (:op p)
@@ -136,7 +137,8 @@
     :key (list 'key (:keys p) (:key p))
     :fn-range (list 'rng (:arity p))
     :fn-domain (list 'dom (:arity p) (:position p))
-    :var (list 'var (:name p))))
+    :var (list 'var (:name p))
+    :index (list 'index (:count p) (:nth p))))
 
 (defn type? [t]
   (and (map? t)
@@ -187,6 +189,7 @@
                         (cond
                           (vector? in) (parse-HVec in)
                           (map? in) (parse-HMap in)
+                          (keyword? in) {:op :val :val in}
                           :else (assert nil (str "Bad quote: " m))))
 
                 IFn {:op :IFn
@@ -194,9 +197,16 @@
                 U (make-Union
                     (into #{}
                           (map parse-type)
-                          (rest m))))
+                          (rest m)))
+                Vec (-class clojure.lang.IPersistentVector
+                            [(parse-type (second m))])
+                (let [res (resolve (first m))]
+                  (assert (class? res) (prn-str "Must be class: " (first m)))
+                  (-class res (mapv parse-type (drop 1 m)))))
     :else (assert nil (str "bad type " m))))
 
+(defmacro prs [t]
+  `(parse-type '~t))
 
 ; [Node :-> Any]
 (defn unparse-type' [{:as m}]
@@ -294,11 +304,31 @@
          :arities [{:op :IFn1, :dom [], :rng {:op :class, :class java.lang.Long, :args []}}]}
         {:op :IFn, :arities [{:op :IFn1, :dom [{:op :unknown}], :rng {:op :class, :class java.lang.Long, :args []}}]})))
 
+(defn should-join-HMaps? [t1 t2]
+  ;; join if the keys are the same, 
+  ;; (TODO)
+  ;; and common
+  ;; keys are not always different keywords
+  (let [t1-map (:map t1)
+        t2-map (:map t2)]
+    (and (= (set (keys t1-map))
+            (set (keys t2-map)))
+         ;; TODO
+         #_
+         (every?
+           (fn [k]
+             (let [left (t1-map k)
+                   right (t2-map k)]
+               (or (= left right)
+                   (not (and (keyword? (:val left))
+                             (keyword? (:val right)))))))
+           (keys t1-map)))))
+
+
 (defn join-HMaps [t1 t2]
   {:pre [(#{:HMap} (:op t1))
          (#{:HMap} (:op t2))
-         (= (-> t1 :map keys set)
-            (-> t2 :map keys set))]
+         (should-join-HMaps? t1 t2)]
    :post (#{:HMap} (:op %))}
   (let [t2-map (:map t2)]
     ;(prn "join HMaps")
@@ -330,6 +360,15 @@
               (apply join* (flatten-unions [t1 t2]))
 
               (and (#{:class} (:op t1))
+                   (#{:class} (:op t2))
+                   (= (:class t1)
+                      (:class t2)))
+              (do
+                (assert (= (count (:args t1))
+                           (count (:args t2))))
+                (-class (:class t1) (mapv join (:args t1) (:args t2))))
+
+              (and (#{:class} (:op t1))
                    (= clojure.lang.IFn
                       (:class t1))
                    (#{:IFn} (:op t2)))
@@ -343,8 +382,7 @@
 
               (and (#{:HMap} (:op t1))
                    (#{:HMap} (:op t2))
-                   (= (-> t1 :map keys set)
-                      (-> t2 :map keys set)))
+                   (should-join-HMaps? t1 t2))
               (join-HMaps t1 t2)
 
               (and (#{:IFn} (:op t1))
@@ -407,6 +445,40 @@
               (flatten-unions args)))))
 
 (deftest join-test
+  (is (=
+       (join
+         (prs
+           '{:E (quote :false)})
+         (prs
+           '{:args (Vec '{:name clojure.lang.Symbol, :E ':var}),
+             :fun
+             (U
+              '{:E ':lambda,
+                :arg clojure.lang.Symbol,
+                :body '{:name clojure.lang.Symbol, :E ':var},
+                :arg-type
+                '{:T ':intersection, :types clojure.lang.PersistentHashSet}}
+              '{:name clojure.lang.Symbol, :E ':var}),
+             :E ':app}))
+       (prs
+         (U
+          '{:E ':false}
+          '{:args (Vec '{:name clojure.lang.Symbol, :E ':var}),
+            :fun
+            (U
+             '{:E ':lambda,
+               :arg clojure.lang.Symbol,
+               :body '{:name clojure.lang.Symbol, :E ':var},
+               :arg-type
+               '{:T ':intersection, :types clojure.lang.PersistentHashSet}}
+             '{:name clojure.lang.Symbol, :E ':var}),
+            :E ':app}))))
+  (is 
+    (=
+      (join*
+        (prs (Vec '{:a ?}))
+        (prs (Vec '{:b ?})))
+      (prs (Vec (U '{:a ?} '{:b ?})))))
   (is 
     (= 
       (join*
@@ -479,6 +551,8 @@
                             {:op :HMap
                              :map (assoc (zipmap keys (repeat {:op :unknown}))
                                          key type)}))
+        :index (update-path nxt-pth
+                            (-class clojure.lang.IPersistentVector [type]))
         :fn-domain (let [{:keys [arity position]} cur-pth]
                      (update-path nxt-pth
                                   {:op :IFn
@@ -678,7 +752,211 @@
   (U
    '{:b java.lang.Long, :f clojure.lang.IFn, :a java.lang.Long}
    '{:b java.lang.Long, :f clojure.lang.IFn})])}))
-  )
+
+#_
+(is
+(ppenv
+  (update-path' {}
+                (mapv parse-infer-result
+'[[[#'clojure.core.typed.test.mini-occ/parse-exp
+   (rng 1)
+   (key #{:name :E} :name)]
+  :-
+  clojure.lang.Symbol]
+ [[#'clojure.core.typed.test.mini-occ/parse-exp
+   (rng 1)
+   (key #{:args :fun :E} :args)
+   (index 2 0)
+   (key #{:name :E} :E)]
+  :-
+  ':var]
+ [[#'clojure.core.typed.test.mini-occ/parse-exp
+   (rng 1)
+   (key #{:E :arg :body :arg-type} :body)
+   (key #{:name :E} :name)]
+  :-
+  clojure.lang.Symbol]
+ [[#'clojure.core.typed.test.mini-occ/parse-exp
+   (rng 1)
+   (key #{:E :arg :body :arg-type} :arg-type)
+   (key #{:T :types} :types)]
+  :-
+  clojure.lang.PersistentHashSet]
+ [[#'clojure.core.typed.test.mini-occ/parse-exp
+   (rng 1)
+   (key #{:E :arg :body :arg-type} :body)
+   (key #{:name :E} :E)]
+  :-
+  ':var]
+ [[#'clojure.core.typed.test.mini-occ/parse-exp
+   (rng 1)
+   (key #{:E :arg :body :arg-type} :arg)]
+  :-
+  clojure.lang.Symbol]
+ [[#'clojure.core.typed.test.mini-occ/parse-exp
+   (rng 1)
+   (key #{:args :fun :E} :args)
+   (index 1 0)
+   (key #{:name :E} :name)]
+  :-
+  clojure.lang.Symbol]
+ [[#'clojure.core.typed.test.mini-occ/parse-exp
+   (rng 1)
+   (key #{:args :fun :E} :E)]
+  :-
+  ':app]
+ [[#'clojure.core.typed.test.mini-occ/parse-exp
+   (rng 1)
+   (key #{:args :fun :E} :args)
+   (index 1 0)
+   (key #{:name :E} :E)]
+  :-
+  ':var]
+ [[#'clojure.core.typed.test.mini-occ/parse-exp (dom 1 0)]
+  :-
+  clojure.lang.Symbol]
+ [[#'clojure.core.typed.test.mini-occ/parse-exp (dom 1 0)]
+  :-
+  clojure.lang.PersistentList]
+ [[#'clojure.core.typed.test.mini-occ/parse-exp
+   (rng 1)
+   (key #{:else :E :then :test} :then)
+   (key #{:name :E} :E)]
+  :-
+  ':var]
+ [[#'clojure.core.typed.test.mini-occ/parse-exp
+   (rng 1)
+   (key #{:args :fun :E} :fun)
+   (key #{:E :arg :body :arg-type} :body)
+   (key #{:name :E} :name)]
+  :-
+  clojure.lang.Symbol]
+ [[#'clojure.core.typed.test.mini-occ/parse-exp
+   (rng 1)
+   (key #{:args :fun :E} :args)
+   (index 2 0)
+   (key #{:name :E} :name)]
+  :-
+  clojure.lang.Symbol]
+ [[#'clojure.core.typed.test.mini-occ/parse-exp
+   (rng 1)
+   (key #{:else :E :then :test} :else)
+   (key #{:name :E} :E)]
+  :-
+  ':var]
+ [[#'clojure.core.typed.test.mini-occ/parse-exp
+   (rng 1)
+   (key #{:else :E :then :test} :test)
+   (key #{:name :E} :name)]
+  :-
+  clojure.lang.Symbol]
+ [[#'clojure.core.typed.test.mini-occ/parse-exp] :- clojure.lang.IFn]
+ [[#'clojure.core.typed.test.mini-occ/parse-exp
+   (rng 1)
+   (key #{:args :fun :E} :fun)
+   (key #{:name :E} :name)]
+  :-
+  clojure.lang.Symbol]
+ [[#'clojure.core.typed.test.mini-occ/parse-exp
+   (rng 1)
+   (key #{:args :fun :E} :args)
+   (index 2 1)
+   (key #{:name :E} :E)]
+  :-
+  ':var]
+ [[#'clojure.core.typed.test.mini-occ/parse-exp
+   (rng 1)
+   (key #{:else :E :then :test} :test)
+   (key #{:name :E} :E)]
+  :-
+  ':var]
+ [[#'clojure.core.typed.test.mini-occ/parse-exp
+   (rng 1)
+   (key #{:args :fun :E} :fun)
+   (key #{:name :E} :E)]
+  :-
+  ':var]
+ [[#'clojure.core.typed.test.mini-occ/parse-exp
+   (rng 1)
+   (key #{:args :fun :E} :args)
+   (index 2 1)
+   (key #{:name :E} :name)]
+  :-
+  clojure.lang.Symbol]
+ [[#'clojure.core.typed.test.mini-occ/parse-exp (rng 1) (key #{:E} :E)]
+  :-
+  ':false]
+ [[#'clojure.core.typed.test.mini-occ/parse-exp
+   (rng 1)
+   (key #{:E :arg :body :arg-type} :arg-type)
+   (key #{:T :types} :T)]
+  :-
+  ':intersection]
+ [[#'clojure.core.typed.test.mini-occ/parse-exp
+   (rng 1)
+   (key #{:args :fun :E} :fun)
+   (key #{:E :arg :body :arg-type} :arg-type)
+   (key #{:T :types} :T)]
+  :-
+  ':intersection]
+ [[#'clojure.core.typed.test.mini-occ/parse-exp
+   (rng 1)
+   (key #{:else :E :then :test} :E)]
+  :-
+  ':if]
+ [[#'clojure.core.typed.test.mini-occ/parse-exp
+   (rng 1)
+   (key #{:else :E :then :test} :else)
+   (key #{:name :E} :name)]
+  :-
+  clojure.lang.Symbol]
+ [[#'clojure.core.typed.test.mini-occ/parse-exp (dom 1 0)] :- false]
+ [[#'clojure.core.typed.test.mini-occ/parse-exp
+   (rng 1)
+   (key #{:args :fun :E} :fun)
+   (key #{:E :arg :body :arg-type} :E)]
+  :-
+  ':lambda]
+ [[#'clojure.core.typed.test.mini-occ/parse-exp
+   (rng 1)
+   (key #{:args :fun :E} :fun)
+   (key #{:E :arg :body :arg-type} :body)
+   (key #{:name :E} :E)]
+  :-
+  ':var]
+ [[#'clojure.core.typed.test.mini-occ/parse-exp
+   (rng 1)
+   (key #{:else :E :then :test} :then)
+   (key #{:name :E} :name)]
+  :-
+  clojure.lang.Symbol]
+ [[#'clojure.core.typed.test.mini-occ/parse-exp
+   (rng 1)
+   (key #{:name :E} :E)]
+  :-
+  ':var]
+ [[#'clojure.core.typed.test.mini-occ/parse-exp
+   (rng 1)
+   (key #{:args :fun :E} :fun)
+   (key #{:E :arg :body :arg-type} :arg)]
+  :-
+  clojure.lang.Symbol]
+ [[#'clojure.core.typed.test.mini-occ/parse-exp
+   (rng 1)
+   (key #{:E :arg :body :arg-type} :E)]
+  :-
+  ':lambda]
+ [[#'clojure.core.typed.test.mini-occ/parse-exp
+   (rng 1)
+   (key #{:args :fun :E} :fun)
+   (key #{:E :arg :body :arg-type} :arg-type)
+   (key #{:T :types} :types)]
+  :-
+  clojure.lang.PersistentHashSet]
+]
+
+
+  )))))
 
 ; track : (Atom InferResultEnv) Value Path -> Value
 (defn track [results-atom v path]
@@ -700,19 +978,19 @@
                 (meta v)))
 
     ; TODO implement :index in update-path
-    ;(and (vector? v) 
-    ;     (satisfies? clojure.core.protocols/IKVReduce v)) ; MapEntry's are not IKVReduce
-    ;(let [len (count v)]
-    ;  ;; TODO handle zero-length vectors, also might 
-    ;  ;; want to remember IPV like IFn above.
-    ;  (reduce-kv
-    ;    (fn [e k v]
-    ;      (let [v' (track results-atom v (conj path (index-path len k)))]
-    ;        (if (identical? v v')
-    ;          e
-    ;          (assoc e k v'))))
-    ;    v
-    ;    v))
+    (and (vector? v) 
+         (satisfies? clojure.core.protocols/IKVReduce v)) ; MapEntry's are not IKVReduce
+    (let [len (count v)]
+      ;; TODO handle zero-length vectors, also might 
+      ;; want to remember IPV like IFn above.
+      (reduce-kv
+        (fn [e k v]
+          (let [v' (track results-atom v (conj path (index-path len k)))]
+            (if (identical? v v')
+              e
+              (assoc e k v'))))
+        v
+        v))
 
     ;; maps with keyword keys
     (and (or (instance? clojure.lang.PersistentHashMap v)
@@ -863,7 +1141,9 @@
                      [name (unparse-type t)]))
               @*type-env*)))))
 
-(defn gen-current []
+(defn gen-current 
+  "Print the currently inferred type environment"
+  []
   (generate @results-atom))
 
 (defn ppresults []
@@ -872,6 +1152,19 @@
           (map (fn [a]
                  (update a :type unparse-type)))
           @results-atom)))
+
+
+(defn var-constraints 
+  "Return the bag of constraints in the current results-atom
+  for the given fully qualified var.
+  
+  eg. (var-constraints 'clojure.core.typed.test.mini-occ/parse-exp)
+  "
+
+  [vsym]
+  (pprint (mapv unparse-infer-result 
+                (-> (->> @results-atom (group-by (comp :name first :path))) 
+                    (get vsym)))))
 
 ;; TESTS
 
