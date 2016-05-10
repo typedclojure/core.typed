@@ -3,7 +3,8 @@
             [clojure.set :as set]
             [clojure.test :refer :all]
             [clojure.core.typed.ast-utils :as ast]
-            [clojure.core.typed.current-impl :as impl]))
+            [clojure.core.typed.current-impl :as impl]
+            [clojure.core.typed.ast-utils :as ast]))
 
 #_
 (defalias Type
@@ -111,6 +112,8 @@
   {:path (mapv parse-path-elem p)
    :type (parse-type t)})
 
+(declare unparse-type)
+
 (defn unparse-infer-result [p]
   [(mapv unparse-path-elem (:path p))
    :-
@@ -138,6 +141,10 @@
 (defn type? [t]
   (and (map? t)
        (keyword? (:op t))))
+
+(defn HMap? [t]
+  (and (type? t)
+       (= :HMap (:op t))))
 
 (declare parse-type)
 
@@ -191,8 +198,6 @@
     :else (assert nil (str "bad type " m))))
 
 
-(declare unparse-type)
-
 ; [Node :-> Any]
 (defn unparse-type' [{:as m}]
   (assert (type? m)
@@ -230,17 +235,37 @@
     :unknown '?
     (assert nil (str "No unparse-type case: " m))))
 
+(defn unp [t]
+  (pprint (unparse-type t)))
+
 (def ^:dynamic unparse-type unparse-type')
 
 (defn flatten-union [t]
   {:pre [(type? t)]
    :post [(set? %)]}
   (if (#{:union} (:op t))
-    (set (mapcat flatten-union (:types t)))
+    (into #{}
+          (mapcat flatten-union)
+          (:types t))
     #{t}))
 
+(defn flatten-unions [ts]
+  {:post [(set? %)]}
+  (into #{} 
+        (mapcat flatten-union)
+        ts))
+
 (defn make-Union [args]
-  (let [ts (apply set/union (map flatten-union args))]
+  (let [ts (flatten-unions args)
+        {hmaps true non-hmaps false} (group-by (comp boolean #{:HMap} :op) ts)
+        hmap-by-keys (group-by (comp set keys :map) hmaps)
+        hmaps-merged (into #{}
+                           (map (fn [ms]
+                                  {:post [(HMap? %)]}
+                                  (reduce join-HMaps (first ms) (rest ms))))
+                           (vals hmap-by-keys))
+        ;_ (prn "hmaps-merged" (map unparse-type hmaps-merged))
+        ts (into hmaps-merged non-hmaps)]
     (assert (every? (complement #{:union}) (map :op ts)))
     (cond
       (= 1 (count ts)) (first ts)
@@ -248,130 +273,12 @@
       {:op :union
        :types ts})))
 
-; Node Node -> Node
-(defn union [s t]
-  {:pre [(type? s)
-         (type? t)]
-   :post [(type? %)]}
-  ;(prn 'Union (unparse-type s) (unparse-type t))
-  ;(prn 'Union (:op s) (:op t))
-  (cond
-    ;; preserve Top
-    (#{:Top} (:op s)) s
-    (#{:Top} (:op t)) t
-
-    ;; annihilate unknown
-    (#{:unknown} (:op s)) t
-    (#{:unknown} (:op t)) s
-
-    (or (#{:union} (:op s))
-        (#{:union} (:op t)))
-    (let [;_ (prn "union two union")
-          ss (or (when (#{:union} (:op s))
-                   (:types s))
-                 #{s})
-          tt (or (when (#{:union} (:op t))
-                   (:types t))
-                 #{t})
-          ts (reduce
-               (fn [ss t]
-                 (cond
-                   (#{:HVec} (:op t))
-                   (into #{} 
-                         (comp
-                           (map (fn [v]
-                                  (cond
-                                    (#{:HVec} (:op t)) (flatten-union (union v t))
-                                    :else #{v})))
-                           (mapcat identity))
-                         ss)
-                   :else (conj ss t)))
-               ss
-               tt)]
-      (make-Union ts))
-
-    (and (#{:HVec} (:op s))
-         (#{:HVec} (:op t)))
-    {:op :class
-     :class clojure.lang.IPersistentVector
-     :args [(reduce union (make-Union []) (concat (:vec s) (:vec t)))]}
-
-    (and (#{:HVec} (:op s))
-         (#{:class} (:op t))
-         (#{clojure.lang.IPersistentVector} (:class t)))
-    {:op :class
-     :class clojure.lang.IPersistentVector
-     :args [(reduce union (-> t :args first) (:vec s))]}
-
-    (and (#{:HVec} (:op t))
-         (#{:class} (:op s))
-         (#{clojure.lang.IPersistentVector} (:class s)))
-    {:op :class
-     :class clojure.lang.IPersistentVector
-     :args [(reduce union (-> s :args first) (:vec t))]}
-
-    :else (make-Union [s t])))
-
-(defn subst [v s]
-  {:pre [(type? v)]
-   :post [(type? %)]}
-  (case (:op v)
-    :val v
-    :HMap (update v :map (fn [m]
-                           (reduce-kv
-                             (fn [m k v]
-                               (assoc m k (subst v s)))
-                             {}
-                             m)))
-    :class (update v :args (fn [m]
-                             (reduce-kv
-                               (fn [m k v]
-                                 (assoc m k (subst v s)))
-                               []
-                               m)))
-    :HVec (update v :vec (fn [m]
-                           (reduce-kv
-                             (fn [m k v]
-                               (assoc m k (subst v s)))
-                             []
-                             m)))
-    :union (update v :types (fn [m]
-                              (reduce
-                                (fn [m v]
-                                  (conj m (subst v s)))
-                                #{}
-                                m)))
-    :var (update v :name (fn [n]
-                           (get s n n)))
-    :IFn (update v :arities 
-                 (fn [as]
-                   (mapv
-                     (fn [a]
-                       (-> a
-                           (update :rng subst s)
-                           (update :dom
-                                   (fn [ds]
-                                     (mapv #(subst % s) ds)))))
-                     as)))))
-
 (declare join)
 
 ;; (U nil (Atom AliasEnv))
 (def ^:dynamic *alias-env* nil)
 ;; (U nil (Atom AliasEnv))
 (def ^:dynamic *type-env* nil)
-
-(defn join-union [t ts]
-  (let [id (gensym (apply str (map :op (cons t ts))))
-        _ (apply prn "join-union" id (unparse-type t)
-                 (map unparse-type ts))
-        res-ts (map #(join t %) ts)
-        res (cond
-              (empty? res-ts) t
-              (= (count res-ts) 1) (first res-ts)
-              :else (make-Union res-ts))]
-    (prn "join-union result" id (unparse-type res))
-    res))
 
 (defn group-arities [t1 t2]
   {:pre [(#{:IFn} (:op t1))
@@ -387,10 +294,29 @@
          :arities [{:op :IFn1, :dom [], :rng {:op :class, :class java.lang.Long, :args []}}]}
         {:op :IFn, :arities [{:op :IFn1, :dom [{:op :unknown}], :rng {:op :class, :class java.lang.Long, :args []}}]})))
 
+(defn join-HMaps [t1 t2]
+  {:pre [(#{:HMap} (:op t1))
+         (#{:HMap} (:op t2))
+         (= (-> t1 :map keys set)
+            (-> t2 :map keys set))]
+   :post (#{:HMap} (:op %))}
+  (let [t2-map (:map t2)]
+    ;(prn "join HMaps")
+    {:op :HMap
+     :map (into {}
+                (map (fn [[k1 t1]]
+                       (let [left t1
+                             right (get t2-map k1)]
+                         ;(prn "key" k1)
+                         ;(prn "left" (unparse-type left))
+                         ;(prn "right" (unparse-type right))
+                         [k1 (join left right)])))
+                (:map t1))}))
+
 ; join : Type Type -> Type
 (defn join [t1 t2]
   (let [id (gensym (apply str (map :op [t1 t2])))
-        _ (prn "join" id (unparse-type t1) (unparse-type t2))
+        ;_ (prn "join" id (unparse-type t1) (unparse-type t2))
         res (cond
               (= t1 t2) t1
 
@@ -398,19 +324,10 @@
               (#{:unknown} (:op t1)) t2
               (#{:unknown} (:op t2)) t1
 
-              (and (#{:union} (:op t1))
-                   (#{:union} (:op t2)))
-              (reduce
-                union
-                (make-Union [])
-                (for [t1 (:types t1)
-                      t2 (:types t2)]
-                  (join t1 t2)))
-
-              (#{:union} (:op t1))
-              (join-union t2 (:types t1))
-              (#{:union} (:op t2))
-              (join-union t1 (:types t2))
+              ((some-fn #{:union})
+               (:op t1)
+               (:op t2))
+              (apply join* (flatten-unions [t1 t2]))
 
               (and (#{:class} (:op t1))
                    (= clojure.lang.IFn
@@ -428,18 +345,7 @@
                    (#{:HMap} (:op t2))
                    (= (-> t1 :map keys set)
                       (-> t2 :map keys set)))
-              (let [t2-map (:map t2)]
-                (prn "join HMaps")
-                {:op :HMap
-                 :map (into {}
-                            (map (fn [[k1 t1]]
-                                   (let [left t1
-                                         right (get t2-map k1)]
-                                     (prn "key" k1)
-                                     (prn "left" (unparse-type left))
-                                     (prn "right" (unparse-type right))
-                                     [k1 (join left right)])))
-                            (:map t1))})
+              (join-HMaps t1 t2)
 
               (and (#{:IFn} (:op t1))
                    (#{:IFn} (:op t2)))
@@ -460,11 +366,11 @@
                                      (fn [& [dom & doms]]
                                        {:pre [dom]}
                                        ;(prn "join IFn IFn dom" (map :op (cons dom doms)))
-                                       (join-union dom doms))
+                                       (apply join* dom doms))
                                      (map :dom as))
                          :rng (let [[rng & rngs] (map :rng as)]
                                 (assert rng)
-                                (join-union rng rngs))})
+                                (apply join* rng rngs))})
                       grouped)]
                 {:op :IFn
                  :arities arities})
@@ -472,16 +378,48 @@
               :else 
               (let []
                 ;(prn "join union fall through")
-                (union t1 t2)))]
-    (prn "join result" id (unparse-type res))
+                (make-Union [t1 t2])))]
+    ;(prn "join result" id (unparse-type res))
     res))
 
+(defn join* [& args]
+  (letfn [(merge-type [t as]
+            {:pre [(type? t)
+                   (not= :union (:op t))
+                   (set? as)]
+             :post [(set? %)]}
+            ;(prn "merge-type" (unparse-type t) (mapv unparse-type as))
+            (let [ms (into #{}
+                           (comp
+                             (map #(join t %))
+                             ;(mapcat flatten-union)
+                             )
+                           (flatten-unions as))
+                  res (cond
+                        (empty? ms) #{t}
+                        :else ms)]
+              ;(prn "merge-type result" (map unparse-type res))
+              res))]
+    (make-Union
+      (reduce (fn [as t]
+                (merge-type t as))
+              #{}
+              (flatten-unions args)))))
+
 (deftest join-test
+  (is 
+    (= 
+      (join*
+        (parse-type ''{:a ?})
+        (parse-type ''{:a [? :-> ?]})
+        (parse-type ''{:a [? :-> Long]})
+        (parse-type ''{:a [Long :-> Long]}))
+      (parse-type ''{:a [Long :-> Long]})))
   (is
     (= 
-      (join-union
+      (join*
         (parse-type ''{:f ?, :a java.lang.Long}) 
-        [(parse-type ''{:f [[? :-> java.lang.Long] :-> ?], :a ?})])
+        (parse-type ''{:f [[? :-> java.lang.Long] :-> ?], :a ?}))
       (parse-type ''{:f [[? :-> java.lang.Long] :-> ?], :a java.lang.Long})))
   (is (=
        (join (parse-type '['{:f ?, :a java.lang.Long} :-> '{:b ?, :f clojure.lang.IFn, :a ?}])
@@ -505,12 +443,11 @@
          (parse-type
            '(U '{:f [? :-> java.lang.Long], :a ?} 
                '{:f [? :-> java.lang.Long]}))))
-  (-> 
-    (join
-      (parse-type ''{:f [[java.lang.Long :-> java.lang.Long] :-> ?]})
-      (parse-type ''{:f [[java.lang.Long :-> java.lang.Long] :-> java.lang.Long]}))
-    unparse-type
-    pprint)
+  (is (= 
+        (join
+          (parse-type ''{:f [[java.lang.Long :-> java.lang.Long] :-> ?]})
+          (parse-type ''{:f [[java.lang.Long :-> java.lang.Long] :-> java.lang.Long]}))
+        (parse-type ''{:f [[java.lang.Long :-> java.lang.Long] :-> java.lang.Long]})))
   )
 
 ; update-path : Path Type -> AliasTypeEnv
@@ -616,10 +553,26 @@
                                      (parse-type
                                        '[Long :-> ?]))])
         {'foo (parse-type '[java.lang.Long :-> ?])}))
-  )
+
+(is
+  (=
+    (join
+      (parse-type '[(U '{:f [? :-> java.lang.Long], :a ?} '{:f [? :-> java.lang.Long]}) :-> '{:b ?, :f ?, :a java.lang.Long}])
+      (parse-type '['{:f clojure.lang.IFn, :a ?} :-> ?]))
+    (parse-type
+      '[(U '{:f [? :-> java.lang.Long], :a ?} '{:f [? :-> java.lang.Long]})
+        :->
+        '{:b ?, :f ?, :a java.lang.Long}])))
+
+(is
+  (=
+   (join
+     (parse-type '(U '{:f [? :-> java.lang.Long], :a ?} '{:f [? :-> java.lang.Long]}))
+     (parse-type ''{:f clojure.lang.IFn, :a ?}))
+   (parse-type '(U '{:f [? :-> java.lang.Long], :a ?} '{:f [? :-> java.lang.Long]}))))
   
 (is
-(->
+(=
   (update-path' {}
                 (mapv parse-infer-result
                       '[[[#'clojure.core.typed.runtime-infer/use-map (dom 1 0) (key #{:f} :f)]
@@ -647,76 +600,85 @@
                           (key #{:f :a} :f)]
                          :-
                          clojure.lang.IFn]
-                        ;[[#'clojure.core.typed.runtime-infer/use-map
-                        ;  (dom 1 0)
-                        ;  (key #{:f :a} :f)
-                        ;  (dom 1 0)]
-                        ; :-
-                        ; clojure.lang.IFn]
-                        ;[[#'clojure.core.typed.runtime-infer/use-map
-                        ;  (dom 1 0)
-                        ;  (key #{:f} :f)
-                        ;  (dom 1 0)
-                        ;  (rng 1)]
-                        ; :-
-                        ; java.lang.Long]
-                        ;[[#'clojure.core.typed.runtime-infer/use-map
-                        ;  (dom 1 0)
-                        ;  (key #{:f :a} :a)]
-                        ; :-
-                        ; java.lang.Long]
-                        ;[[#'clojure.core.typed.runtime-infer/use-map] :- clojure.lang.IFn]
-                        ;[[#'clojure.core.typed.runtime-infer/use-map
-                        ;  (dom 1 0)
-                        ;  (key #{:f} :f)
-                        ;  (dom 1 0)
-                        ;  (dom 1 0)]
-                        ; :-
-                        ; java.lang.Long]
-                        ;[[#'clojure.core.typed.runtime-infer/use-map
-                        ;  (rng 1)
-                        ;  (key #{:b :f} :f)]
-                        ; :-
-                        ; clojure.lang.IFn]
-                        ;[[#'clojure.core.typed.runtime-infer/use-map
-                        ;  (dom 1 0)
-                        ;  (key #{:f :a} :f)
-                        ;  (dom 1 0)
-                        ;  (dom 1 0)]
-                        ; :-
-                        ; java.lang.Long]
-                        ;[[#'clojure.core.typed.runtime-infer/use-map
-                        ;  (dom 1 0)
-                        ;  (key #{:f :a} :f)
-                        ;  (dom 1 0)
-                        ;  (rng 1)]
-                        ; :-
-                        ; java.lang.Long]
-                        ;[[#'clojure.core.typed.runtime-infer/use-map
-                        ;  (rng 1)
-                        ;  (key #{:b :f} :b)]
-                        ; :-
-                        ; java.lang.Long]
-                        ;[[#'clojure.core.typed.runtime-infer/use-map
-                        ;  (rng 1)
-                        ;  (key #{:b :f :a} :f)]
-                        ; :-
-                        ; clojure.lang.IFn]
-                        ;[[#'clojure.core.typed.runtime-infer/use-map
-                        ;  (dom 1 0)
-                        ;  (key #{:f} :f)
-                        ;  (dom 1 0)]
-                        ; :-
-                        ; clojure.lang.IFn]
-                        ;[[#'clojure.core.typed.runtime-infer/use-map
-                        ;  (rng 1)
-                        ;  (key #{:b :f :a} :b)]
-                        ; :-
-                        ;java.lang.Long]
+                        [[#'clojure.core.typed.runtime-infer/use-map
+                          (dom 1 0)
+                          (key #{:f :a} :f)
+                          (dom 1 0)]
+                         :-
+                         clojure.lang.IFn]
+                        [[#'clojure.core.typed.runtime-infer/use-map
+                          (dom 1 0)
+                          (key #{:f} :f)
+                          (dom 1 0)
+                          (rng 1)]
+                         :-
+                         java.lang.Long]
+                        [[#'clojure.core.typed.runtime-infer/use-map
+                          (dom 1 0)
+                          (key #{:f :a} :a)]
+                         :-
+                         java.lang.Long]
+                        [[#'clojure.core.typed.runtime-infer/use-map] :- clojure.lang.IFn]
+                        [[#'clojure.core.typed.runtime-infer/use-map
+                          (dom 1 0)
+                          (key #{:f} :f)
+                          (dom 1 0)
+                          (dom 1 0)]
+                         :-
+                         java.lang.Long]
+                        [[#'clojure.core.typed.runtime-infer/use-map
+                          (rng 1)
+                          (key #{:b :f} :f)]
+                         :-
+                         clojure.lang.IFn]
+                        [[#'clojure.core.typed.runtime-infer/use-map
+                          (dom 1 0)
+                          (key #{:f :a} :f)
+                          (dom 1 0)
+                          (dom 1 0)]
+                         :-
+                         java.lang.Long]
+                        [[#'clojure.core.typed.runtime-infer/use-map
+                          (dom 1 0)
+                          (key #{:f :a} :f)
+                          (dom 1 0)
+                          (rng 1)]
+                         :-
+                         java.lang.Long]
+                        [[#'clojure.core.typed.runtime-infer/use-map
+                          (rng 1)
+                          (key #{:b :f} :b)]
+                         :-
+                         java.lang.Long]
+                        [[#'clojure.core.typed.runtime-infer/use-map
+                          (rng 1)
+                          (key #{:b :f :a} :f)]
+                         :-
+                         clojure.lang.IFn]
+                        [[#'clojure.core.typed.runtime-infer/use-map
+                          (dom 1 0)
+                          (key #{:f} :f)
+                          (dom 1 0)]
+                         :-
+                         clojure.lang.IFn]
+                        [[#'clojure.core.typed.runtime-infer/use-map
+                          (rng 1)
+                          (key #{:b :f :a} :b)]
+                         :-
+                        java.lang.Long]
                       ]
                       ))
-ppenv))
-
+{'clojure.core.typed.runtime-infer/use-map
+ (parse-type
+ '[(U
+   '{:f [[java.lang.Long :-> java.lang.Long] :-> java.lang.Long]}
+   '{:f [[java.lang.Long :-> java.lang.Long] :-> java.lang.Long],
+     :a java.lang.Long})
+  :->
+  (U
+   '{:b java.lang.Long, :f clojure.lang.IFn, :a java.lang.Long}
+   '{:b java.lang.Long, :f clojure.lang.IFn})])}))
+  )
 
 ; track : (Atom InferResultEnv) Value Path -> Value
 (defn track [results-atom v path]
@@ -737,19 +699,20 @@ ppenv))
                     (track results-atom (apply v args) (conj path (fn-rng-path blen)))))
                 (meta v)))
 
-    (and (vector? v) 
-         (satisfies? clojure.core.protocols/IKVReduce v)) ; MapEntry's are not IKVReduce
-    (let [len (count v)]
-      ;; TODO handle zero-length vectors, also might 
-      ;; want to remember IPV like IFn above.
-      (reduce-kv
-        (fn [e k v]
-          (let [v' (track results-atom v (conj path (index-path len k)))]
-            (if (identical? v v')
-              e
-              (assoc e k v'))))
-        v
-        v))
+    ; TODO implement :index in update-path
+    ;(and (vector? v) 
+    ;     (satisfies? clojure.core.protocols/IKVReduce v)) ; MapEntry's are not IKVReduce
+    ;(let [len (count v)]
+    ;  ;; TODO handle zero-length vectors, also might 
+    ;  ;; want to remember IPV like IFn above.
+    ;  (reduce-kv
+    ;    (fn [e k v]
+    ;      (let [v' (track results-atom v (conj path (index-path len k)))]
+    ;        (if (identical? v v')
+    ;          e
+    ;          (assoc e k v'))))
+    ;    v
+    ;    v))
 
     ;; maps with keyword keys
     (and (or (instance? clojure.lang.PersistentHashMap v)
@@ -792,6 +755,9 @@ ppenv))
 (defmacro track-var [v]
   `(track-var' (var ~v)))
 
+(defn track-def-init [vsym val]
+  (track results-atom val [{:op :var :name vsym}]))
+
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Analysis compiler pass
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -802,45 +768,77 @@ ppenv))
      clojure.test
      clojure.string})
 
+(defn wrap-var-deref [expr vsym *ns*]
+  (do
+    #_
+    (println (str "Instrumenting " vsym " in " (ns-name *ns*) 
+                  #_":" 
+                  #_(-> expr :env :line)
+                  #_(when-let [col (-> expr :env :column)]
+                      ":" col)))
+    {:op :invoke 
+     :children [:fn :args]
+     :form `(track-var' (var ~vsym))
+     :env (:env expr)
+     :fn {:op :var
+          :var #'track-var'
+          :form `track-var'
+          :env (:env expr)}
+     :args [{:op :var
+             :form `results-atom
+             :env (:env expr)
+             :var #'results-atom}
+            {:op :the-var
+             :form `(var ~vsym)
+             :env (:env expr)
+             :var (:var expr)}
+            {:op :const
+             :type :unknown
+             :form *ns*
+             :val *ns*
+             :env (:env expr)}]}))
+
+(defn wrap-def-init [expr vsym *ns*]
+  (do
+    #_
+    (println (str "Instrumenting def init " vsym " in " (ns-name *ns*) 
+                  #_":" 
+                  #_(-> expr :env :line)
+                  #_(when-let [col (-> expr :env :column)]
+                      ":" col)))
+    {:op :invoke
+     :children [:fn :args]
+     :form `(track-def-init '~vsym ~(:form expr))
+     :env (:env expr)
+     :fn {:op :var
+          :var #'track-def-init
+          :form `track-def-init
+          :env (:env expr)}
+     :args [{:op :const
+             :type :symbol
+             :form `'~vsym
+             :env (:env expr)
+             :val vsym}
+            expr]}))
+
 (defn check
   "Assumes collect-expr is already called on this AST."
   ([expr] (check expr nil))
   ([expr expected]
    (letfn []
      (case (:op expr)
-       (:var) (let [vsym (impl/var->symbol (:var expr))]
-                ;(prn "var" vsym)
-                (if (not (ns-exclusions (symbol (namespace vsym))))
-                  (do
-                    #_
-                    (println (str "Instrumenting " vsym " in " (ns-name *ns*) 
-                                  #_":" 
-                                  #_(-> expr :env :line)
-                                  #_(when-let [col (-> expr :env :column)]
-                                    ":" col)))
-                    {:op :invoke 
-                     :children [:fn :args]
-                     :form `(track-var' (var ~vsym))
-                     :env (:env expr)
-                     :fn {:op :var
-                          :var #'track-var'
-                          :form `track-var'
-                          :env (:env expr)}
-                     :args [{:op :var
-                             :form `results-atom
-                             :env (:env expr)
-                             :var #'results-atom}
-                            {:op :the-var
-                             :form `(var ~vsym)
-                             :env (:env expr)
-                             :var (:var expr)}
-                            {:op :const
-                             :type :unknown
-                             :form *ns*
-                             :val *ns*
-                             :env (:env expr)}
-                            ]})
-                  expr))
+       ;; Wrap def's so we can instrument their usages outside this
+       ;; namespace.
+       :def (if (:init expr)
+              (update expr :init wrap-def-init (ast/def-var-name expr) *ns*)
+              expr)
+       ;; Only wrap library imports so we can infer how they are used.
+       :var (let [vsym (impl/var->symbol (:var expr))
+                  vns (symbol (namespace vsym))]
+              ;(prn "var" vsym)
+              (if-not (contains? (conj ns-exclusions (ns-name *ns*)) vns)
+                (wrap-var-deref expr vsym *ns*)
+                expr))
        (ast/walk-children check expr)))))
 
 (def runtime-infer-expr check)
