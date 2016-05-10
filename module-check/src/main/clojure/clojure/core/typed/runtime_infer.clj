@@ -31,6 +31,7 @@
        :position Int}
      '{:op :fn-range
        :arity Int}
+     '{:op :set-entry}
      '{:op :key
        :keys (Set Kw)
        :key Kw}
@@ -96,6 +97,9 @@
    :count count
    :nth nth})
 
+(defn set-entry []
+  {:op :set-entry})
+
 (defn -class [cls args]
   {:pre [(class? cls)]}
   {:op :class
@@ -138,7 +142,8 @@
     :fn-range (list 'rng (:arity p))
     :fn-domain (list 'dom (:arity p) (:position p))
     :var (list 'var (:name p))
-    :index (list 'index (:count p) (:nth p))))
+    :index (list 'index (:count p) (:nth p))
+    :set-entry (list 'set-entry)))
 
 (defn type? [t]
   (and (map? t)
@@ -180,10 +185,12 @@
     (vector? m) {:op :IFn
                  :arities [(parse-arity m)]}
 
-    (symbol? m) (do (assert (class? (resolve m)))
-                    {:op :class
-                     :class (resolve m)
-                     :args []})
+    (symbol? m) (case m
+                  Nothing {:op :union :types #{}}
+                  (do (assert (class? (resolve m)))
+                      {:op :class
+                       :class (resolve m)
+                       :args []}))
     (list? m) (case (first m)
                 quote (let [in (second m)]
                         (cond
@@ -200,6 +207,9 @@
                           (rest m)))
                 Vec (-class clojure.lang.IPersistentVector
                             [(parse-type (second m))])
+                Set (-class clojure.lang.IPersistentSet
+                            [(parse-type (second m))])
+                Sym (-class clojure.lang.Symbol [])
                 (let [res (resolve (first m))]
                   (assert (class? res) (prn-str "Must be class: " (first m)))
                   (-class res (mapv parse-type (drop 1 m)))))
@@ -219,7 +229,9 @@
              ((some-fn nil? false?) t) t
              (keyword? t) `'~t
              :else 'Any))
-    :union (list* 'U (set (map unparse-type (:types m))))
+    :union (if (empty? (:types m))
+             'Nothing
+             (list* 'U (set (map unparse-type (:types m)))))
     :HVec `'~(mapv unparse-type (:vec m))
     :HMap `'~(into {}
                    (map (fn [[k v]]
@@ -237,6 +249,8 @@
              (list* 'IFn as)))
     :class (let [cls (condp = (:class m)
                        clojure.lang.IPersistentVector 'Vec
+                       clojure.lang.IPersistentSet 'Set
+                       clojure.lang.Symbol 'Sym
                        (:class m))]
              (if (seq (:args m))
                (list* cls (map unparse-type (:args m)))
@@ -362,11 +376,10 @@
               (and (#{:class} (:op t1))
                    (#{:class} (:op t2))
                    (= (:class t1)
-                      (:class t2)))
-              (do
-                (assert (= (count (:args t1))
-                           (count (:args t2))))
-                (-class (:class t1) (mapv join (:args t1) (:args t2))))
+                      (:class t2))
+                   (= (count (:args t1))
+                      (count (:args t2))))
+              (-class (:class t1) (mapv join (:args t1) (:args t2)))
 
               (and (#{:class} (:op t1))
                    (= clojure.lang.IFn
@@ -551,6 +564,8 @@
                             {:op :HMap
                              :map (assoc (zipmap keys (repeat {:op :unknown}))
                                          key type)}))
+        :set-entry (update-path nxt-pth
+                                (-class clojure.lang.IPersistentSet [type]))
         :index (update-path nxt-pth
                             (-class clojure.lang.IPersistentVector [type]))
         :fn-domain (let [{:keys [arity position]} cur-pth]
@@ -977,12 +992,11 @@
                     (track results-atom (apply v args) (conj path (fn-rng-path blen)))))
                 (meta v)))
 
-    ; TODO implement :index in update-path
     (and (vector? v) 
          (satisfies? clojure.core.protocols/IKVReduce v)) ; MapEntry's are not IKVReduce
     (let [len (count v)]
-      ;; TODO handle zero-length vectors, also might 
-      ;; want to remember IPV like IFn above.
+      (when (= 0 len)
+        (swap! results-atom conj (infer-result path (-class clojure.lang.IPersistentVector [{:op :union :types #{}}]))))
       (reduce-kv
         (fn [e k v]
           (let [v' (track results-atom v (conj path (index-path len k)))]
@@ -991,6 +1005,15 @@
               (assoc e k v'))))
         v
         v))
+
+    (set? v)
+    (do
+      (when (empty? v)
+        (swap! results-atom conj (infer-result path (-class clojure.lang.IPersistentSet [{:op :union :types #{}}]))))
+      (into #{}
+            (map (fn [e]
+                   (track results-atom e (conj path (set-entry))))
+                 v)))
 
     ;; maps with keyword keys
     (and (or (instance? clojure.lang.PersistentHashMap v)
