@@ -351,13 +351,16 @@
          ;; TODO
          #_
          (every?
-           (fn [k]
-             (let [left (t1-map k)
-                   right (t2-map k)]
+           ;; should return true if we should merge
+           ;; this entry
+           (fn [[k left]]
+             (let [right (t2-map k)]
                (or (= left right)
-                   (not (and (keyword? (:val left))
-                             (keyword? (:val right)))))))
-           (keys t1-map)))))
+                   (not ((every-pred (comp #{:val} :op)
+                                     (comp keyword? :val))
+                         left
+                         right)))))
+           t1-map))))
 
 
 (defn join-HMaps [t1 t2]
@@ -616,6 +619,7 @@
   (case (:op v)
     :val v
     :alias v
+    :unknown v
     :HMap (update v :map (fn [m]
                            (reduce-kv
                              (fn [m k v]
@@ -694,33 +698,64 @@
    :post [(type? %)]}
   (@*alias-env* name))
 
-(defn likely-HMap-dispatch [t]
+(def kw-val? (every-pred (comp #{:val} :op)
+                         (comp keyword? :val)))
+
+#_ 
+(ann likely-HMap-dispatch [HMap -> (U nil '[Kw (Set Kw)])])
+(defn likely-HMap-dispatch
+  "Given a HMap type, returns a vector tuple
+  of the best guess for the dispatch entry for this HMap.
+  The first entry contains the keyword key, and the second
+  contains a set of keys that dispatch to this type.
+  
+  eg. (likely-HMap-dispatch (prs '{:op ':val})) 
+      ;=> [:op #{:val}]
+
+  eg. (likely-HMap-dispatch (prs '{:T (U ':intersection :union)}))
+      ;=> [:T #{:intersection :union}]
+  "
+  [t]
   {:pre [(HMap? t)]
    :post [((some-fn nil? vector?) %)]}
-  (let [singles (filter (comp (every-pred (comp #{:val} :op)
-                                          (comp keyword? :val))
+  (let [singles (filter (comp (some-fn
+                                ; either a literal keyword
+                                kw-val?
+                                ; or a union of literal keywords
+                                (every-pred (comp #{:union} :op)
+                                            #(every? kw-val? (:types %))))
                               val)
                         (:map t))]
-    (when (= (count singles) 1)
-      (first singles))))
+    (when-let [[k t] (and (= (count singles) 1)
+                          (first singles))]
+      [k (case (:op t)
+           :val #{(:val t)}
+           :union (into #{}
+                        (map :val)
+                        (:types t)))])))
 
 (defn alias-hmap-type [t]
   (letfn [(do-alias [t]
             (let [nme (case (:op t)
                         :HMap (if-let [[k v] (likely-HMap-dispatch t)]
-                                (str (name k) "-" (name (:val v)))
+                                (apply str (name k) "-" 
+                                       (into []
+                                             (comp
+                                               (map name)
+                                               (interpose "-"))
+                                             v))
                                 (apply str (interpose "-" (map name (keys (:map t))))))
                         :union (if (every? (comp #{:alias} :op) (:types t))
                                  (let [ls (into []
                                                 (map (comp likely-HMap-dispatch resolve-alias))
                                                 (:types t))]
-                                   (let [ss (into #{} 
+                                   (let [ss (into #{}
                                                   (comp (filter some?)
-                                                        (map key))
+                                                        (map first))
                                                   ls)]
                                      (if (and (every? some? ls)
                                               (= (count ss) 1))
-                                       (str (name (first ss)))
+                                       (name (first ss))
                                        "union")))
                                  "union")
                         "unknown")
@@ -1421,6 +1456,9 @@
                         {:color (rand-nth [:red :blue :green :yellow :black])})
                       :node->cluster 
                       (fn [n]
+                        (when-let [s (apply str (first (partition-by #{\_} (str n))))]
+                          s)
+                        #_
                         (let [t (-> n meta :type)]
                           (case (:op t)
                             :HMap
