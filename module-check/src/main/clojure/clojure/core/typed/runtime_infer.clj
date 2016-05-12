@@ -2,7 +2,9 @@
   (:require [clojure.pprint :refer [pprint]]
             [clojure.set :as set]
             [clojure.test :refer :all]
+            [clojure.string :as str]
             [clojure.core.typed.ast-utils :as ast]
+            [rhizome.viz :as viz]
             [clojure.core.typed.current-impl :as impl]
             [clojure.core.typed.ast-utils :as ast]))
 
@@ -19,7 +21,9 @@
        :arities (Vec '{:op :IFn1
                        :dom (Vec Type)
                        :rng Type})}
-     '{:op :Unknown}
+     '{:op :unknown}
+     '{:op :alias
+       :name Sym}
      '{:op :Top}))
 
 #_
@@ -76,6 +80,11 @@
   {:op :var
    :name name})
 
+(defn -alias [name]
+  {:pre [(symbol? name)]}
+  {:op :alias
+   :name name})
+
 (defn -unknown []
   {:op :unknown})
 
@@ -110,13 +119,13 @@
   {:op :val
    :val v})
 
-(declare parse-path-elem)
+(declare parse-path-elem parse-type)
 
 (defn parse-infer-result [[p _ t]]
   {:path (mapv parse-path-elem p)
    :type (parse-type t)})
 
-(declare unparse-type)
+(declare unparse-path-elem unparse-type)
 
 (defn unparse-infer-result [p]
   [(mapv unparse-path-elem (:path p))
@@ -173,6 +182,8 @@
                      [k (parse-type v)]))
               m)})
 
+(declare make-Union)
+
 (defn parse-type [m]
   (cond
     (= 'Any m) {:op :Top}
@@ -218,12 +229,17 @@
 (defmacro prs [t]
   `(parse-type '~t))
 
+(def ^:dynamic *unparse-abbrev-alias* false)
+(def ^:dynamic *unparse-abbrev-class* false)
+
 ; [Node :-> Any]
 (defn unparse-type' [{:as m}]
   (assert (type? m)
           m)
   (case (:op m)
-    :var (:name m)
+    :alias (if *unparse-abbrev-alias*
+             (-> (:name m) name symbol)
+             (:name m))
     :val (let [t (:val m)]
            (cond
              ((some-fn nil? false?) t) t
@@ -251,7 +267,10 @@
                        clojure.lang.IPersistentVector 'Vec
                        clojure.lang.IPersistentSet 'Set
                        clojure.lang.Symbol 'Sym
-                       (:class m))]
+                       (if *unparse-abbrev-class*
+                         (symbol 
+                           (apply str (last (partition-by #{\.} (str (:class m))))))
+                         (:class m)))]
              (if (seq (:args m))
                (list* cls (map unparse-type (:args m)))
                cls))
@@ -278,6 +297,8 @@
   (into #{} 
         (mapcat flatten-union)
         ts))
+
+(declare join-HMaps join*)
 
 (defn make-Union [args]
   (let [ts (flatten-unions args)
@@ -588,6 +609,151 @@
     (doseq [{:keys [path type]} infer-results]
       (update-path path type))
     @*type-env*))
+
+(defn walk-type-children [v f]
+  {:pre [(type? v)]
+   :post [(type? %)]}
+  (case (:op v)
+    :val v
+    :alias v
+    :HMap (update v :map (fn [m]
+                           (reduce-kv
+                             (fn [m k v]
+                               (assoc m k (f v)))
+                             {}
+                             m)))
+    :class (update v :args (fn [m]
+                             (reduce-kv
+                               (fn [m k v]
+                                 (assoc m k (f v)))
+                               []
+                               m)))
+    :HVec (update v :vec (fn [m]
+                           (reduce-kv
+                             (fn [m k v]
+                               (assoc m k (f v)))
+                             []
+                             m)))
+    :union (apply join* (into #{}
+                              (map f)
+                              (:types v)))
+    ;:var (update v :name (fn [n]
+    ;                       (get s n n)))
+    :IFn (update v :arities
+                 (fn [as]
+                   (mapv f as)))
+    :IFn1 (-> v
+              (update :dom
+                      (fn [ds]
+                        (mapv f ds)))
+              (update :rng f))))
+
+; tools.analyzer
+(defn walk
+  "Walk the ast applying `pre` when entering the nodes, and `post` when exiting.
+   Both functions must return a valid node since the returned value will replace
+   the node in the AST which was given as input to the function.
+   Short-circuits on reduced."
+  ([ast pre post]
+     (unreduced
+      ((fn walk [ast pre post]
+         (let [walk #(walk % pre post)]
+           (if (reduced? ast)
+             ast
+             (let [ret (walk-type-children (pre ast) walk)]
+               (if (reduced? ret)
+                 ret
+                 (post ret))))))
+       ast pre post))))
+
+; tools.analyzer
+(defn prewalk
+  "Shorthand for (walk ast f identity)"
+  [ast f]
+  (walk ast f identity))
+
+; tools.analyzer
+(defn postwalk
+  "Shorthand for (walk ast identity f reversed?)"
+  ([ast f] (walk ast identity f)))
+
+(defn register-alias [name t]
+  {:pre [(symbol? name)
+         (namespace name)]}
+  (swap! *alias-env* assoc name t)
+  nil)
+
+(defn gen-unique-alias [sym]
+  (if (contains? @*alias-env* sym)
+    (gensym (str sym "__"))
+    sym))
+
+(defn resolve-alias [{:keys [name] :as a}]
+  {:pre [(symbol? name)
+         (type? a)]
+   :post [(type? %)]}
+  (@*alias-env* name))
+
+(defn likely-HMap-dispatch [t]
+  {:pre [(HMap? t)]
+   :post [((some-fn nil? vector?) %)]}
+  (let [singles (filter (comp (every-pred (comp #{:val} :op)
+                                          (comp keyword? :val))
+                              val)
+                        (:map t))]
+    (when (= (count singles) 1)
+      (first singles))))
+
+(defn alias-hmap-type [t]
+  (letfn [(do-alias [t]
+            (let [nme (case (:op t)
+                        :HMap (if-let [[k v] (likely-HMap-dispatch t)]
+                                (str (name k) "-" (name (:val v)))
+                                (apply str (interpose "-" (map name (keys (:map t))))))
+                        :union (if (every? (comp #{:alias} :op) (:types t))
+                                 (let [ls (into []
+                                                (map (comp likely-HMap-dispatch resolve-alias))
+                                                (:types t))]
+                                   (let [ss (into #{} 
+                                                  (comp (filter some?)
+                                                        (map key))
+                                                  ls)]
+                                     (if (and (every? some? ls)
+                                              (= (count ss) 1))
+                                       (str (name (first ss)))
+                                       "union")))
+                                 "union")
+                        "unknown")
+                  a (gen-unique-alias (symbol (-> *ns* ns-name str) nme))]
+              (register-alias a t)
+              (-alias a)))]
+    (postwalk t
+              (fn [t]
+                (case (:op t)
+                  :HMap (do-alias t)
+                  :union (if (and (seq (:types t))
+                                  (not-every?
+                                    (fn [t]
+                                      (case (:op t)
+                                        :val true
+                                        :class (empty? (:args t))
+                                        false))
+                                    (:types t)))
+                           (do-alias t)
+                           t)
+                  ;:IFn1 (-> t
+                  ;          (update :dom #(mapv do-alias %))
+                  ;          (update :rng do-alias))
+                  t)))))
+
+(declare generate-tenv ppenv)
+
+(defn alias-hmap-envs* [aenv tenv]
+  (binding [*type-env* (atom tenv)
+            *alias-env* (atom aenv)]
+    (doseq [[v t] @*type-env*]
+      (swap! *type-env* update v alias-hmap-type))
+    [@*type-env* @*alias-env*]))
 
 (defn ppenv [env]
   (pprint (into {}
@@ -1144,19 +1310,11 @@
 
 (def runtime-infer-expr check)
 
-(defmacro for-fold [[acc acc-init] [arg arg-coll] & body]
-  `(reduce
-     (fn [~acc ~arg]
-       ~@body)
-     ~acc-init
-     ~arg-coll))
-
 ; generate : (Set InferResultEnv) -> TypeEnv
 (defn generate [is]
   (binding [*alias-env* (atom {})
             *type-env*  (atom {})]
-    (let [_ (doseq [{:keys [path type]} is]
-              (update-path path type))]
+    (let [_ (reset! *type-env* (generate-tenv is))]
       (pprint
         (into {}
               (map (fn [[name t]]
@@ -1164,10 +1322,140 @@
                      [name (unparse-type t)]))
               @*type-env*)))))
 
-(defn gen-current 
+(defn generate-tenv [is]
+  (binding [*type-env* (atom {})]
+    (doseq [{:keys [path type]} is]
+      (update-path path type))
+    @*type-env*))
+
+(defn gen-current1
   "Print the currently inferred type environment"
   []
   (generate @results-atom))
+
+(defn gen-current2 
+  "Turn the currently inferred type environment
+  into type aliases. Also print the alias environment."
+  []
+  (binding [*type-env* (atom {})
+            *alias-env* (atom {})]
+    (reset! *type-env*
+            (into {}
+                  (map (fn [[v t]]
+                         [v (alias-hmap-type t)]))
+                  (generate-tenv @results-atom)))
+    (ppenv @*type-env*)
+    (ppenv @*alias-env*)))
+
+(declare visualize)
+
+(defn gen-current3 
+  "Turn the currently inferred type environment
+  into type aliases. Also print the alias environment."
+  []
+  (binding [*type-env* (atom {})
+            *alias-env* (atom {})]
+    (reset! *type-env*
+            (into {}
+                  (map (fn [[v t]]
+                         [v (alias-hmap-type t)]))
+                  (generate-tenv @results-atom)))
+    (visualize @*alias-env* @*type-env*)))
+
+(defn fv
+  "Returns the aliases referred in this type, in order of
+  discovery."
+  [v]
+  (case (:op v)
+    (:Top :unknown :val) []
+    :HMap (into []
+                (mapcat fv)
+                (-> v :map vals))
+    :HVec (into []
+                (mapcat fv)
+                (-> v :vec))
+    :union (into []
+                 (mapcat fv)
+                 (-> v :types))
+    :class (into []
+                 (mapcat fv)
+                 (-> v :args))
+    :alias [(:name v)]
+    :IFn (into []
+               (mapcat (fn [f']
+                         (into (into [] 
+                                     (mapcat fv) 
+                                     (:dom f'))
+                               (fv (:rng f')))))
+               (:arities v))))
+
+(defn visualize [alias-env type-env]
+  (let [abbrev-alias (into {}
+                           (map 
+                             (fn [[k v]]
+                               [(symbol (name k)) v])
+                             alias-env))
+                                
+        nodes (into #{}
+                    (map (fn [[v t]]
+                           (with-meta v {:type t})))
+                    (merge type-env abbrev-alias))]
+    ;(spit
+    ;  "visualize.svg"
+      (#_viz/graph->svg viz/view-graph 
+                      nodes
+                      (reduce
+                        (fn [g [v t]]
+                          (assoc g v (into []
+                                           (map (comp symbol name)) 
+                                           (fv t))))
+                        {}
+                        (merge type-env abbrev-alias))
+                      :options {:dpi 50
+                                :fixedsize false
+                                :fontname "Courier"
+                                :vertical? false
+                                }
+                      :cluster->descriptor 
+                      (fn [c]
+                        {:color (rand-nth [:red :blue :green :yellow :black])})
+                      :node->cluster 
+                      (fn [n]
+                        (let [t (-> n meta :type)]
+                          (case (:op t)
+                            :HMap
+                            (let [singles (filter (comp #{:val} :op val) (:map t))]
+                              (when-let [[k v] (and (= (count singles) 1)
+                                                    (first singles))]
+                                (str k "-" (pr-str (:val v)))))
+                            nil)))
+
+                      ;:cluster->descriptor 
+                      ;(fn [c]
+                      ;  {:color (rand-nth [:red :blue :green :yellow :black])})
+                      ;:node->cluster 
+                      ;(fn [n]
+                      ;  (let [t (-> n meta :type)]
+                      ;    (case (:op t)
+                      ;      :HMap (apply str (interpose "-" (sort (map name (keys (:map t))))))
+                      ;      nil)))
+                      :node->descriptor 
+                      (fn [n] 
+                        (let [t (-> n meta :type)]
+                          {:color (case (:op t)
+                                    :union :blue
+                                    :HMap :red
+                                    :IFn :yellow
+                                    :black)
+                           :shape "box"
+                           :label (str n ":\n" 
+                                       (with-out-str 
+                                         (binding [*unparse-abbrev-alias* true
+                                                   *unparse-abbrev-class* true]
+                                           (pprint (unparse-type t)))))})))
+      ;)
+    ))
+
 
 (defn ppresults []
   (pprint
