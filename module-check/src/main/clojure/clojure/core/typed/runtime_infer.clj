@@ -687,15 +687,29 @@
   (swap! *alias-env* assoc name t)
   nil)
 
-(defn gen-unique-alias [sym]
-  (if (contains? @*alias-env* sym)
-    (gensym (str sym "__"))
+(defn register-merge-alias [sym t]
+  (prn "gen" sym)
+  (let [t' (get @*alias-env* sym)]
+    (if t'
+      (do
+        (swap! *alias-env* update sym join t')
+        sym)
+      (do
+        (swap! *alias-env* assoc sym t)
+        sym))))
+
+(defn register-unique-alias [sym t]
+  (let [sym (if (contains? @*alias-env* sym)
+              (gensym (str sym "__"))
+              sym)]
+    (register-alias sym t)
     sym))
 
 (defn resolve-alias [{:keys [name] :as a}]
   {:pre [(symbol? name)
          (type? a)]
    :post [(type? %)]}
+  (prn "resolve" name)
   (@*alias-env* name))
 
 (def kw-val? (every-pred (comp #{:val} :op)
@@ -736,31 +750,35 @@
 
 (defn alias-hmap-type [t]
   (letfn [(do-alias [t]
-            (let [nme (case (:op t)
-                        :HMap (if-let [[k v] (likely-HMap-dispatch t)]
-                                (apply str (name k) "-" 
-                                       (into []
-                                             (comp
-                                               (map name)
-                                               (interpose "-"))
-                                             v))
-                                (apply str (interpose "-" (map name (keys (:map t))))))
-                        :union (if (every? (comp #{:alias} :op) (:types t))
-                                 (let [ls (into []
-                                                (map (comp likely-HMap-dispatch resolve-alias))
-                                                (:types t))]
-                                   (let [ss (into #{}
-                                                  (comp (filter some?)
-                                                        (map first))
-                                                  ls)]
-                                     (if (and (every? some? ls)
-                                              (= (count ss) 1))
-                                       (name (first ss))
-                                       "union")))
-                                 "union")
-                        "unknown")
-                  a (gen-unique-alias (symbol (-> *ns* ns-name str) nme))]
-              (register-alias a t)
+            (let [[nme merge?] (case (:op t)
+                                 :HMap (if-let [[k v] (likely-HMap-dispatch t)]
+                                         [(apply str (name k) "-" 
+                                                (into []
+                                                      (comp
+                                                        (map name)
+                                                        (interpose "-"))
+                                                      v))
+                                          true]
+                                         [(apply str (interpose "-" (map name (keys (:map t)))))
+                                          false])
+                                 :union (if (every? (comp #{:alias} :op) (:types t))
+                                          (let [ls (into []
+                                                         (map (comp likely-HMap-dispatch resolve-alias))
+                                                         (:types t))]
+                                            (let [ss (into #{}
+                                                           (comp (filter some?)
+                                                                 (map first))
+                                                           ls)]
+                                              (if (and (every? some? ls)
+                                                       (= (count ss) 1))
+                                                [(name (first ss)) true]
+                                                ["union" false])))
+                                          ["union" false])
+                                 ["unknown" false])
+                  _ (assert (instance? Boolean merge?))
+                  n (symbol (-> *ns* ns-name str) nme)
+                  a ((if merge? register-merge-alias register-unique-alias) 
+                     n t)]
               (-alias a)))]
     (postwalk t
               (fn [t]
