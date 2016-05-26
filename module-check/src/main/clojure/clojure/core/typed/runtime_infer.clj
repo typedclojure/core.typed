@@ -22,7 +22,16 @@
                        :dom (Vec Type)
                        :rng Type})}
      '{:op :unknown}
+     '{:op :poly
+       :known-params (Vec Sym)
+       :params (Map (Set Path) 
+                    {:weight Int
+                     :name Sym
+                     :types (Set Kw)})
+       :type Type}
      '{:op :alias
+       :name Sym}
+     '{:op :free
        :name Sym}
      '{:op :Top}))
 
@@ -36,6 +45,8 @@
      '{:op :fn-range
        :arity Int}
      '{:op :set-entry}
+     '{:op :seq-entry}
+     '{:op :transient-vector-entry}
      '{:op :key
        :keys (Set Kw)
        :key Kw}
@@ -49,8 +60,23 @@
 
 #_
 (defalias InferResult
-  {:path Path
-   :type Type})
+  '{:op ':path-type
+    :path Path
+    :type Type})
+
+#_
+(defalias Equiv
+  '{:op ':equiv
+    := (Vec Path)
+    :type (U ':nil
+             ':keyword
+             ':fn
+             ':number
+             ':symbol
+             ':string
+             ':bool
+             ':coll
+             ':other)})
 
 #_
 (defalias TypeEnv
@@ -67,14 +93,77 @@
 
 #_
 (defalias InferResultEnv
-  (Set InferResult))
+  '{:infer-results (Set InferResult)
+    :equivs (Vec Equiv)
+    :path-occ (Map Path Int)
+    :value-envs (MutableIdentityMap Any ValueEnv)})
+
+#_
+(defalias ValueResultEnv
+  '{:path Path
+    :aliases (Set Path)
+    :infer-results (Set InferResult)
+    :parent (U nil [Any])})
+
+(defn initial-results 
+  ([] (initial-results nil []))
+  ([parent base]
+   {:infer-results #{}
+    :equivs []
+    :path-occ {}
+    ; current path
+    :base base
+    :parent parent}))
 
 ; results-atom : (Atom InferResultEnv)
-(def results-atom (atom #{}))
+(def results-atom (atom (initial-results)
+                        :validator
+                        (fn [m]
+                          (and (map? m)
+                               (-> m :infer-results set?)
+                               (-> m :path-occ map?)
+                               (-> m :equivs vector?)))))
+
+(defn find-top-parent [results-atom]
+  {:pre [(instance? clojure.lang.IAtom results-atom)]
+   :post [(instance? clojure.lang.IAtom %)]}
+  (loop [results-atom results-atom]
+    (if (:parent @results-atom)
+      (recur (:parent @results-atom))
+      results-atom)))
+
+(defn has-parent? [results-atom]
+  {:pre [(instance? clojure.lang.IAtom results-atom)]}
+  (boolean (:parent @results-atom)))
+
+(defn rename-infer-result-prefix [ir old new]
+  {:pre [(= old (take (count old) (:path ir)))]}
+  (update ir :path
+          (fn [p]
+            (into old
+                  (drop (count old) p)))))
+
+(defn add-infer-result! [results-atom r]
+  (swap! results-atom update :infer-results conj r))
+
+(defn add-equiv! [results-atom e]
+  (swap! results-atom update :equivs conj e))
+
+(defn get-infer-results [results-atom]
+  (get @results-atom :infer-results))
 
 (defn infer-result [path type]
-  {:type type
+  {:op :path-type
+   :type type
    :path path})
+
+(defn equiv-result [ps cls]
+  {:pre [(set? ps)
+         (= 2 (count ps))
+         (keyword? cls)]}
+  {:op :equiv
+   := ps
+   :type cls})
 
 (defn var-path [name]
   {:op :var
@@ -106,8 +195,14 @@
    :count count
    :nth nth})
 
+(defn seq-entry []
+  {:op :set-entry})
+
 (defn set-entry []
   {:op :set-entry})
+
+(defn transient-vector-entry []
+  {:op :transient-vector-entry})
 
 (defn -class [cls args]
   {:pre [(class? cls)]}
@@ -119,6 +214,11 @@
   {:op :val
    :val v})
 
+(defn make-free [name]
+  {:pre [(symbol? name)]}
+  {:op :free
+   :name name})
+
 (declare parse-path-elem parse-type)
 
 (defn parse-infer-result [[p _ t]]
@@ -127,10 +227,11 @@
 
 (declare unparse-path-elem unparse-type)
 
+(defn unparse-path [ps]
+  (mapv unparse-path-elem ps))
+
 (defn unparse-infer-result [p]
-  [(mapv unparse-path-elem (:path p))
-   :-
-   (unparse-type (:type p))])
+  [(unparse-path (:path p) :- (unparse-type (:type p)))])
 
 (defn parse-path-elem [p]
   (case (first p)
@@ -152,7 +253,9 @@
     :fn-domain (list 'dom (:arity p) (:position p))
     :var (list 'var (:name p))
     :index (list 'index (:count p) (:nth p))
-    :set-entry (list 'set-entry)))
+    :set-entry (list 'set-entry)
+    :seq-entry (list 'seq-entry)
+    :transient-vector-entry (list 'transient-vector-entry)))
 
 (defn type? [t]
   (and (map? t)
@@ -184,6 +287,8 @@
 
 (declare make-Union)
 
+(def ^:dynamic *type-var-scope* #{})
+
 (defn parse-type [m]
   (cond
     (= 'Any m) {:op :Top}
@@ -198,11 +303,26 @@
 
     (symbol? m) (case m
                   Nothing {:op :union :types #{}}
-                  (do (assert (class? (resolve m)))
+                  (if (contains? *type-var-scope* m)
+                    {:op :var
+                     :name m}
+                    (do
+                      (assert (class? (resolve m)))
                       {:op :class
                        :class (resolve m)
-                       :args []}))
+                       :args []})))
     (list? m) (case (first m)
+                All (let [[vs t :as rst] (second m)
+                          _ (assert (= 2 (count rst)))]
+                      {:op :poly
+                       :known-params (into []
+                                           (map (fn [m]
+                                                  {:pre [(symbol? m)]}
+                                                  m))
+                                           vs)
+                       :params {}
+                       :type (binding [*type-var-scope* (into *type-var-scope* vs)]
+                               (parse-type t))})
                 quote (let [in (second m)]
                         (cond
                           (vector? in) (parse-HVec in)
@@ -276,6 +396,18 @@
                cls))
     :Top 'Any
     :unknown '?
+    :free (:name m)
+    :poly (list 'All (into (mapv (fn [[ps {:keys [weight name types]}]]
+                                   {:pre [(= 2 (count ps))]}
+                                   [name 
+                                    types
+                                    weight :of 
+                                    [(get-in @results-atom [:path-occ (first ps)] 0)
+                                     (get-in @results-atom [:path-occ (second ps)] 0)]
+                                    '<- (mapv unparse-path ps)])
+                                 (:params m))
+                           (:known-params m))
+                (unparse-type (:type m)))
     (assert nil (str "No unparse-type case: " m))))
 
 (defn unp [t]
@@ -396,6 +528,30 @@
                (:op t1)
                (:op t2))
               (apply join* (flatten-unions [t1 t2]))
+
+              (and (#{:poly} (:op t1))
+                   (#{:poly} (:op t2)))
+              {:op :poly
+               :known-params (into (:known-params t1)
+                                   (:known-params t2))
+               :params (merge-with (fn [{w1 :weight
+                                         v1 :name
+                                         t1 :types}
+                                        {w2 :weight
+                                         v2 :name
+                                         t2 :types}]
+                                     ;; throw away v2
+                                     (prn "Merging:" w1 w2)
+                                     {:weight (+ w1 w2)
+                                      :name v1
+                                      :types (into t1 t2)})
+                                   (:params t1) (:params t2))
+               :types (join (:type t1) (:type t2))}
+
+              (#{:poly} (:op t1))
+              (update t1 :type join t2)
+              (#{:poly} (:op t2))
+              (update t2 :type join t1)
 
               (and (#{:class} (:op t1))
                    (#{:class} (:op t2))
@@ -559,6 +715,75 @@
         (parse-type ''{:f [[java.lang.Long :-> java.lang.Long] :-> java.lang.Long]})))
   )
 
+(declare update-path)
+
+(defn update-var-down-paths [ps new-var]
+  #_
+  (doseq [p ps]
+    (update-path p new-var)))
+
+(defn update-equiv [ps tpe]
+  {:pre [(set? ps)
+         (= 2 (count ps))
+         (every? vector? ps)
+         (every? (comp #{:var} :op first) ps)
+         ; vars must be the same
+         (apply = (map (comp :name :op first) ps))
+         (keyword? tpe)]}
+  ;(prn "update-equiv")
+  ;(pprint (mapv unparse-path ps))
+  (let [nme (-> ps first first :name)
+        _ (assert (symbol? nme))
+        t (get @*type-env* nme)
+        _ (assert (type? t) (pr-str nme))]
+    (case (:op t)
+      :poly (let [; find existing path that overlaps with any
+                  ; of the current paths
+                  vs (remove (fn [[s _]]
+                               (assert (set? s) s)
+                               (empty? 
+                                 (set/intersection s ps)))
+                             (:params t))]
+              (case (count vs)
+                ;; no matches
+                0 (let [new-sym (gensym "var")
+                        new-var (make-free new-sym)]
+                    ;(prn "Found no matching poly, extending with " new-sym)
+                    ;; first add the variable to the parameter list
+                    (swap! *type-env* assoc-in [nme :params ps] 
+                           ; weight of 1
+                           {:weight 1 
+                            :name new-sym
+                            :types #{tpe}})
+                    ;; then update the variable down each path
+                    (update-var-down-paths ps new-var))
+                ;; process results
+                (doseq [[vps {vsym :name}] vs]
+                  (let [var (make-free vsym)]
+                    ;(prn "Found many matching poly, " vsym)
+                    (swap! *type-env* 
+                           (fn [m]
+                             (-> m
+                                 (update-in [nme :params vps :weight] 
+                                            (fn [i]
+                                              ;(prn "adding i" i)
+                                              (inc i)))
+                                 (update-in [nme :params vps :types] conj tpe))))
+                    ;; update var down each path
+                    (update-var-down-paths ps var)))))
+      (let [new-sym (gensym "var")
+            new-var (make-free new-sym)]
+        ;(prn "No polymorphic type found, creating new poly with " new-sym)
+        ;; first construct a poly type that wraps the original type
+        (swap! *type-env* assoc nme
+               {:op :poly
+                :params {ps {:weight 1 
+                             :name new-sym
+                             :types #{tpe}}} ; weight of 1
+                :type t})
+        ;; then update the var down each path
+        (update-var-down-paths ps new-var)))))
+
 ; update-path : Path Type -> AliasTypeEnv
 (defn update-path [path type]
   {:pre [(vector? path)]}
@@ -590,6 +815,10 @@
                                          key type)}))
         :set-entry (update-path nxt-pth
                                 (-class clojure.lang.IPersistentSet [type]))
+        :seq-entry (update-path nxt-pth
+                                (-class clojure.lang.ISeq [type]))
+        :transient-vector-entry (update-path nxt-pth
+                                             (-class clojure.lang.ITransientVector [type]))
         :index (update-path nxt-pth
                             (-class clojure.lang.IPersistentVector [type]))
         :fn-domain (let [{:keys [arity position]} cur-pth]
@@ -688,7 +917,7 @@
   nil)
 
 (defn register-merge-alias [sym t]
-  (prn "gen" sym)
+  ;(prn "gen" sym)
   (let [t' (get @*alias-env* sym)]
     (if t'
       (do
@@ -709,7 +938,7 @@
   {:pre [(symbol? name)
          (type? a)]
    :post [(type? %)]}
-  (prn "resolve" name)
+  ;(prn "resolve" name)
   (@*alias-env* name))
 
 (def kw-val? (every-pred (comp #{:val} :op)
@@ -777,7 +1006,8 @@
                                  ["unknown" false])
                   _ (assert (instance? Boolean merge?))
                   n (symbol (-> *ns* ns-name str) nme)
-                  a ((if merge? register-merge-alias register-unique-alias) 
+                  a (;(if merge? register-merge-alias register-unique-alias)  ;; buggy
+                     register-unique-alias
                      n t)]
               (-alias a)))]
     (postwalk t
@@ -1192,76 +1422,171 @@
 
   )))))
 
-; track : (Atom InferResultEnv) Value Path -> Value
-(defn track [results-atom v path]
-  {:pre [(vector? path)]}
+#_
+(= [map {:dom 0} {:dom 0}]
+   [map {:dom 1} {:index 0}])
+
+(defn identity-hash []
+  (new java.util.IdentityHashMap))
+
+(def identity-hash-lock (Object.))
+
+(defn update-identity-hash! 
+  [^java.util.IdentityHashMap h k f & args]
+  (locking h
+    (doto h
+      (.put k (apply f (.get h k) args)))))
+
+(defn summarize-object [v] 
+  #_(System/identityHashCode v)
+  v)
+
+(defn type-of [v]
   (cond
-    ;; only accurate up to 20 arguments.
-    ;; all arities 21 and over will collapse into one.
-    (fn? v) (do
-              ;; if this is never called, remember it is actually a function
-              (swap! results-atom conj (infer-result path (-class clojure.lang.IFn [])))
-              (with-meta
-                (fn [& args]
-                  (let [blen (impl/bounded-length args 20) ;; apply only realises 20 places
-                        args (map-indexed
-                               (fn [n v]
-                                 (track results-atom v (conj path (fn-dom-path blen n))))
-                               args)]
-                    (track results-atom (apply v args) (conj path (fn-rng-path blen)))))
-                (meta v)))
+    (nil? v) :nil
+    (keyword? v) :keyword
+    (symbol? v) :symbol
+    (string? v) :string
+    (instance? Boolean v) :bool
+    (coll? v) :coll
+    (number? v) :number
+    (fn? v) :fn
+    (instance? clojure.lang.ITransientCollection v) :transient
+    :else :other))
 
-    (and (vector? v) 
-         (satisfies? clojure.core.protocols/IKVReduce v)) ; MapEntry's are not IKVReduce
-    (let [len (count v)]
-      (when (= 0 len)
-        (swap! results-atom conj (infer-result path (-class clojure.lang.IPersistentVector [{:op :union :types #{}}]))))
-      (reduce-kv
-        (fn [e k v]
-          (let [v' (track results-atom v (conj path (index-path len k)))]
-            (if (identical? v v')
-              e
-              (assoc e k v'))))
-        v
-        v))
+(defmacro cond-wrap [f & clauses]
+  (letfn [(wrap [f clauses]
+            (when clauses
+              (list 'if (first clauses)
+                    (if (next clauses)
+                      (list f (second clauses))
+                      (throw (IllegalArgumentException.
+                               "cond-wrap requires an even number of forms")))
+                    (wrap f (next (next clauses))))))]
+    (let [b (gensym "f")]
+      `(let [~b ~f]
+         ~(wrap b clauses)))))
 
-    (set? v)
-    (do
-      (when (empty? v)
-        (swap! results-atom conj (infer-result path (-class clojure.lang.IPersistentSet [{:op :union :types #{}}]))))
-      (into #{}
-            (map (fn [e]
-                   (track results-atom e (conj path (set-entry))))
-                 v)))
 
-    ;; maps with keyword keys
-    (and (or (instance? clojure.lang.PersistentHashMap v)
-             (instance? clojure.lang.PersistentArrayMap v))
-         (every? keyword? (keys v)))
-    (let [ks (set (keys v))]
-      (reduce
-        (fn [m k]
-          (let [orig-v (get m k)
-                v (track results-atom orig-v
-                         (conj path (key-path ks k)))]
-            ;; only assoc if needed
-            (if (identical? v orig-v)
-              m
-              (assoc m k v))))
-        v
-        ks))
+; value-cache :
+;WeakIdentityRefMap
+#_
+(Ref (Map Int (Vec '[(U nil WeakReference)
+                     (Ref '{:infer-results (Set InferResult)
+                            :path Path
+                            :aliases (Set Path)})])))
+(def value-cache (ref {}))
 
-    ;(instance? clojure.lang.IAtom v)
-    ;(reify
+; track : (Atom InferResultEnv) Value Path -> Value
+(defn track 
+  ([results-atom v path]
+   {:pre [(vector? path)]}
+   (let []
+     (cond
+       ;; only accurate up to 20 arguments.
+       ;; all arities 21 and over will collapse into one.
+       (fn? v) (let [;; if this is never called, remember it is actually a function
+                     ir (infer-result path (-class clojure.lang.IFn []))
+                     _ (add-infer-result! results-atom ir)]
+                 (with-meta
+                   (fn [& args]
+                     (let [blen (impl/bounded-length args 20) ;; apply only realises 20 places
+                           args (map-indexed
+                                  (fn [n v]
+                                    (track results-atom v (conj path (fn-dom-path blen n))))
+                                  args)]
+                       (track results-atom (apply v args) (conj path (fn-rng-path blen)))))
+                   (meta v)))
 
-    ((some-fn keyword? nil? false?) v)
-    (do
-      (swap! results-atom conj (infer-result path (-val v)))
-      v)
+       (list? v)
+       (with-meta
+         (list* (map (fn [e]
+                       (track results-atom e (conj path (seq-entry))))
+                     v))
+         (meta v))
 
-    :else (do
-            (swap! results-atom conj (infer-result path (-class (class v) [])))
-            v)))
+       (and (seq? v)
+            (not (list? v)))
+       (letfn [(wrap-lseq [v]
+                 (with-meta
+                   (lazy-seq
+                     (if (empty? v)
+                       v
+                       (cons (track results-atom
+                                    (first v)
+                                    (conj path (seq-entry)))
+                             (wrap-lseq (rest v)))))
+                   (meta v)))]
+         (wrap-lseq v))
+
+       (instance? clojure.lang.ITransientVector v)
+       (let [cnt (count v)]
+         (reduce
+           (fn [v i]
+             (let [e (nth v i)
+                   e' (track results-atom e
+                             (conj path (transient-vector-entry)))]
+               (if (identical? e e')
+                 v
+                 (assoc! v i e'))))
+           v
+           (range cnt)))
+
+       (and (vector? v) 
+            (satisfies? clojure.core.protocols/IKVReduce v)) ; MapEntry's are not IKVReduce
+       (let [len (count v)]
+         (when (= 0 len)
+           (add-infer-result! results-atom (infer-result path (-class clojure.lang.IPersistentVector [{:op :union :types #{}}]))))
+         (reduce-kv
+           (fn [e k v]
+             (let [v' (track results-atom v (conj path (index-path len k)))]
+               (if (identical? v v')
+                 e
+                 (assoc e k v'))))
+           v
+           v))
+
+       (set? v)
+       (do
+         (when (empty? v)
+           (add-infer-result!
+             results-atom
+             (infer-result path
+                           (-class clojure.lang.IPersistentSet
+                                   [{:op :union :types #{}}]))))
+         (into #{}
+               (map (fn [e]
+                      (track results-atom e (conj path (set-entry)))))
+               v))
+
+       ;; maps with keyword keys
+       (and (or (instance? clojure.lang.PersistentHashMap v)
+                (instance? clojure.lang.PersistentArrayMap v))
+            (every? keyword? (keys v)))
+       (let [ks (set (keys v))]
+         (reduce
+           (fn [m k]
+             (let [orig-v (get m k)
+                   v (track results-atom orig-v
+                            (conj path (key-path ks k)))]
+               ;; only assoc if needed
+               (if (identical? v orig-v)
+                 m
+                 (assoc m k v))))
+           v
+           ks))
+
+       ;(instance? clojure.lang.IAtom v)
+       ;(reify
+
+       ((some-fn keyword? nil? false?) v)
+       (do
+         (add-infer-result! results-atom (infer-result path (-val v)))
+         v)
+
+       :else (do
+               (add-infer-result! results-atom (infer-result path (-class (class v) [])))
+               v)))))
 
 (defn track-var'
   ([vr] (track-var' results-atom vr *ns*))
@@ -1276,7 +1601,14 @@
   `(track-var' (var ~v)))
 
 (defn track-def-init [vsym val]
+  {:pre [(symbol? vsym)
+         (namespace vsym)]}
   (track results-atom val [{:op :var :name vsym}]))
+
+(defmacro defntrack [n & args]
+  `(def ~n (track-def-init
+             '~(symbol (str (ns-name *ns*)) (str n))
+             (fn ~@args))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Analysis compiler pass
@@ -1363,7 +1695,7 @@
 
 (def runtime-infer-expr check)
 
-; generate : (Set InferResultEnv) -> TypeEnv
+; generate : InferResultEnv -> TypeEnv
 (defn generate [is]
   (binding [*alias-env* (atom {})
             *type-env*  (atom {})]
@@ -1375,10 +1707,15 @@
                      [name (unparse-type t)]))
               @*type-env*)))))
 
-(defn generate-tenv [is]
+; generate-tenv : InferResultEnv -> TypeEnv
+(defn generate-tenv [{:keys [infer-results equivs] :as is}]
   (binding [*type-env* (atom {})]
-    (doseq [{:keys [path type]} is]
-      (update-path path type))
+    (doseq [i infer-results]
+      (let [{:keys [path type]} i] 
+        (update-path path type)))
+    (doseq [i equivs]
+      (update-equiv (:= i)
+                    (:type i)))
     @*type-env*))
 
 (defn gen-current1
@@ -1400,7 +1737,97 @@
     (ppenv @*type-env*)
     (ppenv @*alias-env*)))
 
-(declare visualize)
+(declare visualize unmunge)
+
+(def premade-configs
+  {:vfn {:spit (fn [& args]
+                 (spit "visualize.svg" (apply viz/graph->svg args)))
+         :viz viz/view-graph}
+   :options {:small {:dpi 50
+                     ;:fixedsize false
+                     :fontname "Courier"
+                     :vertical? true}}
+   :node->cluster {:unmunge (fn [n]
+                              (when-not (namespace n)
+                                (unmunge n))
+                              #_
+                              (let [t (-> n meta :type)]
+                                (case (:op t)
+                                  :HMap
+                                  (let [singles (filter (comp #{:val} :op val) (:map t))]
+                                    (when-let [[k v] (and (= (count singles) 1)
+                                                          (first singles))]
+                                      (str k "-" (pr-str (:val v)))))
+                                  nil)))
+                   :HMaps
+                   (fn [n]
+                     (let [t (-> n meta :type)]
+                       (case (:op t)
+                         :HMap (apply str (interpose "-" (sort (map name (keys (:map t))))))
+                         nil)))}
+   :cluster->descriptor 
+   {:random-color (fn [c]
+                    {:color (rand-nth [:red :blue :green :yellow :black])})
+    :known-colors (fn [c]
+                    {:color 
+                     #_(case (first c)
+                         \P "#EDA985"
+                         \E "#D0E84A"
+                         \T :lightblue
+                         :black)
+                     (rand-nth [;:lightgrey 
+                                "#44C7F2"
+                                ;:red 
+                                "#129AC7"
+                                "#126E8C"
+                                "#7AD7F5"
+                                "#5CA1B8"
+                                "#9DBBC4"
+                                ;:turquoise 
+                                #_:blue 
+                                #_:green 
+                                ;:yellow
+                                ])
+                     :style :filled
+                     :label c
+                     })
+    }
+   :edge->descriptor {:bold (fn [n1 n2]
+                              {:style :bold})}
+   :node->descriptor 
+   {:just-label 
+    (fn [n]
+      (let [t (-> n meta :type)]
+        {:label (str n ":\n" 
+                     (with-out-str 
+                       (binding [*unparse-abbrev-alias* true
+                                 *unparse-abbrev-class* true]
+                         (pprint (unparse-type t)))))}))
+    :default
+    (fn [n] 
+      (let [t (-> n meta :type)]
+        {;:color (case (:op t)
+         ;         :union :blue
+         ;         :HMap :red
+         ;         :IFn :yellow
+         ;         :black)
+         :color (if (namespace n)
+                  :green
+                  #_(case (:op t)
+                      :union :blue
+                      :HMap :red
+                      :IFn :yellow
+                      :black))
+         :style (when (namespace n)
+                  :filled)
+
+         ;:shape :box
+         :label (cond true #_(namespace n) (str n ":\n" 
+                                                (with-out-str 
+                                                  (binding [*unparse-abbrev-alias* true
+                                                            *unparse-abbrev-class* true]
+                                                    (pprint (unparse-type t)))))
+                      :else (unmunge n))}))}})
 
 (defn gen-current3 
   "Turn the currently inferred type environment
@@ -1413,104 +1840,106 @@
                   (map (fn [[v t]]
                          [v (alias-hmap-type t)]))
                   (generate-tenv @results-atom)))
-    (visualize @*alias-env* @*type-env*)))
+    (visualize
+      {:top-levels #{`take-map}
+       :viz-args {:options (-> premade-configs :options :small)
+                  :node->descriptor (-> premade-configs
+                                        :node->descriptor
+                                        :just-label)}}
+      @*alias-env* @*type-env*)))
 
 (defn fv
   "Returns the aliases referred in this type, in order of
-  discovery."
-  [v]
-  (case (:op v)
-    (:Top :unknown :val) []
-    :HMap (into []
-                (mapcat fv)
-                (-> v :map vals))
-    :HVec (into []
-                (mapcat fv)
-                (-> v :vec))
-    :union (into []
-                 (mapcat fv)
-                 (-> v :types))
-    :class (into []
-                 (mapcat fv)
-                 (-> v :args))
-    :alias [(:name v)]
-    :IFn (into []
-               (mapcat (fn [f']
-                         (into (into [] 
-                                     (mapcat fv) 
-                                     (:dom f'))
-                               (fv (:rng f')))))
-               (:arities v))))
+  discovery. If recur? is true, also find aliases
+  referred by other aliases found."
+  ([v] (fv v false))
+  ([v recur?]
+   (let [fv (fn [v] (fv v recur?))]
+     (case (:op v)
+       (:Top :unknown :val) []
+       :HMap (into []
+                   (mapcat fv)
+                   (-> v :map vals))
+       :HVec (into []
+                   (mapcat fv)
+                   (-> v :vec))
+       :union (into []
+                    (mapcat fv)
+                    (-> v :types))
+       :class (into []
+                    (mapcat fv)
+                    (-> v :args))
+       :alias (conj
+                (if recur?
+                  (fv (resolve-alias v))
+                  [])
+                (:name v))
+       :IFn (into []
+                  (mapcat (fn [f']
+                            (into (into [] 
+                                        (mapcat fv) 
+                                        (:dom f'))
+                                  (fv (:rng f')))))
+                  (:arities v))))))
 
-(defn visualize [alias-env type-env]
-  (let [abbrev-alias (into {}
-                           (map 
-                             (fn [[k v]]
-                               [(symbol (name k)) v])
-                             alias-env))
-                                
+(defn unmunge [n]
+  (when-let [s (first (partition-by #{\_} (str n)))]
+    (apply str s)))
+
+;https://github.com/ToBeReplaced/mapply/blob/master/src/org/tobereplaced/mapply.cl
+(defn mapply
+  "Applies a function f to the argument list formed by concatenating
+  everything but the last element of args with the last element of
+  args.  This is useful for applying a function that accepts keyword
+  arguments to a map."
+  [f & args]
+  (apply f (apply concat (butlast args) (last args))))
+
+(defn visualize [{:keys [top-levels] :as config} alias-env type-env]
+  (let [relevant (atom #{})
+        type-env-edge-map 
+        (reduce
+          (fn [g [v t]]
+            (if (or (contains? top-levels v)
+                    (contains? top-levels :all))
+              (let [fvs (fv t)]
+                (swap! relevant into fvs)
+                (assoc g v fvs))
+              g))
+          {}
+          type-env)
+
+        _ (prn "relevant" @relevant)
+
+        alias-env-edge-map
+        (loop [g {}
+               wl (select-keys alias-env @relevant)]
+          (if (empty? wl)
+            g
+            (let [[v t] (first wl)
+                  fvs (fv t)]
+              (recur (assoc g v fvs)
+                     (merge
+                       (dissoc wl v)
+                       (select-keys alias-env
+                                    (set/difference
+                                      (set fvs)
+                                      (set (keys g))
+                                      (set (keys wl))
+                                      #{v})))))))
+
+        edge-map (merge type-env-edge-map
+                        alias-env-edge-map)
+
         nodes (into #{}
                     (map (fn [[v t]]
                            (with-meta v {:type t})))
-                    (merge type-env abbrev-alias))]
-    ;(spit
-    ;  "visualize.svg"
-      (#_viz/graph->svg viz/view-graph 
-                      nodes
-                      (reduce
-                        (fn [g [v t]]
-                          (assoc g v (into []
-                                           (map (comp symbol name)) 
-                                           (fv t))))
-                        {}
-                        (merge type-env abbrev-alias))
-                      :options {:dpi 50
-                                :fixedsize false
-                                :fontname "Courier"
-                                :vertical? false
-                                }
-                      :cluster->descriptor 
-                      (fn [c]
-                        {:color (rand-nth [:red :blue :green :yellow :black])})
-                      :node->cluster 
-                      (fn [n]
-                        (when-let [s (apply str (first (partition-by #{\_} (str n))))]
-                          s)
-                        #_
-                        (let [t (-> n meta :type)]
-                          (case (:op t)
-                            :HMap
-                            (let [singles (filter (comp #{:val} :op val) (:map t))]
-                              (when-let [[k v] (and (= (count singles) 1)
-                                                    (first singles))]
-                                (str k "-" (pr-str (:val v)))))
-                            nil)))
-
-                      ;:cluster->descriptor 
-                      ;(fn [c]
-                      ;  {:color (rand-nth [:red :blue :green :yellow :black])})
-                      ;:node->cluster 
-                      ;(fn [n]
-                      ;  (let [t (-> n meta :type)]
-                      ;    (case (:op t)
-                      ;      :HMap (apply str (interpose "-" (sort (map name (keys (:map t))))))
-                      ;      nil)))
-                      :node->descriptor 
-                      (fn [n] 
-                        (let [t (-> n meta :type)]
-                          {:color (case (:op t)
-                                    :union :blue
-                                    :HMap :red
-                                    :IFn :yellow
-                                    :black)
-                           :shape "box"
-                           :label (str n ":\n" 
-                                       (with-out-str 
-                                         (binding [*unparse-abbrev-alias* true
-                                                   *unparse-abbrev-class* true]
-                                           (pprint (unparse-type t)))))})))
-      ;)
-    ))
+                    (select-keys (merge alias-env type-env)
+                                 (keys edge-map)))]
+    (mapply viz/view-graph 
+            nodes
+            edge-map
+            (:viz-args config))))
 
 
 (defn ppresults []
@@ -1518,7 +1947,7 @@
     (into #{}
           (map (fn [a]
                  (update a :type unparse-type)))
-          @results-atom)))
+          (get-infer-results results-atom))))
 
 
 (defn var-constraints 
@@ -1530,50 +1959,52 @@
 
   [vsym]
   (pprint (mapv unparse-infer-result 
-                (-> (->> @results-atom (group-by (comp :name first :path))) 
+                (-> (->> (get-infer-results results-atom) (group-by (comp :name first :path))) 
                     (get vsym)))))
 
 ;; TESTS
 
-(defn foo [a]
+(defntrack foo 
+  [a]
   (+ a 2))
 
-(defn bar [f]
+(defntrack bar
+  [f]
   (f 1))
 
-(bar (track-var foo))
+(bar foo)
+(bar foo)
 
-(defn use-map [m]
+(defntrack use-map [m]
   (merge m {:b ((:f m) foo)}))
 
 (use-map {:a 1, :f bar})
 
-((track-var use-map) {:a 1, :f bar})
+(use-map {:a 1, :f bar})
 
-((track-var use-map) {:f bar})
+(use-map {:f bar})
 
-((track-var use-map) {:f (track-var bar)})
+(use-map {:f bar})
 
-(defn multi-arg 
+(defntrack multi-arg 
   ([a] (inc a))
   ([s1 s2] (str s1 s2)))
 
-((track-var multi-arg) 1)
-((track-var multi-arg) "a" "a")
+(multi-arg 1)
+(multi-arg "a" "a")
+(multi-arg "b" "c")
+(multi-arg "d" "e")
 
-(defn take-map [m]
-  m)
+(defntrack take-map [m]
+  {:a m})
 
-(comment
 
-((track-var take-map) nil)
-((track-var take-map) {:a nil})
-((track-var take-map) {:a {:a nil}})
-((track-var take-map) {:a {:a {:a {:a nil}}}})
+(take-map nil)
+(take-map {:a nil})
+(take-map {:a {:a nil}})
+(take-map {:a {:a {:a {:a nil}}}})
 
-(ppres)
-
-(defn postfix [& words]
+(defntrack postfix [& words]
   (reduce (fn [stack t]
             (if (fn? t)
               (let [[l r & m] stack]
@@ -1582,5 +2013,104 @@
           [] 
           words))
 
-(postfix 1 2 )
+(postfix 1 2)
+
+(defntrack mymapv [f c]
+  (mapv f c))
+
+(mymapv inc [1 2 3 4])
+(mymapv str '[a b c d])
+(mymapv (juxt first second) {'a 'b 'c 'd 'e 'f})
+
+(defntrack iden [x] x)
+;(defntrack f [x] (add1 x))
+
+(defntrack invthunk [f]
+  (f)
+  f)
+
+(defntrack invnested [f g]
+  (f g)
+  [f g])
+
+(invnested (fn [g] (g))
+           (fn [] (+ 1 2)))
+
+#_
+((track
+   results-atom
+   (fn [g] (g))
+   [#'invnested (dom 2 0)])
+ (track
+   results-atom
+   (fn [] (+ 1 2))
+   [#'invnested (dom 2 0)]))
+
+#_
+((let [atm (atom #{})]
+   (fn [g]
+     (track
+       results-atom
+       ((fn [g] (g))
+        (track results-atom g [#'invnested (dom 2 0) (dom 1 0)]))
+       [#'invnested (dom 2 0) (rng 1)])))
+ (let [atm (atom #{})]
+   (fn []
+     (track
+       results-atom
+       ((fn [] (+ 1 2)))
+       [#'invnested (dom 2 1) (rng 0)]))))
+
+
+; (Rec [f] [f -> f])
+; (All [a] [a -> a])
+(iden iden)
+;(iden 1)
+;(iden 'a)
+;(iden [1])
+;(iden [2 3])
+;(iden [5 8])
+
+(invthunk #(+ 2 3))
+
+#_
+(fn [f] ; f = #(+ 2 3)
+  (let [f (let [app-info (atom {:infer-results #{}
+                                :base-path '[#'invthunk]
+                                :alias-paths #{}
+                                :parent results-atom})]
+            (with-meta
+              (fn []
+                (track
+                  app-info
+                  (f)
+                  '[#'invthunk (dom 1 0) (rng 0)]))
+              {:inferred (atom )}))]
+    (f) ; [#'invthunk (dom 1 0) (rng 0)] : Long
+
+    (swap! app-info update :equiv-paths conj '[#'invthunk (rng 1)])
+    (track
+      f   
+    ; [#'invthunk (dom 1 0) (rng 0)] = [#'invthunk (rng 1)]
+    )))
+
+(defntrack maptrans [f]
+  (map f))
+
+(into []
+      (maptrans identity)
+      [1 2 3])
+
+(into []
+      (maptrans identity)
+      ['a 'b 'c])
+
+(into []
+      (maptrans str)
+      ['a 'b 'c])
+
+(comment
+
+(ppres)
+
 )
