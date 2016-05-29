@@ -2355,7 +2355,7 @@ for checking namespaces, cf for checking individual forms."}
 (defn runtime-infer []
   (load-if-needed)
   (require '[clojure.core.typed.runtime-infer])
-  ((impl/v 'clojure.core.typed.runtime-infer/summary)))
+  ((impl/v 'clojure.core.typed.runtime-infer/infer-anns)))
 
 (defn ppinfer []
   (pprint/pprint (runtime-infer)))

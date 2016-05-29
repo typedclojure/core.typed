@@ -3,10 +3,13 @@
    :core.typed {:features #{:runtime-infer}}
    }
   (:require [clojure.test :refer [deftest is]]
-            [clojure.core.typed :as t]))
+            [clojure.core.typed :as t]
+            [clojure.pprint :refer [pprint]]))
+
+
 
 ;;  e  ::= x | (if e e e) | (lambda (x :- t) e) | (e e*) | #f | n? | add1
-;;  t  ::= [x : t -> t] | (not t) | (or t t) | (and t t) | #f | N | (refine [x] p) | Any
+;;  t  ::= [x : t -> t] | (not t) | (or t t) | (and t t) | #f | N | Any
 ;;  p  ::= (is e t) | (not p) | (or p p) | (and p p) | (= e e)
 ;;  ps ::= p*
 
@@ -33,11 +36,12 @@
 #_
 (defalias P
   "Propositions"
-  (U '{:P :is, :exp E, :type T}
-     '{:P :=, :exps (Set E)}
-     '{:P :or, :ps (Set P)}
-     '{:P :and, :ps (Set P)}
-     '{:P :not, :p P}))
+  (U '{:P ':is, :exp E, :type T}
+     '{:P ':=, :exps (Set E)}
+     '{:P ':or, :ps (Set P)}
+     '{:P ':and, :ps (Set P)}
+     '{:P ':not, :p P}))
+
 #_
 (defalias Ps
   "Proposition environments"
@@ -52,14 +56,16 @@
         x)))
 
 ; ps p -> List List ass
-(defn prove [ps p]
-  )
+;(defn prove [ps p]
+;  )
 
 (declare parse-exp parse-type)
 
 ; Any -> P
 (defn parse-prop [p]
-  (assert (list? p) p)
+  (assert (and (sequential? p)
+               (seq? p))
+          p)
   (case (first p)
     is (let [[_ e t] p]
          {:P :is
@@ -115,14 +121,23 @@
     :and `(~'and ~@(map unparse-prop (:ps p)))
     :not `(~'not ~(unparse-prop (:p p)))))
 
+(defn parse-roundtrip [syn]
+  (= (parse-prop (unparse-prop (parse-prop syn)))
+     (parse-prop syn)))
+
+#_
+(unparse-prop
+  {:P :not, 
+   :p {:P :is,
+       :exp {:E :var, :name x},
+       :type {:T :intersection, :types #{}}}})
+
 (deftest unparse-prop-test
-  (is (unparse-prop (parse-prop '(is x Any))))
-  (is (unparse-prop (parse-prop '(= (x y) z))))
-  (is (unparse-prop (parse-prop '(or (= (x y) z)
-                                     (is x Any)))))
-  (is (unparse-prop (parse-prop '(and (= (x y) z)
-                                      (is x Any)))))
-  (is (unparse-prop (parse-prop '(not (= (x y) z))))))
+  (is (parse-roundtrip '(is x Any)))
+  (is (parse-roundtrip '(= z (x y))))
+  (is (parse-roundtrip '(or (= (x y) z) (is x Any))))
+  (is (parse-roundtrip '(and (= (x y) z) (is x Any))))
+  (is (parse-roundtrip '(not (= (x y) z)))))
 
 ; Any -> T
 (defn parse-type [t]
@@ -137,7 +152,7 @@
                   {:T :fun
                    :params (vec args)
                    :return (parse-type ret)})
-    (list? t) (case (first t)
+    (seq? t) (case (first t)
                 not (let [[_ t1] t]
                       {:T :not
                        :type (parse-type t)})
@@ -182,7 +197,7 @@
     (false? e)  {:E :false}
     (= 'n? e)   {:E :n?}
     (= 'add1 e) {:E :add1}
-    (list? e) (case (first e)
+    (seq? e) (case (first e)
                 if (let [[_ e1 e2 e3] e]
                      (assert (= 4 (count e)))
                      {:E :if 
@@ -296,3 +311,191 @@
   #_(is (= false
          (tc [] '(lambda (x :- Num) (add1 x))))))
 
+
+(comment
+(defn mcar [m]
+  (:car m))
+
+(deftest mcar-test
+  (is (mcar {:car 1
+             :cdr 2}))
+  (is (mcar {:car {:car 1 :cdr 2}
+             :cdr {:car 3 :cdr 4}
+             }))
+  )
+
+(track f [path])
+
+(ann g ['{:y Int} -> '{:x Int :y Int}])
+(defn g [m]
+  (merge m {:x 1}))
+
+; Inference result:
+; ['forty-two] : Long
+(def forty-two 42)
+
+(def forty-two
+  (track 42 ['forty-two]))
+
+(fn [x]
+  (track 
+    (f (track x [path {:dom 0}]))
+    [path :rng]))
+
+
+; Int Int -> Point
+(def point 
+  (fn [x y]
+    (track
+      ((fn [x y]
+         {:x x
+          :y y})
+       (track x ['point {:dom 0}])
+       (track y ['point {:dom 1}]))
+      ['point :rng])))
+
+(deftest point-test
+  (is (= 1 (:x (point 1 2))))
+  (is (= 2 (:y (point 1 2)))))
+(track
+  ((fn [x y]
+     {:x x
+      :y y})
+   (track 1 ['point {:dom 0}])
+   (track 2 ['point {:dom 1}]))
+  ['point :rng])
+
+{:x (track 1 ['point :rng (key :x)])
+ :y (track 2 ['point :rng (key :y)])}
+
+{:x 1 ; ['point :rng (key :x)] : Long
+ :y 2}; ['point :rng (key :y)] : Long
+
+; [A -> B] (List A) -> (List B)
+(def my-map map)
+
+(def my-map (track map ['my-map]))
+
+(def my-map 
+  (fn [f c]
+    (track
+      (map
+        (track f ['my-map {:dom 0}])
+        (track c ['my-map {:dom 1}]))
+      ['my-map :rng])))
+
+(deftest my-map-test
+  (is (= [2 3 4] (my-map inc [1 2 3]))))
+
+(my-map inc [1 2 3])
+
+(track 
+  (map 
+    (track inc ['my-map {:dom 0}])
+    (track [1 2 3] ['my-map {:dom 1}]))
+  ['my-map :rng])
+
+(track 
+  (map 
+    ; ['my-map {:dom 0}] : ? -> ?
+    (fn [n]
+      (track
+        (inc 
+          (track n ['my-map {:dom 0} {:dom 0}]))
+        ['my-map {:dom 0} :rng]))
+    (track [1 2 3] ['my-map {:dom 1}]))
+  ['my-map :rng])
+
+(track 
+  (map 
+    ; ['my-map {:dom 0}] : ? -> ?
+    (fn [n]
+      (track
+        (inc 
+          (track n ['my-map {:dom 0} {:dom 0}]))
+        ['my-map {:dom 0} :rng]))
+    ; ['my-map {:dom 1} {:index 0}] : Long
+    ; ['my-map {:dom 1} {:index 1}] : Long
+    ; ['my-map {:dom 1} {:index 2}] : Long
+    [1 2 3])
+  ['my-map :rng])
+
+
+; ['my-map {:dom 0} {:dom 0}] : Long
+; ['my-map {:dom 0} :rng] : Long
+; ['my-map {:dom 0} {:dom 0}] : Long
+; ['my-map {:dom 0} :rng] : Long
+; ['my-map {:dom 0} {:dom 0}] : Long
+; ['my-map {:dom 0} :rng] : Long
+(track 
+  [2 3 4]
+  ['my-map :rng])
+
+; ['my-map :rng {:index 0}] : Long
+; ['my-map :rng {:index 1}] : Long
+; ['my-map :rng {:index 2}] : Long
+[2 3 4]
+
+(def v e)
+
+(def v (track e ['v]))
+
+lib
+
+(track lib ['lib])
+
+(track (fn [x] e) [path])
+
+(fn [x]
+  (let [as (atom {})
+        x (track x [path {:dom 0}] as)]
+    (track
+      ((fn [x] e) x)
+      [path :rng]
+      as)))
+
+(ann point [Long Long -> Point])
+
+(defn point [x y]
+  {:x x
+   :y y})
+
+(def b e)
+
+(track f [path] nil)
+
+(track f [path])
+
+;; new hash map per call to
+;; polymorphic function
+
+(defn track [val path val-path]
+  ;; merge {(hash val) #{path}}
+  (swap! val-path update (hash val) conj path)
+  ...)
+
+(defn point [1 2]
+  {:x 1
+   :y 2})
+
+(point 1 2)
+
+(fn [x]
+  (let [val-paths (atom {})]
+    (track
+      (f (track x [path {:dom 0}] val-paths))
+      [path :rng]
+      val-paths)))
+
+(def b (track e ['b]))
+
+str/upper-case
+
+(track str/upper-case
+       ['str/upper-case])
+
+(ann clojure.string/upper-case [Str -> Str])
+
+(atom {x 1
+       y 2})
+)

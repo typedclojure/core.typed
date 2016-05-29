@@ -1,12 +1,11 @@
 (ns clojure.core.typed.runtime-infer
   (:require [clojure.pprint :refer [pprint]]
+            [clojure.core.typed :as t]
             [clojure.set :as set]
             [clojure.test :refer :all]
             [clojure.string :as str]
             [clojure.core.typed.ast-utils :as ast]
-            [rhizome.viz :as viz]
             [clojure.core.typed.current-impl :as impl]
-            [clojure.core.typed.ast-utils :as ast]
             [clojure.core.typed.debug :refer [dbg]]))
 
 #_
@@ -176,7 +175,7 @@
    :nth nth})
 
 (defn seq-entry []
-  {:op :set-entry})
+  {:op :seq-entry})
 
 (defn set-entry []
   {:op :set-entry})
@@ -247,6 +246,9 @@
 (defn alias? [t]
   (= :alias (:op t)))
 
+(defn union? [t]
+  (= :union (:op t)))
+
 (declare parse-type)
 
 (defn parse-arity [a]
@@ -276,7 +278,7 @@
   ([t seen]
    {:post [(set? %)
            (every? set? %)]}
-   (prn "keysets" (unparse-type t))
+   ;(prn "keysets" (unparse-type t))
    (let [keysets
          (fn 
            ([t] (keysets t seen))
@@ -297,9 +299,9 @@
          (alias? old)
          (type? new)]
    :post [(type? %)]}
-  (prn "subst-alias t" (unparse-type t))
-  (prn "old" (unparse-type old))
-  (prn "new" (unparse-type new))
+  ;(prn "subst-alias t" (unparse-type t))
+  ;(prn "old" (unparse-type old))
+  ;(prn "new" (unparse-type new))
   (postwalk t
             (fn [c]
               (case (:op c)
@@ -384,6 +386,16 @@
 (def ^:dynamic *unparse-abbrev-alias* false)
 (def ^:dynamic *unparse-abbrev-class* false)
 
+(defn qualify-typed-symbol [s]
+  (let [talias (some
+                 (fn [[k v]]
+                   (when (= (the-ns 'clojure.core.typed) v)
+                     k))
+                 (ns-aliases *ns*))]
+    (symbol (or (str talias)
+                "clojure.core.typed")
+            (str s))))
+
 ; [Node :-> Any]
 (defn unparse-type' [{:as m}]
   (assert (type? m)
@@ -391,15 +403,18 @@
   (case (:op m)
     :alias (if *unparse-abbrev-alias*
              (-> (:name m) name symbol)
-             (:name m))
+             (if (= (symbol (namespace (:name m)))
+                    (ns-name *ns*))
+               (symbol (name (:name m)))
+               (:name m)))
     :val (let [t (:val m)]
            (cond
              ((some-fn nil? false?) t) t
              (keyword? t) `'~t
-             :else 'Any))
+             :else (qualify-typed-symbol 'Any)))
     :union (if (empty? (:types m))
-             'Nothing
-             (list* 'U (set (map unparse-type (:types m)))))
+             (qualify-typed-symbol 'Nothing)
+             (list* (qualify-typed-symbol 'U) (set (map unparse-type (:types m)))))
     :HVec `'~(mapv unparse-type (:vec m))
     :HMap `'~(into {}
                    (map (fn [[k v]]
@@ -416,9 +431,9 @@
              (first as)
              (list* 'IFn as)))
     :class (let [cls (condp = (:class m)
-                       clojure.lang.IPersistentVector 'Vec
-                       clojure.lang.IPersistentSet 'Set
-                       clojure.lang.Symbol 'Sym
+                       clojure.lang.IPersistentVector (qualify-typed-symbol 'Vec)
+                       clojure.lang.IPersistentSet (qualify-typed-symbol 'Set)
+                       clojure.lang.Symbol (qualify-typed-symbol 'Sym)
                        (if *unparse-abbrev-class*
                          (symbol 
                            (apply str (last (partition-by #{\.} (str (:class m))))))
@@ -426,7 +441,7 @@
              (if (seq (:args m))
                (list* cls (map unparse-type (:args m)))
                cls))
-    :Top 'Any
+    :Top (qualify-typed-symbol 'Any)
     :unknown '?
     :free (:name m)
     :poly (list 'All (into (mapv (fn [[ps {:keys [weight name types]}]]
@@ -1063,8 +1078,8 @@
          done #{}]
     (assert (vector? worklist))
     (assert (set? done))
-    (prn "worklist" worklist)
-    (prn "done" done)
+    ;(prn "worklist" worklist)
+    ;(prn "done" done)
     (if (empty? worklist)
       t
       (let [t (nth worklist 0)
@@ -1082,8 +1097,8 @@
               (when (and (seq (set/intersection tks fks))
                          (not (alias? (resolve-alias (-alias f))))
                          (not (alias? (resolve-alias t))))
-                (prn "Merging" f
-                     "with" (:name t))
+                ;(prn "Merging" f
+                ;     "with" (:name t))
                 (swap! *alias-env*
                        (fn [m]
                          (-> m 
@@ -1103,8 +1118,17 @@
                (conj done t)))))
   t)
 
+(defn simple-alias? [a]
+  (let [a-res (resolve-alias a)
+        res (not (contains? (set (fv a-res true)) (:name a)))]
+    (prn "simple-alias?" (:name a) res)
+    res))
+
 (defn follow-aliases
-  "Rename aliases to avoid redundant paths."
+  "Rename aliases to avoid redundant paths.
+  Also delete unnecessary aliases for simple
+  types.
+  Also inline aliases if they are simple enough."
   [t]
   {:pre [(type? t)]
    :post [(type? %)]}
@@ -1114,50 +1138,61 @@
             (fn [t f]
               (loop [real (-alias f)
                      seen #{}]
+                (let [real-res (resolve-alias real)]
                 (assert (alias? real))
                 (cond
                   ;; infinite loop, give up
                   (seen real) t
 
-                  (alias? (resolve-alias real))
-                  (recur (resolve-alias real)
-                         (conj seen real))
+                  (alias? real-res)
+                  (recur real-res (conj seen real))
 
-                  :else (subst-alias t (-alias f) real))))
+                  :else (subst-alias t (-alias f) 
+                                     ;; if the new alias is simple, just inline.
+                                     (if (simple-alias? real)
+                                       real-res
+                                       real))))))
             t
             (fv t))
         ;; follow downstream aliases
-        _ (doseq [f (dbg (fv t true))]
+        _ (doseq [f (fv t true)]
             ;; start at root f and rename
             ;; each alias in f to the non-redundant
             ;; alias.
             (doseq [inner (fv (resolve-alias (-alias f)))]
               (loop [real (-alias inner)
                      seen #{}]
-                (prn "following" inner)
-                (prn "real" real)
-                (prn "res real" (resolve-alias real))
-                (assert (alias? real))
-                (cond
-                  ;; infinite loop, give up
-                  (seen real) nil
+                (let [real-res (resolve-alias real)]
+                  ;(prn "following" inner)
+                  ;(prn "real" real)
+                  ;(prn "res real" (resolve-alias real))
+                  (assert (alias? real))
+                  (cond
+                    ;; infinite loop, give up
+                    (seen real) nil
 
-                  (alias? (resolve-alias real))
-                  (recur (resolve-alias real)
-                         (conj seen real))
+                    (alias? real-res)
+                    (recur real-res (conj seen real))
 
-                  :else (register-alias f
-                                        (subst-alias
-                                          (resolve-alias (-alias f))
-                                          (-alias inner)
-                                          real))))))]
+                    :else (register-alias f
+                                          (subst-alias
+                                            (resolve-alias (-alias f))
+                                            (-alias inner)
+                                            ;; if the new alias is simple, just inline.
+                                            (if (simple-alias? real)
+                                              real-res
+                                              real))))))))]
     t))
 
-(defn squash-all [t]
-  (prn "squash-all start" t)
+(defn squash-all 
+  "Jump past redundant aliases that
+  just name another alias.
+  Also make recursive types when possible."
+  [t]
+  ;(prn "squash-all start" t)
   (doseq [f (fv t)]
     (squash (-alias f)))
-  (prn "squash-all done" t)
+  ;(prn "squash-all done" t)
   ;; rename types avoiding redundant type aliases
   (follow-aliases t)
   ;t
@@ -1880,12 +1915,14 @@
     (ppenv @*type-env*)
     (ppenv @*alias-env*)))
 
-(declare visualize unmunge)
+(declare visualize unmunge
+         view-graph
+         graph->svg)
 
 (def premade-configs
   {:vfn {:spit (fn [& args]
-                 (spit "visualize.svg" (apply viz/graph->svg args)))
-         :viz viz/view-graph}
+                 (spit "visualize.svg" (apply graph->svg args)))
+         :viz view-graph}
    :options {:small {:dpi 50
                      ;:fixedsize false
                      :fontname "Courier"
@@ -1986,28 +2023,65 @@
                                                     (pprint (unparse-type t)))))
                       :else (unmunge n))}))}})
 
+(defn populate-envs []
+  (reset! *type-env*
+          (into {}
+                (comp (map (fn [[v t]]
+                             [v (alias-hmap-type t)]))
+                      (map (fn [[v t]]
+                             [v (squash-all t)])))
+                (generate-tenv @results-atom)))
+  nil)
+
+(defn envs-to-annotations []
+  (let [tenv (into {}
+                   (filter (fn [[k v]]
+                             ;(prn "k" k)
+                             (= (str (ns-name *ns*))
+                                (namespace k))))
+                   @*type-env*)
+        tfvs (into #{}
+                   (mapcat
+                     (fn [t]
+                       (fv t true)))
+                   (vals tenv))
+        as (into {}
+                 (filter (comp tfvs key))
+                 @*alias-env*)]
+    (into
+      (into [`(declare ~@(map (comp symbol name key) as))]
+            (map (fn [[k v]]
+                   (list (qualify-typed-symbol 'defalias)
+                         (symbol (name k))
+                         (unparse-type v))))
+            as)
+      (map (fn [[k v]]
+             (list (qualify-typed-symbol 'ann)
+                   (symbol (name k))
+                   (unparse-type v))))
+      tenv)))
+
+(defn infer-anns []
+  (binding [*type-env* (atom {})
+            *alias-env* (atom {})]
+    (populate-envs)
+    (envs-to-annotations)))
+
 (defn gen-current3 
   "Turn the currently inferred type environment
   into type aliases. Also print the alias environment."
-  [squash?]
+  []
   (binding [*type-env* (atom {})
             *alias-env* (atom {})]
-    (reset! *type-env*
-            (into {}
-                  (map (fn [[v t]]
-                         [v (alias-hmap-type t)]))
-                  (generate-tenv @results-atom)))
-    (when squash?
-      (swap! *type-env*
-             (fn [m]
-               (into {}
-                     (map (fn [[v t]]
-                            [v (squash-all t)]))
-                     m))))
+    (populate-envs)
     (visualize
       {:top-levels 
        #{;`take-map
-         `a-b-nested}
+        ; `a-b-nested
+        ;'clojure.core.typed.test.mini-occ/parse-exp
+        'clojure.core.typed.test.mini-occ/parse-prop
+        ;`mymapv
+        }
        :viz-args {:options (-> premade-configs :options :projector)
                   :node->descriptor (-> premade-configs
                                         :node->descriptor
@@ -2021,7 +2095,7 @@
   ([v recur?] (fv v recur? #{}))
   ([v recur? seen-alias]
    {:pre [(type? v)]}
-   (prn "fv" v)
+   ;(prn "fv" v)
    (let [fv (fn 
               ([v] (fv v recur? seen-alias))
               ([v recur? seen-alias]
@@ -2070,6 +2144,14 @@
   [f & args]
   (apply f (apply concat (butlast args) (last args))))
 
+(defn view-graph [& args]
+  (require '[rhizome.viz])
+  (apply (impl/v 'rhizome.viz/view-graph) args))
+
+(defn graph->svg [& args]
+  (require '[rhizome.viz])
+  (apply (impl/v 'rhizome.viz/graph->svg) args))
+
 (defn visualize [{:keys [top-levels] :as config}]
   (let [relevant (atom #{})
         type-env-edge-map 
@@ -2112,7 +2194,7 @@
                            (with-meta v {:type t})))
                     (select-keys (merge @*alias-env* @*type-env*)
                                  (keys edge-map)))]
-    (mapply viz/view-graph 
+    (mapply view-graph 
             nodes
             edge-map
             (:viz-args config))))
@@ -2285,7 +2367,7 @@
       (maptrans str)
       ['a 'b 'c])
 
-(defn a-b-nested []
+(defntrack a-b-nested []
   (rand-nth
     [nil
      {:a nil}
