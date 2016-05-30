@@ -2352,10 +2352,13 @@ for checking namespaces, cf for checking individual forms."}
                                           (when (var? v)
                                             (-> v meta ::special-type))))))}))
 
-(defn runtime-infer []
-  (load-if-needed)
-  (require '[clojure.core.typed.runtime-infer])
-  ((impl/v 'clojure.core.typed.runtime-infer/infer-anns)))
+(defn runtime-infer 
+  ([] (runtime-infer *ns*))
+  ([ns]
+   (load-if-needed)
+   (require '[clojure.core.typed.runtime-infer])
+   ((impl/v 'clojure.core.typed.runtime-infer/infer-anns)
+    ns)))
 
 (defn ppinfer []
   (pprint/pprint (runtime-infer)))

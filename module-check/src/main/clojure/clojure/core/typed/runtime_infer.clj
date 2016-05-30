@@ -38,6 +38,11 @@
 #_
 (defalias PathElem
   (U '{:op :var
+       ;; namespace for which we're inferring.
+       ;; If nil, infer globally (probably for testing
+       ;; purposes only.
+       :ns (U nil Sym)
+       ;; qualified var name
        :name Sym}
      '{:op :fn-domain
        :arity Int
@@ -97,11 +102,39 @@
     :equivs (Vec Equiv)
     :path-occ (Map Path Int)})
 
-;; (U nil (Atom AliasEnv))
-(def ^:dynamic *alias-env* nil)
-;; (U nil (Atom AliasEnv))
-(def ^:dynamic *type-env* nil)
+#_
+(defalias Envs
+  (Map Sym AliasTypeEnv))
 
+(def ^:dynamic *envs*
+  (atom {}))
+
+(defn type-env []
+  (get-in @*envs* [(current-ns) :type-env]))
+
+(defn alias-env []
+  (get-in @*envs* [(current-ns) :alias-env]))
+
+(defmacro with-type-and-alias-env 
+  [t a & body]
+  `(binding [*envs* (atom
+                      {(current-ns)
+                       {:type-env ~t
+                        :alias-env ~a}})]
+     ~@body))
+
+(defn init-env []
+  {:type-env {}
+   :alias-env {}})
+
+(defn swap-env! [& args]
+  (apply swap! *envs* update (current-ns) args))
+
+(defn swap-type-env! [& args]
+  (apply swap! *envs* update-in [(current-ns) :type-env] args))
+
+(defn swap-alias-env! [& args]
+  (apply swap! *envs* update [(current-ns) :alias-env] args))
 
 (defn initial-results 
   ([] (initial-results nil []))
@@ -144,9 +177,15 @@
    := ps
    :type cls})
 
-(defn var-path [name]
-  {:op :var
-   :name name})
+(defn var-path 
+  ([name] (var-path nil name false))
+  ([ns name import?]
+   {:pre [((some-fn symbol? nil?) ns)
+          (symbol? name)]}
+   {:op :var
+    :import? import?
+    :ns ns
+    :name name}))
 
 (defn -alias [name]
   {:pre [(symbol? name)]}
@@ -269,7 +308,7 @@
                      [k (parse-type v)]))
               m)})
 
-(declare make-Union)
+(declare make-Union resolve-alias postwalk)
 
 (def ^:dynamic *type-var-scope* #{})
 
@@ -329,8 +368,7 @@
                     {:op :var
                      :name m}
 
-                    (when *alias-env*
-                      (contains? @*alias-env* m))
+                    (contains? (alias-env) m)
                     (-alias m)
 
                     :else
@@ -370,7 +408,7 @@
                             [(parse-type (second m))])
                 Sym (-class clojure.lang.Symbol [])
                 (let [res (resolve (first m))]
-                  (cond ;(contains? @*alias-env* (:name (first m)))
+                  (cond ;(contains? (alias-env) (:name (first m)))
                         ;(-alias (first m))
 
                         (class? res) (-class res (mapv parse-type (drop 1 m)))
@@ -386,12 +424,16 @@
 (def ^:dynamic *unparse-abbrev-alias* false)
 (def ^:dynamic *unparse-abbrev-class* false)
 
+(def ^:dynamic *ann-for-ns* (fn [] *ns*))
+
+(defn current-ns [] (ns-name (*ann-for-ns*)))
+
 (defn qualify-typed-symbol [s]
   (let [talias (some
                  (fn [[k v]]
                    (when (= (the-ns 'clojure.core.typed) v)
                      k))
-                 (ns-aliases *ns*))]
+                 (ns-aliases (the-ns (current-ns))))]
     (symbol (or (str talias)
                 "clojure.core.typed")
             (str s))))
@@ -404,7 +446,7 @@
     :alias (if *unparse-abbrev-alias*
              (-> (:name m) name symbol)
              (if (= (symbol (namespace (:name m)))
-                    (ns-name *ns*))
+                    (current-ns))
                (symbol (name (:name m)))
                (:name m)))
     :val (let [t (:val m)]
@@ -779,7 +821,7 @@
   ;(pprint (mapv unparse-path ps))
   (let [nme (-> ps first first :name)
         _ (assert (symbol? nme))
-        t (get @*type-env* nme)
+        t (get (type-env) nme)
         _ (assert (type? t) (pr-str nme))]
     (case (:op t)
       :poly (let [; find existing path that overlaps with any
@@ -795,7 +837,7 @@
                         new-var (make-free new-sym)]
                     ;(prn "Found no matching poly, extending with " new-sym)
                     ;; first add the variable to the parameter list
-                    (swap! *type-env* assoc-in [nme :params ps] 
+                    (swap-type-env! assoc-in [nme :params ps] 
                            ; weight of 1
                            {:weight 1 
                             :name new-sym
@@ -806,7 +848,7 @@
                 (doseq [[vps {vsym :name}] vs]
                   (let [var (make-free vsym)]
                     ;(prn "Found many matching poly, " vsym)
-                    (swap! *type-env* 
+                    (swap-type-env!
                            (fn [m]
                              (-> m
                                  (update-in [nme :params vps :weight] 
@@ -820,7 +862,7 @@
             new-var (make-free new-sym)]
         ;(prn "No polymorphic type found, creating new poly with " new-sym)
         ;; first construct a poly type that wraps the original type
-        (swap! *type-env* assoc nme
+        (swap-type-env! assoc nme
                {:op :poly
                 :params {ps {:weight 1 
                              :name new-sym
@@ -836,7 +878,7 @@
     (empty? path) (throw (Exception. "Cannot update empty path"))
     (= 1 (count path)) (let [x (nth path 0)
                              n (:name x)
-                             t (if-let [t (get @*type-env* n)]
+                             t (if-let [t (get (type-env) n)]
                                  (do
                                    #_(prn "update-path join"
                                         (map :op [t type]))
@@ -844,7 +886,7 @@
                                  type)]
                          (assert (#{:var} (:op x))
                                  (str "First element of path must be a variable " x))
-                         (swap! *type-env* assoc n t))
+                         (swap-type-env! assoc n t))
     :else 
     (let [last-pos (dec (count path))
           cur-pth (nth path last-pos)
@@ -881,11 +923,12 @@
                                               :dom (into [] (repeat (:arity cur-pth) {:op :unknown}))
                                               :rng type}]}))))))
 
+;; testing only
 (defn update-path' [env infer-results]
-  (binding [*type-env* (atom env)]
+  (with-type-and-alias-env env (alias-env)
     (doseq [{:keys [path type]} infer-results]
       (update-path path type))
-    @*type-env*))
+    (type-env)))
 
 (defn walk-type-children [v f]
   {:pre [(type? v)]
@@ -959,22 +1002,22 @@
   {:pre [(symbol? name)
          (namespace name)
          (type? t)]}
-  (swap! *alias-env* assoc name t)
+  (swap-alias-env! assoc name t)
   nil)
 
 (defn register-merge-alias [sym t]
   ;(prn "gen" sym)
-  (let [t' (get @*alias-env* sym)]
+  (let [t' (get (alias-env) sym)]
     (if t'
       (do
-        (swap! *alias-env* update sym join t')
+        (swap-alias-env! update sym join t')
         sym)
       (do
-        (swap! *alias-env* assoc sym t)
+        (swap-alias-env! assoc sym t)
         sym))))
 
 (defn register-unique-alias [sym t]
-  (let [sym (if (contains? @*alias-env* sym)
+  (let [sym (if (contains? (alias-env) sym)
               (gensym (str sym "__"))
               sym)]
     (register-alias sym t)
@@ -986,8 +1029,8 @@
          (type? a)]
    :post [(type? %)]}
   ;(prn "resolve" name)
-  ;(prn "resolve res" (@*alias-env* name))
-  (@*alias-env* name))
+  ;(prn "resolve res" ((alias-env) name))
+  (get (alias-env) name))
 
 (def kw-val? (every-pred (comp #{:val} :op)
                          (comp keyword? :val)))
@@ -1044,7 +1087,7 @@
                                  t))
                              (:types t)))
                       t)
-                  n (symbol (-> *ns* ns-name str) "alias")
+                  n (symbol (-> (current-ns) str) "alias")
                   a (register-unique-alias n t)]
               (-alias a)))]
     (postwalk t
@@ -1065,6 +1108,8 @@
                             (update :dom #(mapv do-alias %))
                             (update :rng do-alias))
                   t)))))
+
+(declare fv)
 
 (defn squash
   "Recur down an alias and
@@ -1099,7 +1144,7 @@
                          (not (alias? (resolve-alias t))))
                 ;(prn "Merging" f
                 ;     "with" (:name t))
-                (swap! *alias-env*
+                (swap-alias-env!
                        (fn [m]
                          (-> m 
                              (assoc f t)
@@ -1198,12 +1243,13 @@
   ;t
   )
 
+;; testing only
 (defmacro with-tmp-aliases [as & body]
   `(let [as# ~as]
-     (binding [*alias-env* (atom
-                             (merge (zipmap as# (repeat nil))
-                                    (when *alias-env*
-                                      @*alias-env*)))]
+     (with-type-and-alias-env 
+       (type-env)
+       (merge (zipmap as# (repeat nil))
+              (alias-env))
        ~@body)))
 
 (deftest squash-test
@@ -1213,10 +1259,12 @@
                              '{:a a2})
                        'a2 (prs
                              '{:a nil})}))]
-    (binding [*alias-env* alias-env]
+    (with-type-and-alias-env 
+      (type-env)
+      alias-env
       (is (= (squash (prs a1))
              (prs a1)))
-      (is (= @*alias-env*
+      (is (= (alias-env)
              (with-tmp-aliases '[a1 a2]
                {'a1 (prs '{:a (U nil a1)})
                 'a2 (prs a1)})))))
@@ -1227,10 +1275,12 @@
                        'a3 (prs a4)
                        'a4 (prs
                              '{:a nil})}))]
-    (binding [*alias-env* alias-env]
+    (with-type-and-alias-env 
+      (type-env)
+      alias-env
       (is (= (squash-all (prs a1))
              (prs a1)))
-      (is (= @*alias-env*
+      (is (= (alias-env)
              (with-tmp-aliases '[a1 a2]
                {'a1 (prs '{:a (U nil a1)})
                 'a2 (prs a1)
@@ -1240,12 +1290,12 @@
 
 (declare generate-tenv ppenv)
 
+;; testing only
 (defn alias-hmap-envs* [aenv tenv]
-  (binding [*type-env* (atom tenv)
-            *alias-env* (atom aenv)]
-    (doseq [[v t] @*type-env*]
-      (swap! *type-env* update v alias-hmap-type))
-    [@*type-env* @*alias-env*]))
+  (with-type-and-alias-env tenv aenv
+    (doseq [[v t] (type-env)]
+      (swap-type-env! update v alias-hmap-type))
+    [(type-env) (alias-env)]))
 
 (defn ppenv [env]
   (pprint (into {}
@@ -1771,8 +1821,8 @@
   ([results-atom vr ns]
    {:pre [(var? vr)
           (instance? clojure.lang.IAtom results-atom)]}
-   (track results-atom @vr [#_(ns-name ns) ; don't track current namespace yet
-                            {:op :var
+   (track results-atom @vr [{:op :var
+                             :ns (ns-name ns)
                              :name (impl/var->symbol vr)}])))
 
 (defmacro track-var [v]
@@ -1822,10 +1872,9 @@
              :form `(var ~vsym)
              :env (:env expr)
              :var (:var expr)}
-            {:op :const
-             :type :unknown
-             :form *ns*
-             :val *ns*
+            {:op :var
+             :var #'*ns*
+             :form `*ns*
              :env (:env expr)}]}))
 
 (defn wrap-def-init [expr vsym *ns*]
@@ -1875,26 +1924,27 @@
 
 ; generate : InferResultEnv -> TypeEnv
 (defn generate [is]
-  (binding [*alias-env* (atom {})
-            *type-env*  (atom {})]
-    (let [_ (reset! *type-env* (generate-tenv is))]
+  (with-type-and-alias-env {} {}
+    (let [_ (generate-tenv is)]
       (pprint
         (into {}
               (map (fn [[name t]]
                      ;(prn "generate" t)
                      [name (unparse-type t)]))
-              @*type-env*)))))
+              (type-env))))))
 
-; generate-tenv : InferResultEnv -> TypeEnv
-(defn generate-tenv [{:keys [infer-results equivs] :as is}]
-  (binding [*type-env* (atom {})]
-    (doseq [i infer-results]
-      (let [{:keys [path type]} i] 
-        (update-path path type)))
-    (doseq [i equivs]
-      (update-equiv (:= i)
-                    (:type i)))
-    @*type-env*))
+; generate-tenv : InferResultEnv -> nil
+(defn generate-tenv
+  "Reset and populate global type environment."
+  [{:keys [infer-results equivs] :as is}]
+  (swap-env! (constantly (init-env)))
+  (doseq [i infer-results]
+    (let [{:keys [path type]} i] 
+      (update-path path type)))
+  (doseq [i equivs]
+    (update-equiv (:= i)
+                  (:type i)))
+  nil)
 
 (defn gen-current1
   "Print the currently inferred type environment"
@@ -1905,15 +1955,14 @@
   "Turn the currently inferred type environment
   into type aliases. Also print the alias environment."
   []
-  (binding [*type-env* (atom {})
-            *alias-env* (atom {})]
-    (reset! *type-env*
-            (into {}
-                  (map (fn [[v t]]
-                         [v (alias-hmap-type t)]))
-                  (generate-tenv @results-atom)))
-    (ppenv @*type-env*)
-    (ppenv @*alias-env*)))
+  (generate-tenv @results-atom)
+  (swap-type-env!
+    #(into {}
+           (map (fn [[v t]]
+                  [v (alias-hmap-type t)]))
+           %))
+  (ppenv (type-env))
+  (ppenv (alias-env)))
 
 (declare visualize unmunge
          view-graph
@@ -2024,22 +2073,23 @@
                       :else (unmunge n))}))}})
 
 (defn populate-envs []
-  (reset! *type-env*
-          (into {}
-                (comp (map (fn [[v t]]
-                             [v (alias-hmap-type t)]))
-                      (map (fn [[v t]]
-                             [v (squash-all t)])))
-                (generate-tenv @results-atom)))
+  (generate-tenv @results-atom)
+  (swap-type-env!
+    #(into {}
+           (comp (map (fn [[v t]]
+                        [v (alias-hmap-type t)]))
+                 (map (fn [[v t]]
+                        [v (squash-all t)])))
+           %))
   nil)
 
 (defn envs-to-annotations []
   (let [tenv (into {}
                    (filter (fn [[k v]]
                              ;(prn "k" k)
-                             (= (str (ns-name *ns*))
+                             (= (str (current-ns))
                                 (namespace k))))
-                   @*type-env*)
+                   (type-env))
         tfvs (into #{}
                    (mapcat
                      (fn [t]
@@ -2047,7 +2097,7 @@
                    (vals tenv))
         as (into {}
                  (filter (comp tfvs key))
-                 @*alias-env*)]
+                 (alias-env))]
     (into
       (into [`(declare ~@(map (comp symbol name key) as))]
             (map (fn [[k v]]
@@ -2061,27 +2111,31 @@
                    (unparse-type v))))
       tenv)))
 
-(defn infer-anns []
-  (binding [*type-env* (atom {})
-            *alias-env* (atom {})]
-    (populate-envs)
-    (envs-to-annotations)))
+
+(defn infer-anns 
+  ([] (infer-anns *ns*))
+  ([ns]
+   {:pre [(or (instance? clojure.lang.Namespace ns)
+              (symbol? ns))]}
+   (binding [*ann-for-ns* #(or (some-> ns the-ns) *ns*)]
+     (with-type-and-alias-env {} {}
+       (populate-envs)
+       (envs-to-annotations)))))
 
 (defn gen-current3 
   "Turn the currently inferred type environment
   into type aliases. Also print the alias environment."
   []
-  (binding [*type-env* (atom {})
-            *alias-env* (atom {})]
+  (with-type-and-alias-env {} {}
     (populate-envs)
     (visualize
       {:top-levels 
        #{;`take-map
-        ; `a-b-nested
-        ;'clojure.core.typed.test.mini-occ/parse-exp
-        'clojure.core.typed.test.mini-occ/parse-prop
-        ;`mymapv
-        }
+         ; `a-b-nested
+         ;'clojure.core.typed.test.mini-occ/parse-exp
+         'clojure.core.typed.test.mini-occ/parse-prop
+         ;`mymapv
+         }
        :viz-args {:options (-> premade-configs :options :projector)
                   :node->descriptor (-> premade-configs
                                         :node->descriptor
@@ -2164,13 +2218,13 @@
                 (assoc g v fvs))
               g))
           {}
-          @*type-env*)
+          (type-env))
 
         _ (prn "relevant" @relevant)
 
         alias-env-edge-map
         (loop [g {}
-               wl (select-keys @*alias-env* @relevant)]
+               wl (select-keys (alias-env) @relevant)]
           (if (empty? wl)
             g
             (let [[v t] (first wl)
@@ -2179,7 +2233,7 @@
               (recur (assoc g v fvs)
                      (merge
                        (dissoc wl v)
-                       (select-keys @*alias-env*
+                       (select-keys (alias-env)
                                     (set/difference
                                       (set fvs)
                                       (set (keys g))
@@ -2192,7 +2246,7 @@
         nodes (into #{}
                     (map (fn [[v t]]
                            (with-meta v {:type t})))
-                    (select-keys (merge @*alias-env* @*type-env*)
+                    (select-keys (merge (alias-env) (type-env))
                                  (keys edge-map)))]
     (mapply view-graph 
             nodes
