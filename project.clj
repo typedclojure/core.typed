@@ -20,6 +20,8 @@
                  [org.clojure/math.combinatorics "0.1.1" :exclusions [org.clojure/clojure]]
                  [org.clojure/tools.namespace "0.2.11"]
                  [org.clojure/core.cache "0.6.4"]
+                 [com.gfredericks/test.chuck "0.2.6"]
+                 [org.clojure/test.check "0.9.0"]
                  [rhizome "0.2.5"]
                  ]
   ;; for tools.reader 0.9.2

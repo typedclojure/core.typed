@@ -6,7 +6,12 @@
             [clojure.string :as str]
             [clojure.core.typed.ast-utils :as ast]
             [clojure.core.typed.current-impl :as impl]
-            [clojure.core.typed.debug :refer [dbg]]))
+            [clojure.core.typed.debug :refer [dbg]]
+            [clojure.math.combinatorics :as comb]
+            [com.gfredericks.test.chuck :as chuck]
+            [com.gfredericks.test.chuck.clojure-test :refer [checking]]
+            [com.gfredericks.test.chuck.generators :as gen']
+            [clojure.test.check.generators :as gen]))
 
 #_
 (defalias Type
@@ -109,32 +114,54 @@
 (def ^:dynamic *envs*
   (atom {}))
 
-(defn type-env []
-  (get-in @*envs* [(current-ns) :type-env]))
+(declare current-ns)
 
-(defn alias-env []
-  (get-in @*envs* [(current-ns) :alias-env]))
+(defn get-env [env] 
+  {:pre [(map? env)]}
+  (get env (current-ns)))
+
+(defn type-env 
+  ;([] (type-env @*envs*))
+  ([env] (get (get-env env) :type-env)))
+
+(defn alias-env 
+  ;([] (alias-env @*envs*))
+  ([env] (get (get-env env) :alias-env)))
 
 (defmacro with-type-and-alias-env 
   [t a & body]
-  `(binding [*envs* (atom
-                      {(current-ns)
-                       {:type-env ~t
-                        :alias-env ~a}})]
+  `(binding [*envs* 
+             (atom {(current-ns)
+                    {:type-env ~t
+                     :alias-env ~a}})]
      ~@body))
 
 (defn init-env []
-  {:type-env {}
-   :alias-env {}})
+  {}
+  #_{(current-ns)
+   {:type-env {}
+    :alias-env {}}})
 
-(defn swap-env! [& args]
-  (apply swap! *envs* update (current-ns) args))
+(defn reset-env! [env-atom val]
+  (swap! env-atom assoc (current-ns) val))
 
-(defn swap-type-env! [& args]
-  (apply swap! *envs* update-in [(current-ns) :type-env] args))
+(defn update-env [env & args]
+  (apply update env (current-ns) args))
 
-(defn swap-alias-env! [& args]
-  (apply swap! *envs* update [(current-ns) :alias-env] args))
+(defn swap-env! [env-atom & args]
+  (apply swap! env-atom update-env args))
+
+(defn update-type-env [env & args]
+  (apply update-in env [(current-ns) :type-env] args))
+
+(defn swap-type-env! [env-atom & args]
+  (apply swap! env-atom update-type-env args))
+
+(defn update-alias-env [env & args]
+  (apply update-in env [(current-ns) :alias-env] args))
+
+(defn swap-alias-env! [env-atom & args]
+  (apply swap! env-atom update-alias-env args))
 
 (defn initial-results 
   ([] (initial-results nil []))
@@ -312,16 +339,16 @@
 
 (def ^:dynamic *type-var-scope* #{})
 
-(defn keysets 
-  ([t] (keysets t #{}))
-  ([t seen]
+(defn keysets
+  ([env t] (keysets env t #{}))
+  ([env t seen]
    {:post [(set? %)
            (every? set? %)]}
    ;(prn "keysets" (unparse-type t))
    (let [keysets
          (fn 
-           ([t] (keysets t seen))
-           ([t seen] (keysets t seen)))]
+           ([t] (keysets env t seen))
+           ([t seen] (keysets env t seen)))]
      (case (:op t)
        :HMap #{(set (keys (:map t)))}
        :union (into #{}
@@ -329,7 +356,7 @@
                     (:types t))
        :alias (if (seen t)
                 #{}
-                (keysets (resolve-alias t)
+                (keysets (resolve-alias env t)
                          (conj seen t)))
        #{}))))
 
@@ -368,7 +395,7 @@
                     {:op :var
                      :name m}
 
-                    (contains? (alias-env) m)
+                    (contains? (alias-env @*envs*) m)
                     (-alias m)
 
                     :else
@@ -408,7 +435,7 @@
                             [(parse-type (second m))])
                 Sym (-class clojure.lang.Symbol [])
                 (let [res (resolve (first m))]
-                  (cond ;(contains? (alias-env) (:name (first m)))
+                  (cond ;(contains? (alias-env @*envs*) (:name (first m)))
                         ;(-alias (first m))
 
                         (class? res) (-class res (mapv parse-type (drop 1 m)))
@@ -445,7 +472,7 @@
   (case (:op m)
     :alias (if *unparse-abbrev-alias*
              (-> (:name m) name symbol)
-             (if (= (symbol (namespace (:name m)))
+             (if (= (some-> (namespace (:name m)) symbol)
                     (current-ns))
                (symbol (name (:name m)))
                (:name m)))
@@ -500,7 +527,7 @@
     (assert nil (str "No unparse-type case: " m))))
 
 (defn unp [t]
-  (pprint (unparse-type t)))
+  (unparse-type t))
 
 (def ^:dynamic unparse-type unparse-type')
 
@@ -628,7 +655,7 @@
                                          v2 :name
                                          t2 :types}]
                                      ;; throw away v2
-                                     (prn "Merging:" w1 w2)
+                                     ;(prn "Merging:" w1 w2)
                                      {:weight (+ w1 w2)
                                       :name v1
                                       :types (into t1 t2)})
@@ -725,103 +752,124 @@
               (flatten-unions args)))))
 
 (deftest join-test
-  (is (=
-       (join
-         (prs
-           '{:E (quote :false)})
-         (prs
-           '{:args (Vec '{:name clojure.lang.Symbol, :E ':var}),
-             :fun
-             (U
-              '{:E ':lambda,
-                :arg clojure.lang.Symbol,
-                :body '{:name clojure.lang.Symbol, :E ':var},
-                :arg-type
-                '{:T ':intersection, :types clojure.lang.PersistentHashSet}}
-              '{:name clojure.lang.Symbol, :E ':var}),
-             :E ':app}))
-       (prs
-         (U
-          '{:E ':false}
-          '{:args (Vec '{:name clojure.lang.Symbol, :E ':var}),
-            :fun
-            (U
-             '{:E ':lambda,
-               :arg clojure.lang.Symbol,
-               :body '{:name clojure.lang.Symbol, :E ':var},
-               :arg-type
-               '{:T ':intersection, :types clojure.lang.PersistentHashSet}}
-             '{:name clojure.lang.Symbol, :E ':var}),
-            :E ':app}))))
-  (is 
-    (=
-      (join*
-        (prs (Vec '{:a ?}))
-        (prs (Vec '{:b ?})))
-      (prs (Vec (U '{:a ?} '{:b ?})))))
-  (is 
-    (= 
-      (join*
-        (parse-type ''{:a ?})
-        (parse-type ''{:a [? :-> ?]})
-        (parse-type ''{:a [? :-> Long]})
-        (parse-type ''{:a [Long :-> Long]}))
-      (parse-type ''{:a [Long :-> Long]})))
-  (is
-    (= 
-      (join*
-        (parse-type ''{:f ?, :a java.lang.Long}) 
-        (parse-type ''{:f [[? :-> java.lang.Long] :-> ?], :a ?}))
-      (parse-type ''{:f [[? :-> java.lang.Long] :-> ?], :a java.lang.Long})))
-  (is (=
-       (join (parse-type '['{:f ?, :a java.lang.Long} :-> '{:b ?, :f clojure.lang.IFn, :a ?}])
-             (parse-type '['{:f [[? :-> java.lang.Long] :-> ?], :a ?} :-> ?]))
-       (parse-type
-         '['{:f [[? :-> java.lang.Long] :-> ?], :a java.lang.Long}
-           :->
-           '{:b ?, :f clojure.lang.IFn, :a ?}])))
-  (is (= (join (parse-type '['{:f ?, :a java.lang.Long} :-> '{:b ?, :f clojure.lang.IFn, :a ?}])
-               (parse-type '['{:f [[? :-> java.lang.Long] :-> ?], :a ?} :-> ?]))
-         (parse-type
-           '['{:f [[? :-> java.lang.Long] :-> ?], :a java.lang.Long}
-             :->
-             '{:b ?, :f clojure.lang.IFn, :a ?}])))
+  (checking
+    "join maps"
+    5
+    [ts (gen/shuffle
+          [(prs
+             '{:E ':false})
+           (prs
+             '{:args (Vec '{:name clojure.lang.Symbol, :E ':var}),
+               :fun
+               (U
+                '{:E ':lambda,
+                  :arg clojure.lang.Symbol,
+                  :body '{:name clojure.lang.Symbol, :E ':var},
+                  :arg-type
+                  '{:T ':intersection, :types clojure.lang.PersistentHashSet}}
+                '{:name clojure.lang.Symbol, :E ':var}),
+               :E ':app})])]
 
-  (is (= (join (parse-type
-                 '(U '{:f [? :-> java.lang.Long], :a ?} 
-                     '{:f clojure.lang.IFn}))
-               (parse-type 
-                 ''{:f [? :-> java.lang.Long]}))
-         (parse-type
-           '(U '{:f [? :-> java.lang.Long], :a ?} 
-               '{:f [? :-> java.lang.Long]}))))
-  (is (= 
-        (join
-          (parse-type ''{:f [[java.lang.Long :-> java.lang.Long] :-> ?]})
-          (parse-type ''{:f [[java.lang.Long :-> java.lang.Long] :-> java.lang.Long]}))
-        (parse-type ''{:f [[java.lang.Long :-> java.lang.Long] :-> java.lang.Long]})))
-  )
+    (is (= (apply join ts)
+           (prs
+             (U
+              '{:E ':false}
+              '{:args (Vec '{:name clojure.lang.Symbol, :E ':var}),
+                :fun
+                (U
+                 '{:E ':lambda,
+                   :arg clojure.lang.Symbol,
+                   :body '{:name clojure.lang.Symbol, :E ':var},
+                   :arg-type
+                   '{:T ':intersection, :types clojure.lang.PersistentHashSet}}
+                 '{:name clojure.lang.Symbol, :E ':var}),
+                :E ':app})))))
+  (checking
+    "inner vec"
+    5
+    [ts (gen/shuffle
+          [(prs (Vec '{:a ?}))
+           (prs (Vec '{:b ?}))])]
+    (is 
+      (= (apply join* ts)
+         (prs (Vec (U '{:a ?} '{:b ?}))))))
+  (checking 
+    "functions"
+    30
+    [ts (gen/shuffle
+          [(prs '{:a ?})
+           (prs '{:a [? :-> ?]})
+           (prs '{:a [? :-> Long]})
+           (prs '{:a [Long :-> Long]})])]
+    (= (apply join* ts)
+       (prs '{:a [Long :-> Long]})))
+  (checking
+    "HOF"
+    5
+    [ts (gen/shuffle
+          [(prs '{:f ?, :a java.lang.Long}) 
+           (prs '{:f [[? :-> java.lang.Long] :-> ?], :a ?})])]
+    (is
+      (= (apply join* ts)
+         (prs '{:f [[? :-> java.lang.Long] :-> ?], :a java.lang.Long}))))
+  (checking
+    "map return"
+    5
+    [ts (gen/shuffle
+          [(prs ['{:f ?, :a java.lang.Long} :-> '{:b ?, :f clojure.lang.IFn, :a ?}])
+           (prs ['{:f [[? :-> java.lang.Long] :-> ?], :a ?} :-> ?])])]
+    (is (= (apply join ts)
+           (prs
+             ['{:f [[? :-> java.lang.Long] :-> ?], :a java.lang.Long}
+              :->
+              '{:b ?, :f clojure.lang.IFn, :a ?}]))))
+  (checking
+    "join union"
+    5
+    [ts (gen/shuffle
+          [(prs
+             (U '{:f [? :-> java.lang.Long], :a ?} 
+                '{:f clojure.lang.IFn}))
+           (prs 
+             '{:f [? :-> java.lang.Long]})])]
+     (is (= (apply join ts)
+            (prs
+              (U '{:f [? :-> java.lang.Long], :a ?} 
+                 '{:f [? :-> java.lang.Long]})))))
+  (checking
+    "join fn in map"
+    5
+    [ts (gen/shuffle
+          [(prs '{:f [[java.lang.Long :-> java.lang.Long] :-> ?]})
+           (prs '{:f [[java.lang.Long :-> java.lang.Long] :-> java.lang.Long]})])]
+    (is (= (apply join ts)
+           (prs '{:f [[java.lang.Long :-> java.lang.Long] :-> java.lang.Long]})))))
 
 (declare update-path)
 
-(defn update-var-down-paths [ps new-var]
+(defn update-var-down-paths [envs ps new-var]
+  {:pre [(map? envs)]
+   :post [(map? %)]}
   #_
   (doseq [p ps]
-    (update-path p new-var)))
+    (update-path p new-var))
+  envs)
 
-(defn update-equiv [ps tpe]
-  {:pre [(set? ps)
+(defn update-equiv [env ps tpe]
+  {:pre [(map? env)
+         (set? ps)
          (= 2 (count ps))
          (every? vector? ps)
          (every? (comp #{:var} :op first) ps)
          ; vars must be the same
          (apply = (map (comp :name :op first) ps))
-         (keyword? tpe)]}
+         (keyword? tpe)]
+   :post [(map? %)]}
   ;(prn "update-equiv")
   ;(pprint (mapv unparse-path ps))
   (let [nme (-> ps first first :name)
         _ (assert (symbol? nme))
-        t (get (type-env) nme)
+        t (get (type-env env) nme)
         _ (assert (type? t) (pr-str nme))]
     (case (:op t)
       :poly (let [; find existing path that overlaps with any
@@ -834,59 +882,70 @@
               (case (count vs)
                 ;; no matches
                 0 (let [new-sym (gensym "var")
-                        new-var (make-free new-sym)]
-                    ;(prn "Found no matching poly, extending with " new-sym)
-                    ;; first add the variable to the parameter list
-                    (swap-type-env! assoc-in [nme :params ps] 
-                           ; weight of 1
-                           {:weight 1 
-                            :name new-sym
-                            :types #{tpe}})
-                    ;; then update the variable down each path
-                    (update-var-down-paths ps new-var))
+                        new-var (make-free new-sym)
+                        env ;(prn "Found no matching poly, extending with " new-sym)
+                        ;; first add the variable to the parameter list
+                        (-> env
+                            (update-type-env assoc-in [nme :params ps] 
+                                             ; weight of 1
+                                             {:weight 1 
+                                              :name new-sym
+                                              :types #{tpe}})
+                            ;; then update the variable down each path
+                            (update-var-down-paths ps new-var))]
+                    env)
                 ;; process results
-                (doseq [[vps {vsym :name}] vs]
-                  (let [var (make-free vsym)]
-                    ;(prn "Found many matching poly, " vsym)
-                    (swap-type-env!
-                           (fn [m]
-                             (-> m
-                                 (update-in [nme :params vps :weight] 
-                                            (fn [i]
-                                              ;(prn "adding i" i)
-                                              (inc i)))
-                                 (update-in [nme :params vps :types] conj tpe))))
-                    ;; update var down each path
-                    (update-var-down-paths ps var)))))
+                (reduce 
+                  (fn [env [vps {vsym :name}]]
+                    (let [var (make-free vsym)
+                          env 
+                          (-> env
+                              (update-type-env (fn [m]
+                                                 (-> m
+                                                     (update-in [nme :params vps :weight] 
+                                                                (fn [i]
+                                                                  ;(prn "adding i" i)
+                                                                  (inc i)))
+                                                     (update-in [nme :params vps :types] conj tpe))))
+                              ;(prn "Found many matching poly, " vsym)
+                              ;; update var down each path
+                              (update-var-down-paths ps var))]
+                      env))
+                  env
+                  vs))
       (let [new-sym (gensym "var")
-            new-var (make-free new-sym)]
-        ;(prn "No polymorphic type found, creating new poly with " new-sym)
-        ;; first construct a poly type that wraps the original type
-        (swap-type-env! assoc nme
-               {:op :poly
-                :params {ps {:weight 1 
-                             :name new-sym
-                             :types #{tpe}}} ; weight of 1
-                :type t})
-        ;; then update the var down each path
-        (update-var-down-paths ps new-var)))))
+            new-var (make-free new-sym)
+            env (->
+                  ;(prn "No polymorphic type found, creating new poly with " new-sym)
+                  ;; first construct a poly type that wraps the original type
+                  (update-type-env assoc nme
+                                   {:op :poly
+                                    :params {ps {:weight 1 
+                                                 :name new-sym
+                                                 :types #{tpe}}} ; weight of 1
+                                    :type t})
+                  ;; then update the var down each path
+                  (update-var-down-paths ps new-var))]
+        env)))))
 
 ; update-path : Path Type -> AliasTypeEnv
-(defn update-path [path type]
-  {:pre [(vector? path)]}
+(defn update-path [env path type]
+  {:pre [(map? env)
+         (vector? path)]}
+  ;; keep this atom around
   (cond 
     (empty? path) (throw (Exception. "Cannot update empty path"))
     (= 1 (count path)) (let [x (nth path 0)
                              n (:name x)
-                             t (if-let [t (get (type-env) n)]
+                             t (if-let [t (get (type-env env) n)]
                                  (do
                                    #_(prn "update-path join"
-                                        (map :op [t type]))
+                                          (map :op [t type]))
                                    (join t type))
                                  type)]
                          (assert (#{:var} (:op x))
                                  (str "First element of path must be a variable " x))
-                         (swap-type-env! assoc n t))
+                         (update-type-env env assoc n t))
     :else 
     (let [last-pos (dec (count path))
           cur-pth (nth path last-pos)
@@ -896,39 +955,37 @@
       (case (:op cur-pth)
         :var (throw (Exception. "Var path element must only be first path element"))
         :key (let [{:keys [keys key]} cur-pth]
-               (update-path nxt-pth
-                            {:op :HMap
-                             :map (assoc (zipmap keys (repeat {:op :unknown}))
-                                         key type)}))
-        :set-entry (update-path nxt-pth
-                                (-class clojure.lang.IPersistentSet [type]))
-        :seq-entry (update-path nxt-pth
-                                (-class clojure.lang.ISeq [type]))
-        :transient-vector-entry (update-path nxt-pth
-                                             (-class clojure.lang.ITransientVector [type]))
-        :index (update-path nxt-pth
-                            (-class clojure.lang.IPersistentVector [type]))
+               (recur env nxt-pth
+                      {:op :HMap
+                       :map (assoc (zipmap keys (repeat {:op :unknown}))
+                                   key type)}))
+        :set-entry (recur env nxt-pth (-class clojure.lang.IPersistentSet [type]))
+        :seq-entry (recur env nxt-pth (-class clojure.lang.ISeq [type]))
+        :transient-vector-entry (recur env nxt-pth (-class clojure.lang.ITransientVector [type]))
+        :index (recur env nxt-pth (-class clojure.lang.IPersistentVector [type]))
         :fn-domain (let [{:keys [arity position]} cur-pth]
-                     (update-path nxt-pth
-                                  {:op :IFn
-                                   :arities [{:op :IFn1
-                                              :dom (assoc (into [] 
-                                                                (repeat (:arity cur-pth) {:op :unknown}))
-                                                          position type)
-                                              :rng {:op :unknown}}]}))
+                     (recur env nxt-pth
+                            {:op :IFn
+                             :arities [{:op :IFn1
+                                        :dom (assoc (into [] 
+                                                          (repeat (:arity cur-pth) {:op :unknown}))
+                                                    position type)
+                                        :rng {:op :unknown}}]}))
         :fn-range (let [{:keys [arity]} cur-pth]
-                     (update-path nxt-pth
-                                  {:op :IFn
-                                   :arities [{:op :IFn1
-                                              :dom (into [] (repeat (:arity cur-pth) {:op :unknown}))
-                                              :rng type}]}))))))
+                    (recur env nxt-pth
+                           {:op :IFn
+                            :arities [{:op :IFn1
+                                       :dom (into [] (repeat (:arity cur-pth) {:op :unknown}))
+                                       :rng type}]}))))))
 
 ;; testing only
 (defn update-path' [env infer-results]
-  (with-type-and-alias-env env (alias-env)
-    (doseq [{:keys [path type]} infer-results]
-      (update-path path type))
-    (type-env)))
+  (let [env (reduce 
+              (fn [env {:keys [path type]}]
+                (update-path env path type))
+              env
+              infer-results)]
+    (type-env env)))
 
 (defn walk-type-children [v f]
   {:pre [(type? v)]
@@ -998,39 +1055,28 @@
   "Shorthand for (walk ast identity f reversed?)"
   ([ast f] (walk ast identity f)))
 
-(defn register-alias [name t]
-  {:pre [(symbol? name)
-         (namespace name)
-         (type? t)]}
-  (swap-alias-env! assoc name t)
-  nil)
+(defn register-alias [env name t]
+  {:pre [(map? env)
+         (symbol? name)
+         (type? t)]
+   :post [(map? %)]}
+  ;(prn "register" name)
+  (update-alias-env env assoc name t))
 
-(defn register-merge-alias [sym t]
-  ;(prn "gen" sym)
-  (let [t' (get (alias-env) sym)]
-    (if t'
-      (do
-        (swap-alias-env! update sym join t')
-        sym)
-      (do
-        (swap-alias-env! assoc sym t)
-        sym))))
-
-(defn register-unique-alias [sym t]
-  (let [sym (if (contains? (alias-env) sym)
+(defn register-unique-alias [env sym t]
+  (let [sym (if (contains? (alias-env env) sym)
               (gensym (str sym "__"))
               sym)]
-    (register-alias sym t)
-    sym))
+    [sym (register-alias env sym t)]))
 
-(defn resolve-alias [{:keys [name] :as a}]
-  {:pre [(alias? a)
+(defn resolve-alias [env {:keys [name] :as a}]
+  {:pre [(map? env)
+         (alias? a)
          (symbol? name)
          (type? a)]
    :post [(type? %)]}
-  ;(prn "resolve" name)
-  ;(prn "resolve res" ((alias-env) name))
-  (get (alias-env) name))
+  ;(prn "resolve-alias" name (keys (alias-env env)))
+  (get (alias-env env) name))
 
 (def kw-val? (every-pred (comp #{:val} :op)
                          (comp keyword? :val)))
@@ -1072,101 +1118,131 @@
   "Recur up from the leaves of a type and
   replace HMaps and unions with fresh type
   aliases. Also registers these type variables
-  in *alias-env*."
-  [t]
-  (letfn [(do-alias [t]
-            (let [t (case (:op t)
-                      :union
-                      ;; we want every level of types to be an alias,
-                      ;; since all members of a union are at the same
-                      ;; level, call them the same thing.
-                      (make-Union
-                        (map (fn [t]
-                               (if (alias? t)
-                                 (resolve-alias t)
-                                 t))
-                             (:types t)))
+  in alias-env."
+  [init-env t]
+  (let [env-atom (atom init-env)]
+    (letfn [(do-alias [t]
+              (let [t (case (:op t)
+                        :union
+                        ;; we want every level of types to be an alias,
+                        ;; since all members of a union are at the same
+                        ;; level, call them the same thing.
+                        (make-Union
+                          (map (fn [t]
+                                 (if (alias? t)
+                                   (resolve-alias @env-atom t)
+                                   t))
+                               (:types t)))
+                        t)
+                    n (symbol (-> (current-ns) str) "alias")
+                    a-atom (atom nil)
+                    _ (swap! env-atom 
+                             (fn [env]
+                               (let [[a env] (register-unique-alias env n t)]
+                                 (reset! a-atom a)
+                                 env)))
+                    a @a-atom
+                    _ (assert a)]
+                (-alias a)))]
+      [(postwalk t
+         (fn [t]
+           (case (:op t)
+             :HMap (do-alias t)
+             :union (if (and (seq (:types t))
+                             (not-every?
+                               (fn [t]
+                                 (case (:op t)
+                                   :val true
+                                   :class (empty? (:args t))
+                                   false))
+                               (:types t)))
+                      (do-alias t)
                       t)
-                  n (symbol (-> (current-ns) str) "alias")
-                  a (register-unique-alias n t)]
-              (-alias a)))]
-    (postwalk t
-              (fn [t]
-                (case (:op t)
-                  :HMap (do-alias t)
-                  :union (if (and (seq (:types t))
-                                  (not-every?
-                                    (fn [t]
-                                      (case (:op t)
-                                        :val true
-                                        :class (empty? (:args t))
-                                        false))
-                                    (:types t)))
-                           (do-alias t)
-                           t)
-                  :IFn1 (-> t
-                            (update :dom #(mapv do-alias %))
-                            (update :rng do-alias))
-                  t)))))
+             :IFn1 (-> t
+                       (update :dom #(mapv do-alias %))
+                       (update :rng do-alias))
+             t)))
+       @env-atom])))
 
 (declare fv)
+
+(defn try-merge-aliases [env f t]
+  {:pre [(map? env)
+         (symbol? f)
+         (alias? t)]
+   :post [(map? env)]}
+  ;(prn "Try merging" f
+  ;     "with" (:name t))
+  (let [tks (keysets env t)
+        fks (keysets env (-alias f))]
+    (if (and (seq (set/intersection tks fks))
+             (not (alias? (resolve-alias env (-alias f))))
+             (not (alias? (resolve-alias env t))))
+      (let [;_ (prn "Merging" f
+            ;       "with" (:name t))
+            ]
+        (update-alias-env env
+                          (fn [m]
+                            (-> m 
+                                (assoc f t)
+                                (update (:name t)
+                                        (fn [oldt]
+                                          {:pre [(type? oldt)]}
+                                          (join
+                                            (get m f)
+                                            (subst-alias oldt (-alias f) t))))))))
+      env)))
 
 (defn squash
   "Recur down an alias and
   merge types based on their keysets.
   Also merge back up if possible."
-  [t]
-  {:pre [(alias? t)]
-   :post [(alias? t)]}
-  (loop [worklist [t]
+  [env t]
+  {:pre [(map? env)
+         (alias? t)]
+   :post [(map? %)]}
+  ;(prn "top squash aliases" (keys (alias-env env))
+  ;     #_(fv env t true))
+  (loop [env env
+         worklist [t]
          ;; aliases we're done with
          done #{}]
     (assert (vector? worklist))
     (assert (set? done))
-    ;(prn "worklist" worklist)
+    ;(prn "worklist" (mapv unp worklist))
     ;(prn "done" done)
     (if (empty? worklist)
-      t
+      env
       (let [t (nth worklist 0)
             _ (assert (alias? t) [t (class t)])
-            fvs (fv (resolve-alias t))]
-        ;; find all keysets for downstream aliases
-        ;; and merge 
-        (when-not (done t)
-          (doseq [f (concat
+            ;_ (prn "squash" (unp t))
+            fvs (fv env (resolve-alias env t))
+            ;; find all keysets for downstream (and upstream) aliases
+            ;; and merge.
+            env (if-not (done t)
+                  (reduce 
+                    (fn [env f]
+                      (try-merge-aliases env f t))
+                    env
+                    (concat
                       fvs
                       ;; also try and merge with parents
-                      (map :name (disj done t)))]
-            (let [tks (keysets t)
-                  fks (keysets (-alias f))]
-              (when (and (seq (set/intersection tks fks))
-                         (not (alias? (resolve-alias (-alias f))))
-                         (not (alias? (resolve-alias t))))
-                ;(prn "Merging" f
-                ;     "with" (:name t))
-                (swap-alias-env!
-                       (fn [m]
-                         (-> m 
-                             (assoc f t)
-                             (update (:name t)
-                                     (fn [oldt]
-                                       (join
-                                         (get m f)
-                                         (subst-alias oldt (-alias f) t)))))))))))
-        (recur (into (subvec worklist 1)
+                      (map :name (disj done t))))
+                  env)]
+        (recur env
+               (into (subvec worklist 1)
                      (set/difference
                        (into #{}
                              (map -alias)
-                             (fv (resolve-alias t)))
+                             (fv env (resolve-alias env t)))
                        done
                        #{t}))
-               (conj done t)))))
-  t)
+               (conj done t))))))
 
-(defn simple-alias? [a]
-  (let [a-res (resolve-alias a)
-        res (not (contains? (set (fv a-res true)) (:name a)))]
-    (prn "simple-alias?" (:name a) res)
+(defn simple-alias? [env a]
+  (let [a-res (resolve-alias env a)
+        res (not (contains? (set (fv env a-res true)) (:name a)))]
+    ;(prn "simple-alias?" (:name a) res)
     res))
 
 (defn follow-aliases
@@ -1174,110 +1250,114 @@
   Also delete unnecessary aliases for simple
   types.
   Also inline aliases if they are simple enough."
-  [t]
+  [env t]
   {:pre [(type? t)]
-   :post [(type? %)]}
+   :post [(let [[t env] %]
+            (and (type? t)
+                 (map? env)))]}
   ;; rename aliases directly in type we are
-  ;; returning.
+  ;; returning. Never changes env.
   (let [t (reduce
             (fn [t f]
               (loop [real (-alias f)
                      seen #{}]
-                (let [real-res (resolve-alias real)]
-                (assert (alias? real))
-                (cond
-                  ;; infinite loop, give up
-                  (seen real) t
-
-                  (alias? real-res)
-                  (recur real-res (conj seen real))
-
-                  :else (subst-alias t (-alias f) 
-                                     ;; if the new alias is simple, just inline.
-                                     (if (simple-alias? real)
-                                       real-res
-                                       real))))))
-            t
-            (fv t))
-        ;; follow downstream aliases
-        _ (doseq [f (fv t true)]
-            ;; start at root f and rename
-            ;; each alias in f to the non-redundant
-            ;; alias.
-            (doseq [inner (fv (resolve-alias (-alias f)))]
-              (loop [real (-alias inner)
-                     seen #{}]
-                (let [real-res (resolve-alias real)]
-                  ;(prn "following" inner)
-                  ;(prn "real" real)
-                  ;(prn "res real" (resolve-alias real))
+                (let [real-res (resolve-alias env real)]
                   (assert (alias? real))
                   (cond
                     ;; infinite loop, give up
-                    (seen real) nil
+                    (seen real) t
 
                     (alias? real-res)
                     (recur real-res (conj seen real))
 
-                    :else (register-alias f
-                                          (subst-alias
-                                            (resolve-alias (-alias f))
-                                            (-alias inner)
-                                            ;; if the new alias is simple, just inline.
-                                            (if (simple-alias? real)
-                                              real-res
-                                              real))))))))]
-    t))
+                    :else (subst-alias t (-alias f) 
+                                       ;; if the new alias is simple, just inline.
+                                       (if (simple-alias? env real)
+                                         real-res
+                                         real))))))
+            t
+            (fv env t))
+        ;; follow downstream aliases
+        env (reduce 
+              (fn [env f]
+                ;; start at root f and rename
+                ;; each alias in f to the non-redundant
+                ;; alias.
+                (reduce 
+                  (fn [env inner]
+                    (loop [real (-alias inner)
+                           seen #{}]
+                      (let [real-res (resolve-alias env real)]
+                        ;(prn "following" inner)
+                        ;(prn "real" real)
+                        ;(prn "res real" (resolve-alias env real))
+                        (assert (alias? real))
+                        (cond
+                          ;; infinite loop, give up
+                          (seen real) env
+
+                          (alias? real-res)
+                          (recur real-res (conj seen real))
+
+                          :else (register-alias env f
+                                                (subst-alias
+                                                  (resolve-alias env (-alias f))
+                                                  (-alias inner)
+                                                  ;; if the new alias is simple, just inline.
+                                                  (if (simple-alias? env real)
+                                                    real-res
+                                                    real)))))))
+                  env
+                  (fv env (resolve-alias env (-alias f)))))
+              env
+              (fv env t true))]
+    [t env]))
 
 (defn squash-all 
   "Jump past redundant aliases that
   just name another alias.
   Also make recursive types when possible."
-  [t]
-  ;(prn "squash-all start" t)
-  (doseq [f (fv t)]
-    (squash (-alias f)))
-  ;(prn "squash-all done" t)
-  ;; rename types avoiding redundant type aliases
-  (follow-aliases t)
-  ;t
-  )
+  [env t]
+  {:pre [(map? env)]
+   :post [(let [[t env] %]
+            (and (type? t)
+                 (map? env)))]}
+  ;(prn "squash-all start" (unparse-type t))
+  (let [fvs (set (fv env t))
+        ;_ (prn "free aliases" (unp t) fvs
+        ;       (keys (alias-env env)))
+        env (reduce squash env (map -alias fvs))]
+    ;; rename types avoiding redundant type aliases
+    (follow-aliases env t)))
+
+(defn add-tmp-aliases [env as]
+  (update-alias-env env merge (zipmap as (repeat nil))))
 
 ;; testing only
-(defmacro with-tmp-aliases [as & body]
-  `(let [as# ~as]
-     (with-type-and-alias-env 
-       (type-env)
-       (merge (zipmap as# (repeat nil))
-              (alias-env))
-       ~@body)))
+(defmacro with-tmp-aliases [env as & body]
+  `(binding [*envs* (atom (add-tmp-aliases ~env ~as))] 
+     ~@body))
 
 (deftest squash-test
-  (let [alias-env (with-tmp-aliases '[a1 a2]
-                    (atom
-                      {'a1 (prs 
-                             '{:a a2})
-                       'a2 (prs
-                             '{:a nil})}))]
+  (let [env (init-env)
+        env (update-alias-env env merge
+                              (with-tmp-aliases env '[a1 a2]
+                                {'a1 (prs '{:a a2})
+                                 'a2 (prs '{:a nil})}))]
+    (binding [*envs* (atom env)]
+      (is (= (alias-env (squash env (prs a1)))
+             {'a1 (prs '{:a (U nil a1)})
+              'a2 (prs a1)}))))
+#_
+  (let [aenv (with-tmp-aliases '[a1 a2 a3 a4]
+               {'a1 (prs a2)
+                'a2 (prs '{:a a3})
+                'a3 (prs a4)
+                'a4 (prs
+                      '{:a nil})})]
     (with-type-and-alias-env 
-      (type-env)
-      alias-env
-      (is (= (squash (prs a1))
-             (prs a1)))
-      (is (= (alias-env)
-             (with-tmp-aliases '[a1 a2]
-               {'a1 (prs '{:a (U nil a1)})
-                'a2 (prs a1)})))))
-  (let [alias-env (with-tmp-aliases '[a1 a2 a3 a4]
-                    (atom
-                      {'a1 (prs a2)
-                       'a2 (prs '{:a a3})
-                       'a3 (prs a4)
-                       'a4 (prs
-                             '{:a nil})}))]
-    (with-type-and-alias-env 
-      (type-env)
-      alias-env
+      (type-env @*envs*)
+      aenv
       (is (= (squash-all (prs a1))
              (prs a1)))
       (is (= (alias-env)
@@ -1290,13 +1370,6 @@
 
 (declare generate-tenv ppenv)
 
-;; testing only
-(defn alias-hmap-envs* [aenv tenv]
-  (with-type-and-alias-env tenv aenv
-    (doseq [[v t] (type-env)]
-      (swap-type-env! update v alias-hmap-type))
-    [(type-env) (alias-env)]))
-
 (defn ppenv [env]
   (pprint (into {}
                 (map (fn [[k v]]
@@ -1304,177 +1377,196 @@
                 env)))
 
 (deftest update-path-test
-  (is (= (update-path' {}
-                       [(infer-result [(var-path 'use-map)
-                                       (key-path #{:a} :a)]
-                                      (-unknown))
-                        (infer-result [(var-path 'use-map)
-                                       (key-path #{:a} :a)]
-                                      (-class Long []))])
-         {'use-map (parse-type ''{:a Long})}))
-  (is (= (update-path' {}
-                       [(infer-result [(var-path 'use-map)]
-                                      (-class clojure.lang.IFn []))
-                        (infer-result [(var-path 'use-map)
-                                       (fn-rng-path 1)
-                                       (key-path #{:b :f :a} :f)]
-                                      (-class clojure.lang.IFn []))
-                        (infer-result [(var-path 'use-map)
-                                       (fn-dom-path 1 0)
-                                       (key-path #{:f :a} :a)]
-                                      (-class Long []))
-                        (infer-result [(var-path 'use-map)
-                                       (fn-dom-path 1 0)
-                                       (key-path #{:f :a} :f)
-                                       (fn-dom-path 1 0)
-                                       (fn-rng-path 1)]
-                                      (-class Long []))
-                        ]))
-         {'use-map
-          (parse-type '['{:f [[? :-> Long] :-> ?], :a java.lang.Long} :-> '{:b ?, :f clojure.lang.IFn, :a ?}])})
-  (is (= (->
-           (update-path' {}
-                       [(infer-result [(var-path 'foo) (fn-rng-path 1)]
-                                      (parse-type 'Long))
-                        (infer-result [(var-path 'foo) (fn-dom-path 1 0)]
-                                      (parse-type 'Long))])
-           ;ppenv
-           )
-         {'foo (parse-type '[Long :-> Long])}))
-  (is (=
-        (update-path' {}
-                      [(infer-result [(var-path 'foo)]
-                                     (parse-type
-                                       '?))
-                       (infer-result [(var-path 'foo)]
-                                     (parse-type
-                                       '[Long :-> ?]))])
-        {'foo (parse-type '[java.lang.Long :-> ?])}))
+  (checking
+    "update map"
+    10
+    [infers (gen/shuffle
+              [(infer-result [(var-path 'use-map)
+                              (key-path #{:a} :a)]
+                             (-unknown))
+               (infer-result [(var-path 'use-map)
+                              (key-path #{:a} :a)]
+                             (-class Long []))])]
+    (is (= (update-path' (init-env) infers)
+           {'use-map (prs '{:a Long})})))
+  (checking
+    "update nested map"
+    20
+    [infers (gen/shuffle
+              [(infer-result [(var-path 'use-map)]
+                             (-class clojure.lang.IFn []))
+               (infer-result [(var-path 'use-map)
+                              (fn-rng-path 1)
+                              (key-path #{:b :f :a} :f)]
+                             (-class clojure.lang.IFn []))
+               (infer-result [(var-path 'use-map)
+                              (fn-dom-path 1 0)
+                              (key-path #{:f :a} :a)]
+                             (-class Long []))
+               (infer-result [(var-path 'use-map)
+                              (fn-dom-path 1 0)
+                              (key-path #{:f :a} :f)
+                              (fn-dom-path 1 0)
+                              (fn-rng-path 1)]
+                             (-class Long []))])]
+    (is (= (update-path' (init-env) infers))
+        {'use-map
+         (prs ['{:f [[? :-> Long] :-> ?], :a java.lang.Long} :-> '{:b ?, :f clojure.lang.IFn, :a ?}])}))
+  (checking
+    "function dom rng"
+    10
+    [infers (gen/shuffle
+              [(infer-result [(var-path 'foo) (fn-rng-path 1)]
+                             (parse-type 'Long))
+               (infer-result [(var-path 'foo) (fn-dom-path 1 0)]
+                             (parse-type 'Long))])]
+    (is (= (update-path' (init-env) infers)
+           {'foo (prs [Long :-> Long])})))
+  (checking
+    "unknown with function"
+    10
+    [infers (gen/shuffle
+              [(infer-result [(var-path 'foo)] (prs ?))
+               (infer-result [(var-path 'foo)] (prs [Long :-> ?]))])]
+    (is (= (update-path' (init-env) infers)
+           {'foo (prs [java.lang.Long :-> ?])})))
 
-(is
-  (=
-    (join
-      (parse-type '[(U '{:f [? :-> java.lang.Long], :a ?} '{:f [? :-> java.lang.Long]}) :-> '{:b ?, :f ?, :a java.lang.Long}])
-      (parse-type '['{:f clojure.lang.IFn, :a ?} :-> ?]))
-    (parse-type
-      '[(U '{:f [? :-> java.lang.Long], :a ?} '{:f [? :-> java.lang.Long]})
-        :->
-        '{:b ?, :f ?, :a java.lang.Long}])))
+  (checking
+    "combine functions"
+    10
+    [ts (gen/shuffle
+          [(prs [(U '{:f [? :-> java.lang.Long], :a ?} 
+                    '{:f [? :-> java.lang.Long]}) :-> 
+                 '{:b ?, :f ?, :a java.lang.Long}])
+           (prs ['{:f clojure.lang.IFn, :a ?} :-> ?])])]
 
-(is
-  (=
-   (join
-     (parse-type '(U '{:f [? :-> java.lang.Long], :a ?} '{:f [? :-> java.lang.Long]}))
-     (parse-type ''{:f clojure.lang.IFn, :a ?}))
-   (parse-type '(U '{:f [? :-> java.lang.Long], :a ?} '{:f [? :-> java.lang.Long]}))))
+    (is
+      (= (apply join ts)
+         (prs
+           [(U '{:f [? :-> java.lang.Long], :a ?} '{:f [? :-> java.lang.Long]})
+            :->
+            '{:b ?, :f ?, :a java.lang.Long}]))))
+
+  (checking
+    "IFn with fns"
+    10
+    [ts (gen/shuffle 
+          [(prs (U '{:f [? :-> java.lang.Long], :a ?} 
+                   '{:f [? :-> java.lang.Long]}))
+           (prs '{:f clojure.lang.IFn, :a ?})])]
+    (is
+      (= (apply join ts)
+         (prs (U '{:f [? :-> java.lang.Long], :a ?} 
+                 '{:f [? :-> java.lang.Long]})))))
   
-(is
-(=
-  (update-path' {}
-                (mapv parse-infer-result
-                      '[[[#'clojure.core.typed.runtime-infer/use-map (dom 1 0) (key #{:f} :f)]
-                         :-
-                         clojure.lang.IFn]
-                        [[#'clojure.core.typed.runtime-infer/use-map
-                          (dom 1 0)
-                          (key #{:f :a} :f)
-                          (rng 1)]
-                         :-
-                         java.lang.Long]
-                        [[#'clojure.core.typed.runtime-infer/use-map
-                          (rng 1)
-                          (key #{:b :f :a} :a)]
-                         :-
-                         java.lang.Long]
-                        [[#'clojure.core.typed.runtime-infer/use-map
-                          (dom 1 0)
-                          (key #{:f} :f)
-                          (rng 1)]
-                         :-
-                         java.lang.Long]
-                        [[#'clojure.core.typed.runtime-infer/use-map
-                          (dom 1 0)
-                          (key #{:f :a} :f)]
-                         :-
-                         clojure.lang.IFn]
-                        [[#'clojure.core.typed.runtime-infer/use-map
-                          (dom 1 0)
-                          (key #{:f :a} :f)
-                          (dom 1 0)]
-                         :-
-                         clojure.lang.IFn]
-                        [[#'clojure.core.typed.runtime-infer/use-map
-                          (dom 1 0)
-                          (key #{:f} :f)
-                          (dom 1 0)
-                          (rng 1)]
-                         :-
-                         java.lang.Long]
-                        [[#'clojure.core.typed.runtime-infer/use-map
-                          (dom 1 0)
-                          (key #{:f :a} :a)]
-                         :-
-                         java.lang.Long]
-                        [[#'clojure.core.typed.runtime-infer/use-map] :- clojure.lang.IFn]
-                        [[#'clojure.core.typed.runtime-infer/use-map
-                          (dom 1 0)
-                          (key #{:f} :f)
-                          (dom 1 0)
-                          (dom 1 0)]
-                         :-
-                         java.lang.Long]
-                        [[#'clojure.core.typed.runtime-infer/use-map
-                          (rng 1)
-                          (key #{:b :f} :f)]
-                         :-
-                         clojure.lang.IFn]
-                        [[#'clojure.core.typed.runtime-infer/use-map
-                          (dom 1 0)
-                          (key #{:f :a} :f)
-                          (dom 1 0)
-                          (dom 1 0)]
-                         :-
-                         java.lang.Long]
-                        [[#'clojure.core.typed.runtime-infer/use-map
-                          (dom 1 0)
-                          (key #{:f :a} :f)
-                          (dom 1 0)
-                          (rng 1)]
-                         :-
-                         java.lang.Long]
-                        [[#'clojure.core.typed.runtime-infer/use-map
-                          (rng 1)
-                          (key #{:b :f} :b)]
-                         :-
-                         java.lang.Long]
-                        [[#'clojure.core.typed.runtime-infer/use-map
-                          (rng 1)
-                          (key #{:b :f :a} :f)]
-                         :-
-                         clojure.lang.IFn]
-                        [[#'clojure.core.typed.runtime-infer/use-map
-                          (dom 1 0)
-                          (key #{:f} :f)
-                          (dom 1 0)]
-                         :-
-                         clojure.lang.IFn]
-                        [[#'clojure.core.typed.runtime-infer/use-map
-                          (rng 1)
-                          (key #{:b :f :a} :b)]
-                         :-
-                        java.lang.Long]
-                      ]
-                      ))
-{'clojure.core.typed.runtime-infer/use-map
- (parse-type
- '[(U
-   '{:f [[java.lang.Long :-> java.lang.Long] :-> java.lang.Long]}
-   '{:f [[java.lang.Long :-> java.lang.Long] :-> java.lang.Long],
-     :a java.lang.Long})
-  :->
-  (U
-   '{:b java.lang.Long, :f clojure.lang.IFn, :a java.lang.Long}
-   '{:b java.lang.Long, :f clojure.lang.IFn})])}))
+  (checking
+    "big"
+    75
+    [infers (gen/shuffle
+              (mapv parse-infer-result
+                    '[[[#'clojure.core.typed.runtime-infer/use-map (dom 1 0) (key #{:f} :f)]
+                       :-
+                       clojure.lang.IFn]
+                      [[#'clojure.core.typed.runtime-infer/use-map
+                        (dom 1 0)
+                        (key #{:f :a} :f)
+                        (rng 1)]
+                       :-
+                       java.lang.Long]
+                      [[#'clojure.core.typed.runtime-infer/use-map
+                        (rng 1)
+                        (key #{:b :f :a} :a)]
+                       :-
+                       java.lang.Long]
+                      [[#'clojure.core.typed.runtime-infer/use-map
+                        (dom 1 0)
+                        (key #{:f} :f)
+                        (rng 1)]
+                       :-
+                       java.lang.Long]
+                      [[#'clojure.core.typed.runtime-infer/use-map
+                        (dom 1 0)
+                        (key #{:f :a} :f)]
+                       :-
+                       clojure.lang.IFn]
+                      [[#'clojure.core.typed.runtime-infer/use-map
+                        (dom 1 0)
+                        (key #{:f :a} :f)
+                        (dom 1 0)]
+                       :-
+                       clojure.lang.IFn]
+                      [[#'clojure.core.typed.runtime-infer/use-map
+                        (dom 1 0)
+                        (key #{:f} :f)
+                        (dom 1 0)
+                        (rng 1)]
+                       :-
+                       java.lang.Long]
+                      [[#'clojure.core.typed.runtime-infer/use-map
+                        (dom 1 0)
+                        (key #{:f :a} :a)]
+                       :-
+                       java.lang.Long]
+                      [[#'clojure.core.typed.runtime-infer/use-map] :- clojure.lang.IFn]
+                      [[#'clojure.core.typed.runtime-infer/use-map
+                        (dom 1 0)
+                        (key #{:f} :f)
+                        (dom 1 0)
+                        (dom 1 0)]
+                       :-
+                       java.lang.Long]
+                      [[#'clojure.core.typed.runtime-infer/use-map
+                        (rng 1)
+                        (key #{:b :f} :f)]
+                       :-
+                       clojure.lang.IFn]
+                      [[#'clojure.core.typed.runtime-infer/use-map
+                        (dom 1 0)
+                        (key #{:f :a} :f)
+                        (dom 1 0)
+                        (dom 1 0)]
+                       :-
+                       java.lang.Long]
+                      [[#'clojure.core.typed.runtime-infer/use-map
+                        (dom 1 0)
+                        (key #{:f :a} :f)
+                        (dom 1 0)
+                        (rng 1)]
+                       :-
+                       java.lang.Long]
+                      [[#'clojure.core.typed.runtime-infer/use-map
+                        (rng 1)
+                        (key #{:b :f} :b)]
+                       :-
+                       java.lang.Long]
+                      [[#'clojure.core.typed.runtime-infer/use-map
+                        (rng 1)
+                        (key #{:b :f :a} :f)]
+                       :-
+                       clojure.lang.IFn]
+                      [[#'clojure.core.typed.runtime-infer/use-map
+                        (dom 1 0)
+                        (key #{:f} :f)
+                        (dom 1 0)]
+                       :-
+                       clojure.lang.IFn]
+                      [[#'clojure.core.typed.runtime-infer/use-map
+                        (rng 1)
+                        (key #{:b :f :a} :b)]
+                       :-
+                       java.lang.Long]]))]
+    (is
+      (= (update-path' (init-env) infers)
+         {'clojure.core.typed.runtime-infer/use-map
+          (prs
+            [(U
+              '{:f [[java.lang.Long :-> java.lang.Long] :-> java.lang.Long]}
+              '{:f [[java.lang.Long :-> java.lang.Long] :-> java.lang.Long],
+                :a java.lang.Long})
+             :->
+             (U
+              '{:b java.lang.Long, :f clojure.lang.IFn, :a java.lang.Long}
+              '{:b java.lang.Long, :f clojure.lang.IFn})])})))
 
 #_
 (is
@@ -1680,10 +1772,6 @@
 
 
   )))))
-
-#_
-(= [map {:dom 0} {:dom 0}]
-   [map {:dom 1} {:index 0}])
 
 (defn type-of [v]
   (cond
@@ -1925,7 +2013,7 @@
 ; generate : InferResultEnv -> TypeEnv
 (defn generate [is]
   (with-type-and-alias-env {} {}
-    (let [_ (generate-tenv is)]
+    (let [_ (swap-env! *envs* generate-tenv is)]
       (pprint
         (into {}
               (map (fn [[name t]]
@@ -1933,18 +2021,22 @@
                      [name (unparse-type t)]))
               (type-env))))))
 
-; generate-tenv : InferResultEnv -> nil
+; generate-tenv : InferResultEnv -> AliasTypeEnv
 (defn generate-tenv
   "Reset and populate global type environment."
-  [{:keys [infer-results equivs] :as is}]
-  (swap-env! (constantly (init-env)))
-  (doseq [i infer-results]
-    (let [{:keys [path type]} i] 
-      (update-path path type)))
-  (doseq [i equivs]
-    (update-equiv (:= i)
-                  (:type i)))
-  nil)
+  [env {:keys [infer-results equivs] :as is}]
+  (as-> (init-env) env 
+    (reduce 
+      (fn [env i] 
+        (let [{:keys [path type]} i] 
+          (update-path env path type)))
+      env
+      infer-results)
+    (reduce 
+      (fn [env i]
+        (update-equiv env (:= i) (:type i)))
+      env
+      equivs)))
 
 (defn gen-current1
   "Print the currently inferred type environment"
@@ -1955,14 +2047,16 @@
   "Turn the currently inferred type environment
   into type aliases. Also print the alias environment."
   []
-  (generate-tenv @results-atom)
-  (swap-type-env!
-    #(into {}
-           (map (fn [[v t]]
-                  [v (alias-hmap-type t)]))
-           %))
-  (ppenv (type-env))
-  (ppenv (alias-env)))
+  (let [env (generate-tenv @*envs* @results-atom)
+        _ (assert false)
+        env (reduce
+              (fn [env [v t]]
+                (let [[t' env] (alias-hmap-type env t)]
+                  (update-type-env env assoc v t')))
+              env
+              (type-env env))]
+    (ppenv (type-env env))
+    (ppenv (alias-env env))))
 
 (declare visualize unmunge
          view-graph
@@ -2040,7 +2134,7 @@
     (fn [n]
       (let [t (-> n meta :type)]
         {:label (str n ":\n" 
-                     (keysets t)
+                     (keysets @*envs* t)
                      "\n" 
                      (with-out-str 
                        (binding [*unparse-abbrev-alias* true
@@ -2072,32 +2166,34 @@
                                                     (pprint (unparse-type t)))))
                       :else (unmunge n))}))}})
 
-(defn populate-envs []
-  (generate-tenv @results-atom)
-  (swap-type-env!
-    #(into {}
-           (comp (map (fn [[v t]]
-                        [v (alias-hmap-type t)]))
-                 (map (fn [[v t]]
-                        [v (squash-all t)])))
-           %))
-  nil)
+(defn populate-envs [env]
+  (prn "populating")
+  (let [env (generate-tenv env @results-atom)
+        env (reduce
+              (fn [env [v t]]
+                (let [[t env] (alias-hmap-type env t)
+                      [t env] (squash-all env t)]
+                  (update-type-env env assoc v t)))
+              env
+              (type-env env))]
+    (prn "done populating")
+    env))
 
-(defn envs-to-annotations []
+(defn envs-to-annotations [env]
   (let [tenv (into {}
                    (filter (fn [[k v]]
                              ;(prn "k" k)
                              (= (str (current-ns))
                                 (namespace k))))
-                   (type-env))
+                   (type-env env))
         tfvs (into #{}
                    (mapcat
                      (fn [t]
-                       (fv t true)))
+                       (fv env t true)))
                    (vals tenv))
         as (into {}
                  (filter (comp tfvs key))
-                 (alias-env))]
+                 (alias-env env))]
     (into
       (into [`(declare ~@(map (comp symbol name key) as))]
             (map (fn [[k v]]
@@ -2118,16 +2214,17 @@
    {:pre [(or (instance? clojure.lang.Namespace ns)
               (symbol? ns))]}
    (binding [*ann-for-ns* #(or (some-> ns the-ns) *ns*)]
-     (with-type-and-alias-env {} {}
-       (populate-envs)
-       (envs-to-annotations)))))
+     (let [env (init-env)]
+       (-> (init-env)
+           populate-envs
+           envs-to-annotations)))))
 
 (defn gen-current3 
   "Turn the currently inferred type environment
   into type aliases. Also print the alias environment."
   []
-  (with-type-and-alias-env {} {}
-    (populate-envs)
+  (let [env (init-env)]
+    (populate-envs env)
     (visualize
       {:top-levels 
        #{;`take-map
@@ -2145,15 +2242,17 @@
   "Returns the aliases referred in this type, in order of
   discovery. If recur? is true, also find aliases
   referred by other aliases found."
-  ([v] (fv v false))
-  ([v recur?] (fv v recur? #{}))
-  ([v recur? seen-alias]
-   {:pre [(type? v)]}
+  ([env v] (fv env v false #{}))
+  ([env v recur?] (fv env v recur? #{}))
+  ([env v recur? seen-alias]
+   {:pre [(map? env)
+          (type? v)]
+    :post [(vector? %)]}
    ;(prn "fv" v)
    (let [fv (fn 
-              ([v] (fv v recur? seen-alias))
+              ([v] (fv env v recur? seen-alias))
               ([v recur? seen-alias]
-               (fv v recur? seen-alias)))]
+               (fv env v recur? seen-alias)))]
      (case (:op v)
        (:Top :unknown :val) []
        :HMap (into []
@@ -2172,7 +2271,7 @@
                 []
                 (conj
                   (if recur?
-                    (fv (resolve-alias v) 
+                    (fv (resolve-alias env v)
                         recur?
                         (conj seen-alias v))
                     [])
@@ -2220,7 +2319,7 @@
           {}
           (type-env))
 
-        _ (prn "relevant" @relevant)
+        ;_ (prn "relevant" @relevant)
 
         alias-env-edge-map
         (loop [g {}
@@ -2228,7 +2327,7 @@
           (if (empty? wl)
             g
             (let [[v t] (first wl)
-                  _ (prn "get fv of" t)
+                  ;_ (prn "get fv of" t)
                   fvs (fv t)]
               (recur (assoc g v fvs)
                      (merge
