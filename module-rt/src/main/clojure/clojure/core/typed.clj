@@ -2357,11 +2357,8 @@ for checking namespaces, cf for checking individual forms."}
   ([ns]
    (load-if-needed)
    (require '[clojure.core.typed.runtime-infer])
-   ((impl/v 'clojure.core.typed.runtime-infer/infer-anns)
-    ns)))
-
-(defn ppinfer []
-  (pprint/pprint (runtime-infer)))
+   ((impl/v 'clojure.core.typed.runtime-infer/runtime-infer)
+    {:ns ns})))
 
 (defn pred* [tsyn nsym pred]
   pred)

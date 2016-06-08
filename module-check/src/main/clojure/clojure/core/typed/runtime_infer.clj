@@ -2,16 +2,14 @@
   (:require [clojure.pprint :refer [pprint]]
             [clojure.core.typed :as t]
             [clojure.set :as set]
-            [clojure.test :refer :all]
             [clojure.string :as str]
+            [clojure.java.io :as io]
             [clojure.core.typed.ast-utils :as ast]
             [clojure.core.typed.current-impl :as impl]
-            [clojure.core.typed.debug :refer [dbg]]
-            [clojure.math.combinatorics :as comb]
-            [com.gfredericks.test.chuck :as chuck]
-            [com.gfredericks.test.chuck.clojure-test :refer [checking]]
-            [com.gfredericks.test.chuck.generators :as gen']
-            [clojure.test.check.generators :as gen]))
+            ;[clojure.core.typed.debug :refer [dbg]]
+            [clojure.tools.reader.reader-types :as rdrt]
+            [clojure.tools.namespace.parse :as nprs]
+            [clojure.core.typed.coerce-utils :as coerce]))
 
 #_
 (defalias Type
@@ -128,13 +126,8 @@
   ;([] (alias-env @*envs*))
   ([env] (get (get-env env) :alias-env)))
 
-(defmacro with-type-and-alias-env 
-  [t a & body]
-  `(binding [*envs* 
-             (atom {(current-ns)
-                    {:type-env ~t
-                     :alias-env ~a}})]
-     ~@body))
+(defn init-config []
+  {})
 
 (defn init-env []
   {}
@@ -142,26 +135,17 @@
    {:type-env {}
     :alias-env {}}})
 
-(defn reset-env! [env-atom val]
-  (swap! env-atom assoc (current-ns) val))
-
 (defn update-env [env & args]
   (apply update env (current-ns) args))
 
-(defn swap-env! [env-atom & args]
-  (apply swap! env-atom update-env args))
+(defn update-type-env-in-ns [env ns & args]
+  (apply update-in env [(ns-name ns) :type-env] args))
 
 (defn update-type-env [env & args]
-  (apply update-in env [(current-ns) :type-env] args))
-
-(defn swap-type-env! [env-atom & args]
-  (apply swap! env-atom update-type-env args))
+  (apply update-type-env-in-ns env (current-ns) args))
 
 (defn update-alias-env [env & args]
   (apply update-in env [(current-ns) :alias-env] args))
-
-(defn swap-alias-env! [env-atom & args]
-  (apply swap! env-atom update-alias-env args))
 
 (defn initial-results 
   ([] (initial-results nil []))
@@ -184,9 +168,6 @@
 
 (defn add-infer-result! [results-atom r]
   (swap! results-atom update :infer-results conj r))
-
-(defn add-equiv! [results-atom e]
-  (swap! results-atom update :equivs conj e))
 
 (defn get-infer-results [results-atom]
   (get @results-atom :infer-results))
@@ -455,20 +436,37 @@
 
 (defn current-ns [] (ns-name (*ann-for-ns*)))
 
-(defn qualify-typed-symbol [s]
+(defn qualify-symbol-in [ns s]
+  {:pre [(symbol? s)
+         (not (namespace s))]
+   :post [(symbol? %)]}
   (let [talias (some
                  (fn [[k v]]
-                   (when (= (the-ns 'clojure.core.typed) v)
+                   (when (= ns v)
                      k))
                  (ns-aliases (the-ns (current-ns))))]
     (symbol (or (str talias)
-                "clojure.core.typed")
+                (str (ns-name ns)))
             (str s))))
+
+(defn qualify-typed-symbol [s]
+  {:pre [(symbol? s)]
+   :post [(symbol? %)]}
+  (qualify-symbol-in (the-ns 'clojure.core.typed) s))
+
+(defn qualify-typed-keyword [s]
+  {:pre [(symbol? s)]
+   :post [(keyword? %)]}
+  (keyword (str ":" (qualify-typed-symbol s))))
+
+(defn qualify-typed-keyword-in [ns s]
+  {:pre [(symbol? s)]
+   :post [(keyword? %)]}
+  (keyword (str ":" (qualify-typed-symbol s))))
 
 ; [Node :-> Any]
 (defn unparse-type' [{:as m}]
-  (assert (type? m)
-          m)
+  (assert (type? m) m)
   (case (:op m)
     :alias (if *unparse-abbrev-alias*
              (-> (:name m) name symbol)
@@ -575,12 +573,6 @@
     (group-by (comp count :dom)
               (concat (:arities t1)
                       (:arities t2)))))
-
-#_(deftest group-arities-test
-  (is (group-arities
-        {:op :IFn, 
-         :arities [{:op :IFn1, :dom [], :rng {:op :class, :class java.lang.Long, :args []}}]}
-        {:op :IFn, :arities [{:op :IFn1, :dom [{:op :unknown}], :rng {:op :class, :class java.lang.Long, :args []}}]})))
 
 (defn should-join-HMaps? [t1 t2]
   ;; join if the keys are the same, 
@@ -751,99 +743,6 @@
               #{}
               (flatten-unions args)))))
 
-(deftest join-test
-  (checking
-    "join maps"
-    5
-    [ts (gen/shuffle
-          [(prs
-             '{:E ':false})
-           (prs
-             '{:args (Vec '{:name clojure.lang.Symbol, :E ':var}),
-               :fun
-               (U
-                '{:E ':lambda,
-                  :arg clojure.lang.Symbol,
-                  :body '{:name clojure.lang.Symbol, :E ':var},
-                  :arg-type
-                  '{:T ':intersection, :types clojure.lang.PersistentHashSet}}
-                '{:name clojure.lang.Symbol, :E ':var}),
-               :E ':app})])]
-
-    (is (= (apply join ts)
-           (prs
-             (U
-              '{:E ':false}
-              '{:args (Vec '{:name clojure.lang.Symbol, :E ':var}),
-                :fun
-                (U
-                 '{:E ':lambda,
-                   :arg clojure.lang.Symbol,
-                   :body '{:name clojure.lang.Symbol, :E ':var},
-                   :arg-type
-                   '{:T ':intersection, :types clojure.lang.PersistentHashSet}}
-                 '{:name clojure.lang.Symbol, :E ':var}),
-                :E ':app})))))
-  (checking
-    "inner vec"
-    5
-    [ts (gen/shuffle
-          [(prs (Vec '{:a ?}))
-           (prs (Vec '{:b ?}))])]
-    (is 
-      (= (apply join* ts)
-         (prs (Vec (U '{:a ?} '{:b ?}))))))
-  (checking 
-    "functions"
-    30
-    [ts (gen/shuffle
-          [(prs '{:a ?})
-           (prs '{:a [? :-> ?]})
-           (prs '{:a [? :-> Long]})
-           (prs '{:a [Long :-> Long]})])]
-    (= (apply join* ts)
-       (prs '{:a [Long :-> Long]})))
-  (checking
-    "HOF"
-    5
-    [ts (gen/shuffle
-          [(prs '{:f ?, :a java.lang.Long}) 
-           (prs '{:f [[? :-> java.lang.Long] :-> ?], :a ?})])]
-    (is
-      (= (apply join* ts)
-         (prs '{:f [[? :-> java.lang.Long] :-> ?], :a java.lang.Long}))))
-  (checking
-    "map return"
-    5
-    [ts (gen/shuffle
-          [(prs ['{:f ?, :a java.lang.Long} :-> '{:b ?, :f clojure.lang.IFn, :a ?}])
-           (prs ['{:f [[? :-> java.lang.Long] :-> ?], :a ?} :-> ?])])]
-    (is (= (apply join ts)
-           (prs
-             ['{:f [[? :-> java.lang.Long] :-> ?], :a java.lang.Long}
-              :->
-              '{:b ?, :f clojure.lang.IFn, :a ?}]))))
-  (checking
-    "join union"
-    5
-    [ts (gen/shuffle
-          [(prs
-             (U '{:f [? :-> java.lang.Long], :a ?} 
-                '{:f clojure.lang.IFn}))
-           (prs 
-             '{:f [? :-> java.lang.Long]})])]
-     (is (= (apply join ts)
-            (prs
-              (U '{:f [? :-> java.lang.Long], :a ?} 
-                 '{:f [? :-> java.lang.Long]})))))
-  (checking
-    "join fn in map"
-    5
-    [ts (gen/shuffle
-          [(prs '{:f [[java.lang.Long :-> java.lang.Long] :-> ?]})
-           (prs '{:f [[java.lang.Long :-> java.lang.Long] :-> java.lang.Long]})])]
-    (is (= (apply join ts)
-           (prs '{:f [[java.lang.Long :-> java.lang.Long] :-> java.lang.Long]})))))
 
 (declare update-path)
 
@@ -928,11 +827,10 @@
                   (update-var-down-paths ps new-var))]
         env)))))
 
-; update-path : Path Type -> AliasTypeEnv
-(defn update-path [env path type]
+; update-path : Env Config Path Type -> AliasTypeEnv
+(defn update-path [env config path type]
   {:pre [(map? env)
          (vector? path)]}
-  ;; keep this atom around
   (cond 
     (empty? path) (throw (Exception. "Cannot update empty path"))
     (= 1 (count path)) (let [x (nth path 0)
@@ -945,7 +843,8 @@
                                  type)]
                          (assert (#{:var} (:op x))
                                  (str "First element of path must be a variable " x))
-                         (update-type-env env assoc n t))
+                         (update-type-env-in-ns env (or (:ns x) (current-ns))
+                                                assoc n t))
     :else 
     (let [last-pos (dec (count path))
           cur-pth (nth path last-pos)
@@ -955,16 +854,17 @@
       (case (:op cur-pth)
         :var (throw (Exception. "Var path element must only be first path element"))
         :key (let [{:keys [keys key]} cur-pth]
-               (recur env nxt-pth
+               (recur env config
+                      nxt-pth
                       {:op :HMap
                        :map (assoc (zipmap keys (repeat {:op :unknown}))
                                    key type)}))
-        :set-entry (recur env nxt-pth (-class clojure.lang.IPersistentSet [type]))
-        :seq-entry (recur env nxt-pth (-class clojure.lang.ISeq [type]))
-        :transient-vector-entry (recur env nxt-pth (-class clojure.lang.ITransientVector [type]))
-        :index (recur env nxt-pth (-class clojure.lang.IPersistentVector [type]))
+        :set-entry (recur env config nxt-pth (-class clojure.lang.IPersistentSet [type]))
+        :seq-entry (recur env config nxt-pth (-class clojure.lang.ISeq [type]))
+        :transient-vector-entry (recur env config nxt-pth (-class clojure.lang.ITransientVector [type]))
+        :index (recur env config nxt-pth (-class clojure.lang.IPersistentVector [type]))
         :fn-domain (let [{:keys [arity position]} cur-pth]
-                     (recur env nxt-pth
+                     (recur env config nxt-pth
                             {:op :IFn
                              :arities [{:op :IFn1
                                         :dom (assoc (into [] 
@@ -972,20 +872,11 @@
                                                     position type)
                                         :rng {:op :unknown}}]}))
         :fn-range (let [{:keys [arity]} cur-pth]
-                    (recur env nxt-pth
+                    (recur env config nxt-pth
                            {:op :IFn
                             :arities [{:op :IFn1
                                        :dom (into [] (repeat (:arity cur-pth) {:op :unknown}))
                                        :rng type}]}))))))
-
-;; testing only
-(defn update-path' [env infer-results]
-  (let [env (reduce 
-              (fn [env {:keys [path type]}]
-                (update-path env path type))
-              env
-              infer-results)]
-    (type-env env)))
 
 (defn walk-type-children [v f]
   {:pre [(type? v)]
@@ -1055,7 +946,7 @@
   "Shorthand for (walk ast identity f reversed?)"
   ([ast f] (walk ast identity f)))
 
-(defn register-alias [env name t]
+(defn register-alias [env config name t]
   {:pre [(map? env)
          (symbol? name)
          (type? t)]
@@ -1063,11 +954,11 @@
   ;(prn "register" name)
   (update-alias-env env assoc name t))
 
-(defn register-unique-alias [env sym t]
+(defn register-unique-alias [env config sym t]
   (let [sym (if (contains? (alias-env env) sym)
               (gensym (str sym "__"))
               sym)]
-    [sym (register-alias env sym t)]))
+    [sym (register-alias env config sym t)]))
 
 (defn resolve-alias [env {:keys [name] :as a}]
   {:pre [(map? env)
@@ -1119,8 +1010,8 @@
   replace HMaps and unions with fresh type
   aliases. Also registers these type variables
   in alias-env."
-  [init-env t]
-  (let [env-atom (atom init-env)]
+  [env' config t]
+  (let [env-atom (atom env')]
     (letfn [(do-alias [t]
               (let [t (case (:op t)
                         :union
@@ -1138,7 +1029,7 @@
                     a-atom (atom nil)
                     _ (swap! env-atom 
                              (fn [env]
-                               (let [[a env] (register-unique-alias env n t)]
+                               (let [[a env] (register-unique-alias env config n t)]
                                  (reset! a-atom a)
                                  env)))
                     a @a-atom
@@ -1166,7 +1057,7 @@
 
 (declare fv)
 
-(defn try-merge-aliases [env f t]
+(defn try-merge-aliases [env config f t]
   {:pre [(map? env)
          (symbol? f)
          (alias? t)]
@@ -1197,12 +1088,14 @@
   "Recur down an alias and
   merge types based on their keysets.
   Also merge back up if possible."
-  [env t]
+  [env config t]
   {:pre [(map? env)
+         (map? config)
          (alias? t)]
    :post [(map? %)]}
   ;(prn "top squash aliases" (keys (alias-env env))
   ;     #_(fv env t true))
+  ;; config is constant
   (loop [env env
          worklist [t]
          ;; aliases we're done with
@@ -1222,7 +1115,7 @@
             env (if-not (done t)
                   (reduce 
                     (fn [env f]
-                      (try-merge-aliases env f t))
+                      (try-merge-aliases env config f t))
                     env
                     (concat
                       fvs
@@ -1239,7 +1132,7 @@
                        #{t}))
                (conj done t))))))
 
-(defn simple-alias? [env a]
+(defn simple-alias? [env config a]
   (let [a-res (resolve-alias env a)
         res (not (contains? (set (fv env a-res true)) (:name a)))]
     ;(prn "simple-alias?" (:name a) res)
@@ -1250,7 +1143,7 @@
   Also delete unnecessary aliases for simple
   types.
   Also inline aliases if they are simple enough."
-  [env t]
+  [env config t]
   {:pre [(type? t)]
    :post [(let [[t env] %]
             (and (type? t)
@@ -1272,7 +1165,7 @@
 
                     :else (subst-alias t (-alias f) 
                                        ;; if the new alias is simple, just inline.
-                                       (if (simple-alias? env real)
+                                       (if (simple-alias? env config real)
                                          real-res
                                          real))))))
             t
@@ -1299,12 +1192,13 @@
                           (alias? real-res)
                           (recur real-res (conj seen real))
 
-                          :else (register-alias env f
+                          :else (register-alias env config
+                                                f
                                                 (subst-alias
                                                   (resolve-alias env (-alias f))
                                                   (-alias inner)
                                                   ;; if the new alias is simple, just inline.
-                                                  (if (simple-alias? env real)
+                                                  (if (simple-alias? env config real)
                                                     real-res
                                                     real)))))))
                   env
@@ -1317,7 +1211,7 @@
   "Jump past redundant aliases that
   just name another alias.
   Also make recursive types when possible."
-  [env t]
+  [env config t]
   {:pre [(map? env)]
    :post [(let [[t env] %]
             (and (type? t)
@@ -1326,47 +1220,14 @@
   (let [fvs (set (fv env t))
         ;_ (prn "free aliases" (unp t) fvs
         ;       (keys (alias-env env)))
-        env (reduce squash env (map -alias fvs))]
+        env (reduce (fn [env a]
+                      (squash env config a))
+                    env (map -alias fvs))]
     ;; rename types avoiding redundant type aliases
-    (follow-aliases env t)))
+    (follow-aliases env config t)))
 
 (defn add-tmp-aliases [env as]
   (update-alias-env env merge (zipmap as (repeat nil))))
-
-;; testing only
-(defmacro with-tmp-aliases [env as & body]
-  `(binding [*envs* (atom (add-tmp-aliases ~env ~as))] 
-     ~@body))
-
-(deftest squash-test
-  (let [env (init-env)
-        env (update-alias-env env merge
-                              (with-tmp-aliases env '[a1 a2]
-                                {'a1 (prs '{:a a2})
-                                 'a2 (prs '{:a nil})}))]
-    (binding [*envs* (atom env)]
-      (is (= (alias-env (squash env (prs a1)))
-             {'a1 (prs '{:a (U nil a1)})
-              'a2 (prs a1)}))))
-#_
-  (let [aenv (with-tmp-aliases '[a1 a2 a3 a4]
-               {'a1 (prs a2)
-                'a2 (prs '{:a a3})
-                'a3 (prs a4)
-                'a4 (prs
-                      '{:a nil})})]
-    (with-type-and-alias-env 
-      (type-env @*envs*)
-      aenv
-      (is (= (squash-all (prs a1))
-             (prs a1)))
-      (is (= (alias-env)
-             (with-tmp-aliases '[a1 a2]
-               {'a1 (prs '{:a (U nil a1)})
-                'a2 (prs a1)
-                'a3 (prs a2) ;;TODO <^v
-                'a4 (prs a3)
-                }))))))
 
 (declare generate-tenv ppenv)
 
@@ -1376,402 +1237,6 @@
                        [k (unparse-type v)]))
                 env)))
 
-(deftest update-path-test
-  (checking
-    "update map"
-    10
-    [infers (gen/shuffle
-              [(infer-result [(var-path 'use-map)
-                              (key-path #{:a} :a)]
-                             (-unknown))
-               (infer-result [(var-path 'use-map)
-                              (key-path #{:a} :a)]
-                             (-class Long []))])]
-    (is (= (update-path' (init-env) infers)
-           {'use-map (prs '{:a Long})})))
-  (checking
-    "update nested map"
-    20
-    [infers (gen/shuffle
-              [(infer-result [(var-path 'use-map)]
-                             (-class clojure.lang.IFn []))
-               (infer-result [(var-path 'use-map)
-                              (fn-rng-path 1)
-                              (key-path #{:b :f :a} :f)]
-                             (-class clojure.lang.IFn []))
-               (infer-result [(var-path 'use-map)
-                              (fn-dom-path 1 0)
-                              (key-path #{:f :a} :a)]
-                             (-class Long []))
-               (infer-result [(var-path 'use-map)
-                              (fn-dom-path 1 0)
-                              (key-path #{:f :a} :f)
-                              (fn-dom-path 1 0)
-                              (fn-rng-path 1)]
-                             (-class Long []))])]
-    (is (= (update-path' (init-env) infers))
-        {'use-map
-         (prs ['{:f [[? :-> Long] :-> ?], :a java.lang.Long} :-> '{:b ?, :f clojure.lang.IFn, :a ?}])}))
-  (checking
-    "function dom rng"
-    10
-    [infers (gen/shuffle
-              [(infer-result [(var-path 'foo) (fn-rng-path 1)]
-                             (parse-type 'Long))
-               (infer-result [(var-path 'foo) (fn-dom-path 1 0)]
-                             (parse-type 'Long))])]
-    (is (= (update-path' (init-env) infers)
-           {'foo (prs [Long :-> Long])})))
-  (checking
-    "unknown with function"
-    10
-    [infers (gen/shuffle
-              [(infer-result [(var-path 'foo)] (prs ?))
-               (infer-result [(var-path 'foo)] (prs [Long :-> ?]))])]
-    (is (= (update-path' (init-env) infers)
-           {'foo (prs [java.lang.Long :-> ?])})))
-
-  (checking
-    "combine functions"
-    10
-    [ts (gen/shuffle
-          [(prs [(U '{:f [? :-> java.lang.Long], :a ?} 
-                    '{:f [? :-> java.lang.Long]}) :-> 
-                 '{:b ?, :f ?, :a java.lang.Long}])
-           (prs ['{:f clojure.lang.IFn, :a ?} :-> ?])])]
-
-    (is
-      (= (apply join ts)
-         (prs
-           [(U '{:f [? :-> java.lang.Long], :a ?} '{:f [? :-> java.lang.Long]})
-            :->
-            '{:b ?, :f ?, :a java.lang.Long}]))))
-
-  (checking
-    "IFn with fns"
-    10
-    [ts (gen/shuffle 
-          [(prs (U '{:f [? :-> java.lang.Long], :a ?} 
-                   '{:f [? :-> java.lang.Long]}))
-           (prs '{:f clojure.lang.IFn, :a ?})])]
-    (is
-      (= (apply join ts)
-         (prs (U '{:f [? :-> java.lang.Long], :a ?} 
-                 '{:f [? :-> java.lang.Long]})))))
-  
-  (checking
-    "big"
-    75
-    [infers (gen/shuffle
-              (mapv parse-infer-result
-                    '[[[#'clojure.core.typed.runtime-infer/use-map (dom 1 0) (key #{:f} :f)]
-                       :-
-                       clojure.lang.IFn]
-                      [[#'clojure.core.typed.runtime-infer/use-map
-                        (dom 1 0)
-                        (key #{:f :a} :f)
-                        (rng 1)]
-                       :-
-                       java.lang.Long]
-                      [[#'clojure.core.typed.runtime-infer/use-map
-                        (rng 1)
-                        (key #{:b :f :a} :a)]
-                       :-
-                       java.lang.Long]
-                      [[#'clojure.core.typed.runtime-infer/use-map
-                        (dom 1 0)
-                        (key #{:f} :f)
-                        (rng 1)]
-                       :-
-                       java.lang.Long]
-                      [[#'clojure.core.typed.runtime-infer/use-map
-                        (dom 1 0)
-                        (key #{:f :a} :f)]
-                       :-
-                       clojure.lang.IFn]
-                      [[#'clojure.core.typed.runtime-infer/use-map
-                        (dom 1 0)
-                        (key #{:f :a} :f)
-                        (dom 1 0)]
-                       :-
-                       clojure.lang.IFn]
-                      [[#'clojure.core.typed.runtime-infer/use-map
-                        (dom 1 0)
-                        (key #{:f} :f)
-                        (dom 1 0)
-                        (rng 1)]
-                       :-
-                       java.lang.Long]
-                      [[#'clojure.core.typed.runtime-infer/use-map
-                        (dom 1 0)
-                        (key #{:f :a} :a)]
-                       :-
-                       java.lang.Long]
-                      [[#'clojure.core.typed.runtime-infer/use-map] :- clojure.lang.IFn]
-                      [[#'clojure.core.typed.runtime-infer/use-map
-                        (dom 1 0)
-                        (key #{:f} :f)
-                        (dom 1 0)
-                        (dom 1 0)]
-                       :-
-                       java.lang.Long]
-                      [[#'clojure.core.typed.runtime-infer/use-map
-                        (rng 1)
-                        (key #{:b :f} :f)]
-                       :-
-                       clojure.lang.IFn]
-                      [[#'clojure.core.typed.runtime-infer/use-map
-                        (dom 1 0)
-                        (key #{:f :a} :f)
-                        (dom 1 0)
-                        (dom 1 0)]
-                       :-
-                       java.lang.Long]
-                      [[#'clojure.core.typed.runtime-infer/use-map
-                        (dom 1 0)
-                        (key #{:f :a} :f)
-                        (dom 1 0)
-                        (rng 1)]
-                       :-
-                       java.lang.Long]
-                      [[#'clojure.core.typed.runtime-infer/use-map
-                        (rng 1)
-                        (key #{:b :f} :b)]
-                       :-
-                       java.lang.Long]
-                      [[#'clojure.core.typed.runtime-infer/use-map
-                        (rng 1)
-                        (key #{:b :f :a} :f)]
-                       :-
-                       clojure.lang.IFn]
-                      [[#'clojure.core.typed.runtime-infer/use-map
-                        (dom 1 0)
-                        (key #{:f} :f)
-                        (dom 1 0)]
-                       :-
-                       clojure.lang.IFn]
-                      [[#'clojure.core.typed.runtime-infer/use-map
-                        (rng 1)
-                        (key #{:b :f :a} :b)]
-                       :-
-                       java.lang.Long]]))]
-    (is
-      (= (update-path' (init-env) infers)
-         {'clojure.core.typed.runtime-infer/use-map
-          (prs
-            [(U
-              '{:f [[java.lang.Long :-> java.lang.Long] :-> java.lang.Long]}
-              '{:f [[java.lang.Long :-> java.lang.Long] :-> java.lang.Long],
-                :a java.lang.Long})
-             :->
-             (U
-              '{:b java.lang.Long, :f clojure.lang.IFn, :a java.lang.Long}
-              '{:b java.lang.Long, :f clojure.lang.IFn})])})))
-
-#_
-(is
-(ppenv
-  (update-path' {}
-                (mapv parse-infer-result
-'[[[#'clojure.core.typed.test.mini-occ/parse-exp
-   (rng 1)
-   (key #{:name :E} :name)]
-  :-
-  clojure.lang.Symbol]
- [[#'clojure.core.typed.test.mini-occ/parse-exp
-   (rng 1)
-   (key #{:args :fun :E} :args)
-   (index 2 0)
-   (key #{:name :E} :E)]
-  :-
-  ':var]
- [[#'clojure.core.typed.test.mini-occ/parse-exp
-   (rng 1)
-   (key #{:E :arg :body :arg-type} :body)
-   (key #{:name :E} :name)]
-  :-
-  clojure.lang.Symbol]
- [[#'clojure.core.typed.test.mini-occ/parse-exp
-   (rng 1)
-   (key #{:E :arg :body :arg-type} :arg-type)
-   (key #{:T :types} :types)]
-  :-
-  clojure.lang.PersistentHashSet]
- [[#'clojure.core.typed.test.mini-occ/parse-exp
-   (rng 1)
-   (key #{:E :arg :body :arg-type} :body)
-   (key #{:name :E} :E)]
-  :-
-  ':var]
- [[#'clojure.core.typed.test.mini-occ/parse-exp
-   (rng 1)
-   (key #{:E :arg :body :arg-type} :arg)]
-  :-
-  clojure.lang.Symbol]
- [[#'clojure.core.typed.test.mini-occ/parse-exp
-   (rng 1)
-   (key #{:args :fun :E} :args)
-   (index 1 0)
-   (key #{:name :E} :name)]
-  :-
-  clojure.lang.Symbol]
- [[#'clojure.core.typed.test.mini-occ/parse-exp
-   (rng 1)
-   (key #{:args :fun :E} :E)]
-  :-
-  ':app]
- [[#'clojure.core.typed.test.mini-occ/parse-exp
-   (rng 1)
-   (key #{:args :fun :E} :args)
-   (index 1 0)
-   (key #{:name :E} :E)]
-  :-
-  ':var]
- [[#'clojure.core.typed.test.mini-occ/parse-exp (dom 1 0)]
-  :-
-  clojure.lang.Symbol]
- [[#'clojure.core.typed.test.mini-occ/parse-exp (dom 1 0)]
-  :-
-  clojure.lang.PersistentList]
- [[#'clojure.core.typed.test.mini-occ/parse-exp
-   (rng 1)
-   (key #{:else :E :then :test} :then)
-   (key #{:name :E} :E)]
-  :-
-  ':var]
- [[#'clojure.core.typed.test.mini-occ/parse-exp
-   (rng 1)
-   (key #{:args :fun :E} :fun)
-   (key #{:E :arg :body :arg-type} :body)
-   (key #{:name :E} :name)]
-  :-
-  clojure.lang.Symbol]
- [[#'clojure.core.typed.test.mini-occ/parse-exp
-   (rng 1)
-   (key #{:args :fun :E} :args)
-   (index 2 0)
-   (key #{:name :E} :name)]
-  :-
-  clojure.lang.Symbol]
- [[#'clojure.core.typed.test.mini-occ/parse-exp
-   (rng 1)
-   (key #{:else :E :then :test} :else)
-   (key #{:name :E} :E)]
-  :-
-  ':var]
- [[#'clojure.core.typed.test.mini-occ/parse-exp
-   (rng 1)
-   (key #{:else :E :then :test} :test)
-   (key #{:name :E} :name)]
-  :-
-  clojure.lang.Symbol]
- [[#'clojure.core.typed.test.mini-occ/parse-exp] :- clojure.lang.IFn]
- [[#'clojure.core.typed.test.mini-occ/parse-exp
-   (rng 1)
-   (key #{:args :fun :E} :fun)
-   (key #{:name :E} :name)]
-  :-
-  clojure.lang.Symbol]
- [[#'clojure.core.typed.test.mini-occ/parse-exp
-   (rng 1)
-   (key #{:args :fun :E} :args)
-   (index 2 1)
-   (key #{:name :E} :E)]
-  :-
-  ':var]
- [[#'clojure.core.typed.test.mini-occ/parse-exp
-   (rng 1)
-   (key #{:else :E :then :test} :test)
-   (key #{:name :E} :E)]
-  :-
-  ':var]
- [[#'clojure.core.typed.test.mini-occ/parse-exp
-   (rng 1)
-   (key #{:args :fun :E} :fun)
-   (key #{:name :E} :E)]
-  :-
-  ':var]
- [[#'clojure.core.typed.test.mini-occ/parse-exp
-   (rng 1)
-   (key #{:args :fun :E} :args)
-   (index 2 1)
-   (key #{:name :E} :name)]
-  :-
-  clojure.lang.Symbol]
- [[#'clojure.core.typed.test.mini-occ/parse-exp (rng 1) (key #{:E} :E)]
-  :-
-  ':false]
- [[#'clojure.core.typed.test.mini-occ/parse-exp
-   (rng 1)
-   (key #{:E :arg :body :arg-type} :arg-type)
-   (key #{:T :types} :T)]
-  :-
-  ':intersection]
- [[#'clojure.core.typed.test.mini-occ/parse-exp
-   (rng 1)
-   (key #{:args :fun :E} :fun)
-   (key #{:E :arg :body :arg-type} :arg-type)
-   (key #{:T :types} :T)]
-  :-
-  ':intersection]
- [[#'clojure.core.typed.test.mini-occ/parse-exp
-   (rng 1)
-   (key #{:else :E :then :test} :E)]
-  :-
-  ':if]
- [[#'clojure.core.typed.test.mini-occ/parse-exp
-   (rng 1)
-   (key #{:else :E :then :test} :else)
-   (key #{:name :E} :name)]
-  :-
-  clojure.lang.Symbol]
- [[#'clojure.core.typed.test.mini-occ/parse-exp (dom 1 0)] :- false]
- [[#'clojure.core.typed.test.mini-occ/parse-exp
-   (rng 1)
-   (key #{:args :fun :E} :fun)
-   (key #{:E :arg :body :arg-type} :E)]
-  :-
-  ':lambda]
- [[#'clojure.core.typed.test.mini-occ/parse-exp
-   (rng 1)
-   (key #{:args :fun :E} :fun)
-   (key #{:E :arg :body :arg-type} :body)
-   (key #{:name :E} :E)]
-  :-
-  ':var]
- [[#'clojure.core.typed.test.mini-occ/parse-exp
-   (rng 1)
-   (key #{:else :E :then :test} :then)
-   (key #{:name :E} :name)]
-  :-
-  clojure.lang.Symbol]
- [[#'clojure.core.typed.test.mini-occ/parse-exp
-   (rng 1)
-   (key #{:name :E} :E)]
-  :-
-  ':var]
- [[#'clojure.core.typed.test.mini-occ/parse-exp
-   (rng 1)
-   (key #{:args :fun :E} :fun)
-   (key #{:E :arg :body :arg-type} :arg)]
-  :-
-  clojure.lang.Symbol]
- [[#'clojure.core.typed.test.mini-occ/parse-exp
-   (rng 1)
-   (key #{:E :arg :body :arg-type} :E)]
-  :-
-  ':lambda]
- [[#'clojure.core.typed.test.mini-occ/parse-exp
-   (rng 1)
-   (key #{:args :fun :E} :fun)
-   (key #{:E :arg :body :arg-type} :arg-type)
-   (key #{:T :types} :types)]
-  :-
-  clojure.lang.PersistentHashSet]
-]
-
-
-  )))))
 
 (defn type-of [v]
   (cond
@@ -1916,15 +1381,12 @@
 (defmacro track-var [v]
   `(track-var' (var ~v)))
 
-(defn track-def-init [vsym val]
+(defn track-def-init [vsym ns val]
   {:pre [(symbol? vsym)
          (namespace vsym)]}
-  (track results-atom val [{:op :var :name vsym}]))
-
-(defmacro defntrack [n & args]
-  `(def ~n (track-def-init
-             '~(symbol (str (ns-name *ns*)) (str n))
-             (fn ~@args))))
+  (track results-atom val [{:op :var
+                            :ns (ns-name ns)
+                            :name vsym}]))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Analysis compiler pass
@@ -1965,7 +1427,15 @@
              :form `*ns*
              :env (:env expr)}]}))
 
+(defn dummy-sym [env vsym]
+  {:op :const
+   :type :symbol
+   :form `'~vsym
+   :env env
+   :val vsym})
+
 (defn wrap-def-init [expr vsym *ns*]
+  ;(prn ((juxt identity class) (-> expr :env :ns)))
   (do
     #_
     (println (str "Instrumenting def init " vsym " in " (ns-name *ns*) 
@@ -1981,11 +1451,8 @@
           :var #'track-def-init
           :form `track-def-init
           :env (:env expr)}
-     :args [{:op :const
-             :type :symbol
-             :form `'~vsym
-             :env (:env expr)
-             :val vsym}
+     :args [(dummy-sym (:env expr) vsym)
+            (dummy-sym (:env expr) (:ns (:env expr)))
             expr]}))
 
 (defn check
@@ -2012,29 +1479,28 @@
 
 ; generate : InferResultEnv -> TypeEnv
 (defn generate [is]
-  (with-type-and-alias-env {} {}
-    (let [_ (swap-env! *envs* generate-tenv is)]
-      (pprint
-        (into {}
-              (map (fn [[name t]]
-                     ;(prn "generate" t)
-                     [name (unparse-type t)]))
-              (type-env))))))
+  (let [env (update-type-env (init-env) generate-tenv is)]
+    (pprint
+      (into {}
+            (map (fn [[name t]]
+                   ;(prn "generate" t)
+                   [name (unparse-type t)]))
+            (type-env env)))))
 
 ; generate-tenv : InferResultEnv -> AliasTypeEnv
 (defn generate-tenv
   "Reset and populate global type environment."
-  [env {:keys [infer-results equivs] :as is}]
+  [env config {:keys [infer-results equivs] :as is}]
   (as-> (init-env) env 
     (reduce 
       (fn [env i] 
         (let [{:keys [path type]} i] 
-          (update-path env path type)))
+          (update-path env config path type)))
       env
       infer-results)
     (reduce 
       (fn [env i]
-        (update-equiv env (:= i) (:type i)))
+        (update-equiv env config (:= i) (:type i)))
       env
       equivs)))
 
@@ -2047,7 +1513,7 @@
   "Turn the currently inferred type environment
   into type aliases. Also print the alias environment."
   []
-  (let [env (generate-tenv @*envs* @results-atom)
+  (let [env (generate-tenv (init-env) @results-atom)
         _ (assert false)
         env (reduce
               (fn [env [v t]]
@@ -2062,7 +1528,7 @@
          view-graph
          graph->svg)
 
-(def premade-configs
+(def viz-configs
   {:vfn {:spit (fn [& args]
                  (spit "visualize.svg" (apply graph->svg args)))
          :viz view-graph}
@@ -2166,20 +1632,27 @@
                                                     (pprint (unparse-type t)))))
                       :else (unmunge n))}))}})
 
-(defn populate-envs [env]
-  (prn "populating")
-  (let [env (generate-tenv env @results-atom)
+(defn populate-envs [env config]
+  #_(prn "populating")
+  (let [env (generate-tenv config env @results-atom)
         env (reduce
               (fn [env [v t]]
-                (let [[t env] (alias-hmap-type env t)
-                      [t env] (squash-all env t)]
+                (let [[t env] (alias-hmap-type env config t)
+                      [t env] (squash-all env config t)]
                   (update-type-env env assoc v t)))
               env
               (type-env env))]
-    (prn "done populating")
+    #_(prn "done populating")
     env))
 
-(defn envs-to-annotations [env]
+;(defn order-defaliases [env as]
+;  (let [afvs (into {}
+;                   (map (fn [[k v]]
+;                          [k (set (fv env v))]))
+;                   as)]
+;    ))
+
+(defn envs-to-annotations [env config]
   (let [tenv (into {}
                    (filter (fn [[k v]]
                              ;(prn "k" k)
@@ -2199,8 +1672,8 @@
             (map (fn [[k v]]
                    (list (qualify-typed-symbol 'defalias)
                          (symbol (name k))
-                         (unparse-type v))))
-            as)
+                         (unparse-type v)))
+                 as))
       (map (fn [[k v]]
              (list (qualify-typed-symbol 'ann)
                    (symbol (name k))
@@ -2208,33 +1681,23 @@
       tenv)))
 
 
-(defn infer-anns 
-  ([] (infer-anns *ns*))
-  ([ns]
-   {:pre [(or (instance? clojure.lang.Namespace ns)
-              (symbol? ns))]}
-   (binding [*ann-for-ns* #(or (some-> ns the-ns) *ns*)]
-     (let [env (init-env)]
-       (-> (init-env)
-           populate-envs
-           envs-to-annotations)))))
-
 (defn gen-current3 
   "Turn the currently inferred type environment
   into type aliases. Also print the alias environment."
   []
-  (let [env (init-env)]
-    (populate-envs env)
+  (let [env (populate-envs (init-env) (init-config))]
     (visualize
-      {:top-levels 
+      env
+      {:current-ns 'clojure.core.typed.test.mini-occ
+       :top-levels 
        #{;`take-map
          ; `a-b-nested
          ;'clojure.core.typed.test.mini-occ/parse-exp
          'clojure.core.typed.test.mini-occ/parse-prop
          ;`mymapv
          }
-       :viz-args {:options (-> premade-configs :options :projector)
-                  :node->descriptor (-> premade-configs
+       :viz-args {:options (-> viz-configs :options :projector)
+                  :node->descriptor (-> viz-configs
                                         :node->descriptor
                                         :label-with-keyset)}})))
 
@@ -2305,52 +1768,57 @@
   (require '[rhizome.viz])
   (apply (impl/v 'rhizome.viz/graph->svg) args))
 
-(defn visualize [{:keys [top-levels] :as config}]
-  (let [relevant (atom #{})
-        type-env-edge-map 
-        (reduce
-          (fn [g [v t]]
-            (if (or (contains? top-levels v)
-                    (contains? top-levels :all))
-              (let [fvs (fv t)]
-                (swap! relevant into fvs)
-                (assoc g v fvs))
-              g))
-          {}
-          (type-env))
+(defn visualize [env {:keys [top-levels current-ns] 
+                      :or {current-ns (#'current-ns)}
+                      :as config}]
+  (binding [*ann-for-ns* (fn [] current-ns)]
+    (prn (#'current-ns))
+    (let [relevant (atom #{})
+          type-env-edge-map 
+          (reduce
+            (fn [g [v t]]
+              (if (or (contains? top-levels v)
+                      (contains? top-levels :all))
+                (let [fvs (fv env t)]
+                  (swap! relevant into fvs)
+                  (assoc g v fvs))
+                g))
+            {}
+            (type-env env))
 
-        ;_ (prn "relevant" @relevant)
+          ;_ (prn "relevant" @relevant)
 
-        alias-env-edge-map
-        (loop [g {}
-               wl (select-keys (alias-env) @relevant)]
-          (if (empty? wl)
-            g
-            (let [[v t] (first wl)
-                  ;_ (prn "get fv of" t)
-                  fvs (fv t)]
-              (recur (assoc g v fvs)
-                     (merge
-                       (dissoc wl v)
-                       (select-keys (alias-env)
-                                    (set/difference
-                                      (set fvs)
-                                      (set (keys g))
-                                      (set (keys wl))
-                                      #{v})))))))
+          alias-env-edge-map
+          (loop [g {}
+                 wl (select-keys (alias-env env) @relevant)]
+            (if (empty? wl)
+              g
+              (let [[v t] (first wl)
+                    ;_ (prn "get fv of" t)
+                    fvs (fv env t)]
+                (recur (assoc g v fvs)
+                       (merge
+                         (dissoc wl v)
+                         (select-keys (alias-env env)
+                                      (set/difference
+                                        (set fvs)
+                                        (set (keys g))
+                                        (set (keys wl))
+                                        #{v})))))))
 
-        edge-map (merge type-env-edge-map
-                        alias-env-edge-map)
+          edge-map (merge type-env-edge-map
+                          alias-env-edge-map)
 
-        nodes (into #{}
-                    (map (fn [[v t]]
-                           (with-meta v {:type t})))
-                    (select-keys (merge (alias-env) (type-env))
-                                 (keys edge-map)))]
-    (mapply view-graph 
-            nodes
-            edge-map
-            (:viz-args config))))
+          nodes (into #{}
+                      (map (fn [[v t]]
+                             (with-meta v {:type t})))
+                      (select-keys (merge (alias-env env)
+                                          (type-env env))
+                                   (keys edge-map)))]
+      (mapply view-graph
+              nodes
+              edge-map
+              (:viz-args config)))))
 
 
 (defn ppresults []
@@ -2373,7 +1841,159 @@
                 (-> (->> (get-infer-results results-atom) (group-by (comp :name first :path))) 
                     (get vsym)))))
 
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; Inserting/deleting annotations
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+;; from tools.namespace
+(defn update-file
+  "Reads file as a string, calls f on the string plus any args, then
+  writes out return value of f as the new contents of file. Does not
+  modify file if the content is unchanged."
+  [file f & args]
+  (let [old (slurp file)
+        new (str (apply f old args))]
+    (when-not (= old new)
+      (spit file new))))
+
+(defn ns-file-name [sym]
+  (io/resource
+    (coerce/ns->file sym)))
+
+(def generate-ann-start ";; Start: Generated by clojure.core.typed - DO NOT EDIT")
+(def generate-ann-end ";; End: Generated by clojure.core.typed - DO NOT EDIT")
+
+(defn delete-generated-annotations-in-str 
+  "Delete lines between generate-ann-start and generate-ann-end."
+  [old]
+  {:pre [(string? old)]
+   :post [(string? %)]}
+  (with-open [rdr (java.io.BufferedReader.
+                    (java.io.StringReader. old))]
+    (loop [current-open false
+           lines (line-seq rdr)
+           out []]
+      (if (seq lines)
+        (if current-open
+          (if (= (first lines)
+                 generate-ann-end)
+            (recur false
+                   (next lines)
+                   out)
+            (recur current-open
+                   (next lines)
+                   out))
+          (if (= (first lines)
+                 generate-ann-start)
+            (recur true
+                   (next lines)
+                   out)
+            (recur current-open
+                   (next lines)
+                   (conj out (first lines)))))
+        (str/join "\n" out)))))
+
+(defn ns-end-line 
+  "Returns the last line of the ns form."
+  [s]
+  {:pre [(string? s)]
+   :post [(integer? %)]}
+  (let [ns-form (with-open [pbr (rdrt/indexing-push-back-reader
+                                  (rdrt/string-push-back-reader s))]
+                  (nprs/read-ns-decl pbr))
+        _ (assert ns-form "No namespace form found")
+        end-line (-> ns-form meta :end-line)
+        _ (assert (integer? end-line) 
+                  (str "No end-line found for ns form"
+                       (meta ns-form)))]
+    end-line))
+
+(defn insert-generated-annotations-in-str
+  "Insert annotations after ns form."
+  [old ann-str config]
+  {:pre [(string? old)
+         (string? ann-str)]
+   :post [(string? %)]}
+  (let [insert-after (ns-end-line old)]
+    (with-open [pbr (java.io.BufferedReader.
+                      (java.io.StringReader. old))]
+      (loop [ls (line-seq pbr)
+             current-line 0
+             out []]
+        (if (= current-line insert-after)
+          (str/join "\n" (concat out 
+                                 [(first ls)
+                                  ""
+                                  ann-str]
+                                 (rest ls)))
+          (if (seq ls)
+            (recur (next ls)
+                   (inc current-line)
+                   (conj out (first ls)))
+            (str/join "\n" (concat out 
+                                   [""
+                                    ann-str]))))))))
+    
+
+
+(defn delete-generated-annotations [ns config]
+  (impl/with-clojure-impl
+    (update-file (ns-file-name (ns-name ns)) delete-generated-annotations-in-str)))
+
+(declare infer-anns)
+
+(defn prepare-ann [ns config]
+  {:post [(string? %)]}
+  (let [as (infer-anns ns config)]
+    (binding [*print-length* nil
+              *print-level* nil]
+      (with-out-str
+        (println generate-ann-start)
+        (doseq [a as]
+          (pprint a))
+        (println generate-ann-end)))))
+
+(defn insert-generated-annotations [ns config]
+  (impl/with-clojure-impl
+    (update-file (ns-file-name (ns-name ns))
+                 insert-generated-annotations-in-str
+                 (prepare-ann ns config)
+                 config)))
+
+(defn replace-generated-annotations [ns config]
+  (impl/with-clojure-impl
+    (update-file (ns-file-name (ns-name ns))
+                 (fn [s]
+                   (-> s
+                       delete-generated-annotations-in-str
+                       (insert-generated-annotations-in-str
+                         (prepare-ann ns config)
+                         config))))))
+
+(defn infer-anns 
+  ([ns {:keys [output] :as config}]
+   {:pre [(or (instance? clojure.lang.Namespace ns)
+              (symbol? ns))]}
+   (binding [*ann-for-ns* #(or (some-> ns the-ns) *ns*)]
+     (-> (init-env)
+         (populate-envs config)
+         (envs-to-annotations config)))))
+
+(defn runtime-infer
+  ([{:keys [ns output]}]
+   (replace-generated-annotations ns 
+                                  (assoc (init-config)
+                                         :output output))))
+
 ;; TESTS
+
+(comment
+(defmacro defntrack [n & args]
+  `(def ~n (track-def-init
+             '~(symbol (str (ns-name *ns*)) (str n))
+             '~(ns-name *ns*)
+             (fn ~@args))))
 
 (defntrack foo 
   [a]
@@ -2531,8 +2151,6 @@
 
 (dotimes [_ 100]
   (a-b-nested))
-
-(comment
 
 (ppres)
 
