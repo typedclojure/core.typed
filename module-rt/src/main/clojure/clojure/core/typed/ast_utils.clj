@@ -3,8 +3,6 @@
             [clojure.core.typed.contract-utils :as con]
             [clojure.core.typed.coerce-utils :as coerce]))
 
-(alter-meta! *ns* assoc :skip-wiki true)
-
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; AST ops
 

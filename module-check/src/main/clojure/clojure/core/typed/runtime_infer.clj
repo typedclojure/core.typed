@@ -152,10 +152,8 @@
   ([parent base]
    {:infer-results #{}
     :equivs []
-    :path-occ {}
-    ; current path
-    :base base
-    :parent parent}))
+    ;; TODO
+    :path-occ {}}))
 
 ; results-atom : (Atom InferResultEnv)
 (def results-atom (atom (initial-results)
@@ -186,12 +184,11 @@
    :type cls})
 
 (defn var-path 
-  ([name] (var-path nil name false))
-  ([ns name import?]
+  ([name] (var-path nil name))
+  ([ns name]
    {:pre [((some-fn symbol? nil?) ns)
           (symbol? name)]}
    {:op :var
-    :import? import?
     :ns ns
     :name name}))
 
@@ -453,16 +450,6 @@
   {:pre [(symbol? s)]
    :post [(symbol? %)]}
   (qualify-symbol-in (the-ns 'clojure.core.typed) s))
-
-(defn qualify-typed-keyword [s]
-  {:pre [(symbol? s)]
-   :post [(keyword? %)]}
-  (keyword (str ":" (qualify-typed-symbol s))))
-
-(defn qualify-typed-keyword-in [ns s]
-  {:pre [(symbol? s)]
-   :post [(keyword? %)]}
-  (keyword (str ":" (qualify-typed-symbol s))))
 
 ; [Node :-> Any]
 (defn unparse-type' [{:as m}]
@@ -1374,9 +1361,10 @@
   ([results-atom vr ns]
    {:pre [(var? vr)
           (instance? clojure.lang.IAtom results-atom)]}
-   (track results-atom @vr [{:op :var
-                             :ns (ns-name ns)
-                             :name (impl/var->symbol vr)}])))
+   ;(prn "tracking" vr "in ns" ns)
+   (track results-atom @vr [(var-path
+                              (ns-name ns)
+                              (impl/var->symbol vr))])))
 
 (defmacro track-var [v]
   `(track-var' (var ~v)))
@@ -1400,7 +1388,6 @@
 
 (defn wrap-var-deref [expr vsym *ns*]
   (do
-    #_
     (println (str "Instrumenting " vsym " in " (ns-name *ns*) 
                   #_":" 
                   #_(-> expr :env :line)
@@ -1422,10 +1409,7 @@
              :form `(var ~vsym)
              :env (:env expr)
              :var (:var expr)}
-            {:op :var
-             :var #'*ns*
-             :form `*ns*
-             :env (:env expr)}]}))
+            (dummy-sym (:env expr) *ns*)]}))
 
 (defn dummy-sym [env vsym]
   {:op :const
@@ -1464,7 +1448,11 @@
        ;; Wrap def's so we can instrument their usages outside this
        ;; namespace.
        :def (if (:init expr)
-              (update expr :init wrap-def-init (ast/def-var-name expr) *ns*)
+              (update expr :init 
+                      (fn [init]
+                        (-> init
+                            check
+                            (wrap-def-init (ast/def-var-name expr) *ns*))))
               expr)
        ;; Only wrap library imports so we can infer how they are used.
        :var (let [vsym (impl/var->symbol (:var expr))
@@ -1653,12 +1641,7 @@
 ;    ))
 
 (defn envs-to-annotations [env config]
-  (let [tenv (into {}
-                   (filter (fn [[k v]]
-                             ;(prn "k" k)
-                             (= (str (current-ns))
-                                (namespace k))))
-                   (type-env env))
+  (let [tenv (type-env env)
         tfvs (into #{}
                    (mapcat
                      (fn [t]
@@ -1668,7 +1651,11 @@
                  (filter (comp tfvs key))
                  (alias-env env))]
     (into
-      (into [`(declare ~@(map (comp symbol name key) as))]
+      (into [(list* (if (= (ns-resolve (current-ns) 'declare)
+                           #'clojure.core/declare)
+                      'declare
+                      'clojure.core/declare)
+                    (map (comp symbol name key) as))]
             (map (fn [[k v]]
                    (list (qualify-typed-symbol 'defalias)
                          (symbol (name k))
@@ -1676,7 +1663,12 @@
                  as))
       (map (fn [[k v]]
              (list (qualify-typed-symbol 'ann)
-                   (symbol (name k))
+                   (if (= (namespace k)
+                          (str (ns-name (current-ns))))
+                     ;; defs
+                     (symbol (name k))
+                     ;; imports
+                     k)
                    (unparse-type v))))
       tenv)))
 
@@ -1690,11 +1682,14 @@
       env
       {:current-ns 'clojure.core.typed.test.mini-occ
        :top-levels 
+       :all
+       #_
        #{;`take-map
          ; `a-b-nested
          ;'clojure.core.typed.test.mini-occ/parse-exp
-         'clojure.core.typed.test.mini-occ/parse-prop
+         ;'clojure.core.typed.test.mini-occ/parse-prop
          ;`mymapv
+         `pprint
          }
        :viz-args {:options (-> viz-configs :options :projector)
                   :node->descriptor (-> viz-configs
@@ -1772,13 +1767,13 @@
                       :or {current-ns (#'current-ns)}
                       :as config}]
   (binding [*ann-for-ns* (fn [] current-ns)]
-    (prn (#'current-ns))
+    ;(prn (#'current-ns))
     (let [relevant (atom #{})
           type-env-edge-map 
           (reduce
             (fn [g [v t]]
-              (if (or (contains? top-levels v)
-                      (contains? top-levels :all))
+              (if (or (= :all top-levels)
+                      (contains? top-levels v))
                 (let [fvs (fv env t)]
                   (swap! relevant into fvs)
                   (assoc g v fvs))
