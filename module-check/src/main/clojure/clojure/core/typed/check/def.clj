@@ -1,5 +1,6 @@
 (ns clojure.core.typed.check.def
   (:require [clojure.core.typed.coerce-utils :as coerce]
+            [clojure.core.typed :as t]
             [clojure.core.typed.ns-options :as ns-opts]
             [clojure.core.typed.current-impl :as impl]
             [clojure.core.typed.check.utils :as cu]
@@ -28,11 +29,16 @@
   (let [gradually-typed? (impl/impl-case
                            :clojure
                            (let [m (meta (cu/expr-the-ns expr))] ;; FIXME `expr-the-ns` doesn't work for CLJS 
-                             (or 
-                               (= :core.typed/gradual (:lang m))
-                               (-> m
-                                   :core.typed
-                                   :gradual-exports)))
+                             (and
+                               ; don't generate contracts for definitions with 
+                               ; {:clojure.core.typed/no-contract true}
+                               ; metadata
+                               (not (-> expr :name meta ::t/no-contract))
+                               (or 
+                                 (= :core.typed/gradual (:lang m))
+                                 (-> m
+                                     :core.typed
+                                     :gradual-exports))))
                            :cljs nil)
         init-provided (init-provided? expr)
         _ (assert init-provided)

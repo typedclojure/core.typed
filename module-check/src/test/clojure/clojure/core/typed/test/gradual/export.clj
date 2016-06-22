@@ -9,9 +9,10 @@
 (defn my-plus [x y]
   (+ x y))
 
-
-
-
+(t/ann no-contract (t/All [x] [x :-> x]))
+(defn ^::t/no-contract
+  no-contract [x]
+  x)
 
 
 
