@@ -1823,10 +1823,10 @@
         env (reduce
               (fn [env [kset as]]
                 (if (< 1 (count as))
-                  (let [_ (prn "Merging" kset as)
+                  (let [;_ (prn "Merging" kset as)
                         ;; join all aliases non-recursive aliases
                         as (remove #(recursive-alias? env %) as)
-                        _ (prn "Removed recursive aliases, merging:" as)
+                        ;_ (prn "Removed recursive aliases, merging:" as)
                         atyp (apply join* (map #(resolve-alias env (-alias %)) as))
                         [anew arst] [(first as) (rest as)]
                         ;; rewrite anew to joined type
@@ -1863,12 +1863,12 @@
         ;; with the same keys (they must point to *exactly*
         ;; one top-level HMap, not a union etc.)
         env (squash-horizonally env config)
-        _ (prn "finished squash-horizonally")
+        ;_ (prn "finished squash-horizonally")
         ;; Clean up redundant aliases and inline simple
         ;; type aliases.
-        _ (prn "Start follow-all")
+        ;_ (prn "Start follow-all")
         env (follow-all env (assoc config :simplify? false))
-        _ (prn "end follow-all")
+        ;_ (prn "end follow-all")
         ]
     #_(prn "done populating")
     env))
@@ -2007,21 +2007,21 @@
                       :or {current-ns (#'current-ns)}
                       :as config}]
   (binding [*ann-for-ns* (fn [] current-ns)]
-    (prn (#'current-ns))
+    ;(prn (#'current-ns))
     (let [type-env-edge-map 
           (reduce
             (fn [g [v t]]
               (if (or (= :all top-levels)
                       (contains? top-levels v))
                 (let [fvs (fv env t)]
-                  (prn (unparse-type t))
-                  (prn fvs)
+                  ;(prn (unparse-type t))
+                  ;(prn fvs)
                   (assoc g v fvs))
                 g))
             {}
             (type-env env))
 
-          _ (prn "type-env-edge-map" type-env-edge-map)
+          ;_ (prn "type-env-edge-map" type-env-edge-map)
 
           alias-env-edge-map
           (loop [g {}
@@ -2048,7 +2048,7 @@
                      type-env-edge-map
                      alias-env-edge-map)
 
-          _ (prn edge-map)
+          ;_ (prn edge-map)
 
           nodes (into #{}
                       (map (fn [[v t]]
