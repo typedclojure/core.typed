@@ -6,7 +6,7 @@
             [clojure.java.io :as io]
             [clojure.core.typed.ast-utils :as ast]
             [clojure.core.typed.current-impl :as impl]
-            ;[clojure.core.typed.debug :refer [dbg]]
+            [clojure.core.typed.debug :refer [dbg]]
             [clojure.tools.reader.reader-types :as rdrt]
             [clojure.tools.namespace.parse :as nprs]
             [clojure.core.typed.coerce-utils :as coerce]))
@@ -55,6 +55,7 @@
      '{:op :set-entry}
      '{:op :seq-entry}
      '{:op :transient-vector-entry}
+     '{:op :atom-contents}
      '{:op :key
        :keys (Set Kw)
        :key Kw}
@@ -227,8 +228,17 @@
 (defn transient-vector-entry []
   {:op :transient-vector-entry})
 
+(defn atom-contents []
+  {:op :atom-contents})
+
+(defn type? [t]
+  (and (map? t)
+       (keyword? (:op t))))
+
 (defn -class [cls args]
-  {:pre [(class? cls)]}
+  {:pre [(class? cls)
+         (vector? args)
+         (every? type? args)]}
   {:op :class
    :class cls
    :args args})
@@ -278,11 +288,9 @@
     :index (list 'index (:count p) (:nth p))
     :set-entry (list 'set-entry)
     :seq-entry (list 'seq-entry)
-    :transient-vector-entry (list 'transient-vector-entry)))
+    :transient-vector-entry (list 'transient-vector-entry)
+    :atom-contents (list 'atom-contents)))
 
-(defn type? [t]
-  (and (map? t)
-       (keyword? (:op t))))
 
 (defn HMap? [t]
   (= :HMap (:op t)))
@@ -317,6 +325,11 @@
 
 (def ^:dynamic *type-var-scope* #{})
 
+(defn HMap-keyset [t]
+  {:pre [(HMap? t)]
+   :post [(set? %)]}
+  (set (keys (:map t))))
+
 (defn keysets
   ([env t] (keysets env t #{}))
   ([env t seen]
@@ -328,7 +341,7 @@
            ([t] (keysets env t seen))
            ([t seen] (keysets env t seen)))]
      (case (:op t)
-       :HMap #{(set (keys (:map t)))}
+       :HMap #{(HMap-keyset t)}
        :union (into #{}
                     (mapcat keysets)
                     (:types t))
@@ -368,6 +381,7 @@
 
     (symbol? m) (case m
                   Nothing {:op :union :types #{}}
+                  Sym (-class clojure.lang.Symbol [])
                   (cond
                     (contains? *type-var-scope* m)
                     {:op :var
@@ -411,7 +425,7 @@
                             [(parse-type (second m))])
                 Set (-class clojure.lang.IPersistentSet
                             [(parse-type (second m))])
-                Sym (-class clojure.lang.Symbol [])
+                Nothing (make-Union #{})
                 (let [res (resolve (first m))]
                   (cond ;(contains? (alias-env @*envs*) (:name (first m)))
                         ;(-alias (first m))
@@ -442,7 +456,8 @@
                    (when (= ns v)
                      k))
                  (ns-aliases (the-ns (current-ns))))]
-    (symbol (or (str talias)
+    (symbol (or (when talias
+                  (str talias))
                 (str (ns-name ns)))
             (str s))))
 
@@ -450,6 +465,15 @@
   {:pre [(symbol? s)]
    :post [(symbol? %)]}
   (qualify-symbol-in (the-ns 'clojure.core.typed) s))
+
+(defn resolve-class [^Class c]
+  {:pre [(class? c)]
+   :post [(symbol? %)]}
+  (symbol
+    (if (= (ns-resolve (current-ns) (symbol (.getSimpleName c)))
+           c)
+      (.getSimpleName c)
+      (.getName c))))
 
 ; [Node :-> Any]
 (defn unparse-type' [{:as m}]
@@ -483,18 +507,29 @@
                     (:arities m))]
            (if (== 1 (count as))
              (first as)
-             (list* 'IFn as)))
-    :class (let [cls (condp = (:class m)
-                       clojure.lang.IPersistentVector (qualify-typed-symbol 'Vec)
-                       clojure.lang.IPersistentSet (qualify-typed-symbol 'Set)
-                       clojure.lang.Symbol (qualify-typed-symbol 'Sym)
-                       (if *unparse-abbrev-class*
-                         (symbol 
-                           (apply str (last (partition-by #{\.} (str (:class m))))))
-                         (:class m)))]
-             (if (seq (:args m))
-               (list* cls (map unparse-type (:args m)))
-               cls))
+             (list* (qualify-typed-symbol 'IFn) as)))
+    :class (letfn [(unparse-class [^Class c args]
+                     {:pre [(class? c)]}
+                     (cond
+                       (.isArray c) (list 'Array (unparse-class (.getComponentType c) args))
+                       :else
+                       (let [cls (condp = c
+                                   clojure.lang.IPersistentMap (qualify-typed-symbol 'Map)
+                                   clojure.lang.IPersistentVector (qualify-typed-symbol 'Vec)
+                                   clojure.lang.IPersistentSet (qualify-typed-symbol 'Set)
+                                   clojure.lang.Symbol (qualify-typed-symbol 'Sym)
+                                   clojure.lang.Keyword (qualify-typed-symbol 'Kw)
+                                   clojure.lang.IAtom (qualify-typed-symbol 'Atom1)
+                                   clojure.lang.ISeq (qualify-typed-symbol 'Seqable)
+                                   clojure.lang.IPersistentList (qualify-typed-symbol 'Seqable)
+                                   clojure.lang.IFn 'AnyFunction
+                                   java.lang.String (qualify-typed-symbol 'Str)
+                                   (resolve-class c))
+                             _ (assert (symbol? cls))]
+                         (if (seq args)
+                           (list* cls (map unparse-type args))
+                           cls))))]
+             (unparse-class (:class m) (:args m)))
     :Top (qualify-typed-symbol 'Any)
     :unknown '?
     :free (:name m)
@@ -586,10 +621,10 @@
 
 
 (defn join-HMaps [t1 t2]
-  {:pre [(#{:HMap} (:op t1))
-         (#{:HMap} (:op t2))
+  {:pre [(HMap? t1)
+         (HMap? t2)
          (should-join-HMaps? t1 t2)]
-   :post (#{:HMap} (:op %))}
+   :post [(HMap? %)]}
   (let [t2-map (:map t2)]
     ;(prn "join HMaps")
     {:op :HMap
@@ -849,6 +884,7 @@
         :set-entry (recur env config nxt-pth (-class clojure.lang.IPersistentSet [type]))
         :seq-entry (recur env config nxt-pth (-class clojure.lang.ISeq [type]))
         :transient-vector-entry (recur env config nxt-pth (-class clojure.lang.ITransientVector [type]))
+        :atom-contents (recur env config nxt-pth (-class clojure.lang.IAtom [type]))
         :index (recur env config nxt-pth (-class clojure.lang.IPersistentVector [type]))
         :fn-domain (let [{:keys [arity position]} cur-pth]
                      (recur env config nxt-pth
@@ -869,9 +905,11 @@
   {:pre [(type? v)]
    :post [(type? %)]}
   (case (:op v)
-    :val v
-    :alias v
-    :unknown v
+    (:val 
+      :alias
+      :unknown
+      :Top)
+      v
     :HMap (update v :map (fn [m]
                            (reduce-kv
                              (fn [m k v]
@@ -893,8 +931,6 @@
     :union (apply join* (into #{}
                               (map f)
                               (:types v)))
-    ;:var (update v :name (fn [n]
-    ;                       (get s n n)))
     :IFn (update v :arities
                  (fn [as]
                    (mapv f as)))
@@ -956,8 +992,9 @@
   ;(prn "resolve-alias" name (keys (alias-env env)))
   (get (alias-env env) name))
 
-(def kw-val? (every-pred (comp #{:val} :op)
-                         (comp keyword? :val)))
+(def val? (comp #{:val} :op))
+
+(def kw-val? (every-pred val?  (comp keyword? :val)))
 
 #_ 
 (ann likely-HMap-dispatch [HMap -> (U nil '[Kw (Set Kw)])])
@@ -989,14 +1026,74 @@
       [k (case (:op t)
            :val #{(:val t)}
            :union (into #{}
-                        (map :val)
+                        (comp
+                          (filter val?)
+                          (map :val))
                         (:types t)))])))
+
+(defn alias-single-HMaps
+  "Traverse the type and alias environments
+  and ensure all HMaps are aliased"
+  [env config]
+  (letfn [(do-alias [env-atom t]
+            (let [n (symbol (-> (current-ns) str) "alias")
+                  a-atom (atom nil)
+                  _ (swap! env-atom 
+                           (fn [env]
+                             (let [[a env] (register-unique-alias env config n t)]
+                               ;; don't care if retried
+                               (reset! a-atom a)
+                               env)))
+                  a @a-atom
+                  _ (assert a)]
+              (-alias a)))
+          (single-HMap [env t]
+            {:pre [(type? t)]}
+            (let [env-atom (atom env)]
+              [(postwalk t
+                         (fn [t]
+                           (case (:op t)
+                             :HMap (do-alias env-atom t)
+                             t)))
+               @env-atom]))]
+    (let [env (reduce
+                (fn [env [v t]]
+                  (let [[t env] (single-HMap env t)]
+                    (update-type-env env assoc v t)))
+                env
+                (type-env env))
+          env (reduce
+                (fn [env [a t]]
+                  (let [[t env] (if (HMap? t)
+                                  ;; don't re-alias top-level HMap
+                                  (let [env-atm (atom env)]
+                                    [(walk-type-children
+                                       t
+                                       (fn [t]
+                                         (let [t-atom (atom nil)
+                                               _ (swap! env-atm
+                                                        (fn [env]
+                                                          (let [[t env] (single-HMap env t)]
+                                                            ;; don't care if this is retried
+                                                            (reset! t-atom t)
+                                                            env)))
+                                               t @t-atom]
+                                           (type? t)
+                                           t)))
+                                     @env-atm])
+                                  (single-HMap env t))]
+                    (update-alias-env env assoc a t)))
+                env
+                (alias-env env))]
+      env)))
 
 (defn alias-hmap-type
   "Recur up from the leaves of a type and
   replace HMaps and unions with fresh type
-  aliases. Also registers these type variables
-  in alias-env."
+  aliases. Also registers these type aliases
+  in alias-env.
+  
+  Does not traverse existing type aliases."
   [env' config t]
   (let [env-atom (atom env')]
     (letfn [(do-alias [t]
@@ -1125,10 +1222,73 @@
     ;(prn "simple-alias?" (:name a) res)
     res))
 
+(defn follow-aliases-in-type [env config t]
+  (reduce
+    (fn [t f]
+      ;(prn "Follow" f)
+      (loop [real (-alias f)
+             seen #{}]
+        (let [real-res (resolve-alias env real)]
+          ;(prn "real" real)
+          ;(prn "seen" seen)
+          ;(prn "real-res" (unp real-res))
+          (assert (alias? real))
+          (cond
+            ;; infinite loop, give up
+            (seen real) t
+
+            (alias? real-res)
+            (recur real-res (conj seen real))
+
+            :else (subst-alias t (-alias f) 
+                               ;; if the new alias is simple, just inline.
+                               (if (and (:simplify? config)
+                                        (simple-alias? env config real))
+                                 real-res
+                                 real))))))
+    t
+    (fv env t)))
+
+(defn follow-aliases-in-alias-env [env config]
+  (reduce 
+    (fn [env f]
+      ;; start at root f and rename
+      ;; each alias in f to the non-redundant
+      ;; alias.
+      (reduce 
+        (fn [env inner]
+          (loop [real (-alias inner)
+                 seen #{}]
+            (let [real-res (resolve-alias env real)]
+              ;(prn "following" inner)
+              ;(prn "real" real)
+              ;(prn "res real" (resolve-alias env real))
+              (assert (alias? real))
+              (cond
+                ;; infinite loop, give up
+                (seen real) env
+
+                (alias? real-res)
+                (recur real-res (conj seen real))
+
+                :else (register-alias env config
+                                      f
+                                      (subst-alias
+                                        (resolve-alias env (-alias f))
+                                        (-alias inner)
+                                        ;; if the new alias is simple, just inline.
+                                        (if (and (:simplify? config)
+                                                 (simple-alias? env config real))
+                                          real-res
+                                          real)))))))
+        env
+        (fv env (resolve-alias env (-alias f)))))
+    env
+    (keys (alias-env env))))
+
 (defn follow-aliases
   "Rename aliases to avoid redundant paths.
-  Also delete unnecessary aliases for simple
-  types.
+  Also delete unnecessary aliases for simple types.
   Also inline aliases if they are simple enough."
   [env config t]
   {:pre [(type? t)]
@@ -1137,67 +1297,28 @@
                  (map? env)))]}
   ;; rename aliases directly in type we are
   ;; returning. Never changes env.
-  (let [t (reduce
-            (fn [t f]
-              (loop [real (-alias f)
-                     seen #{}]
-                (let [real-res (resolve-alias env real)]
-                  (assert (alias? real))
-                  (cond
-                    ;; infinite loop, give up
-                    (seen real) t
-
-                    (alias? real-res)
-                    (recur real-res (conj seen real))
-
-                    :else (subst-alias t (-alias f) 
-                                       ;; if the new alias is simple, just inline.
-                                       (if (simple-alias? env config real)
-                                         real-res
-                                         real))))))
-            t
-            (fv env t))
+  (let [t (follow-aliases-in-type env config t)
         ;; follow downstream aliases
-        env (reduce 
-              (fn [env f]
-                ;; start at root f and rename
-                ;; each alias in f to the non-redundant
-                ;; alias.
-                (reduce 
-                  (fn [env inner]
-                    (loop [real (-alias inner)
-                           seen #{}]
-                      (let [real-res (resolve-alias env real)]
-                        ;(prn "following" inner)
-                        ;(prn "real" real)
-                        ;(prn "res real" (resolve-alias env real))
-                        (assert (alias? real))
-                        (cond
-                          ;; infinite loop, give up
-                          (seen real) env
-
-                          (alias? real-res)
-                          (recur real-res (conj seen real))
-
-                          :else (register-alias env config
-                                                f
-                                                (subst-alias
-                                                  (resolve-alias env (-alias f))
-                                                  (-alias inner)
-                                                  ;; if the new alias is simple, just inline.
-                                                  (if (simple-alias? env config real)
-                                                    real-res
-                                                    real)))))))
-                  env
-                  (fv env (resolve-alias env (-alias f)))))
-              env
-              (fv env t true))]
+        ;_ (prn "Follow downstream aliases")
+        env (follow-aliases-in-alias-env env config)]
+    ;(prn "Finish follow-aliases")
     [t env]))
 
+(defn follow-all
+  "Squash all aliases referenced by a type environment."
+  [env config]
+  (let [env (reduce (fn [env [v t]]
+                      ;(prn "Follow" v)
+                      (let [t (follow-aliases-in-type env config t)]
+                        ;(prn "Now update type env")
+                        (update-type-env env assoc v t)))
+                    env
+                    (type-env env))
+        env (follow-aliases-in-alias-env env config)]
+    env))
+
 (defn squash-all 
-  "Jump past redundant aliases that
-  just name another alias.
-  Also make recursive types when possible."
+  "Make recursive types when possible."
   [env config t]
   {:pre [(map? env)]
    :post [(let [[t env] %]
@@ -1210,8 +1331,7 @@
         env (reduce (fn [env a]
                       (squash env config a))
                     env (map -alias fvs))]
-    ;; rename types avoiding redundant type aliases
-    (follow-aliases env config t)))
+    [t env]))
 
 (defn add-tmp-aliases [env as]
   (update-alias-env env merge (zipmap as (repeat nil))))
@@ -1267,25 +1387,39 @@
                    (meta v)))
 
        (list? v)
-       (with-meta
-         (list* (map (fn [e]
-                       (track results-atom e (conj path (seq-entry))))
-                     v))
-         (meta v))
+       (let []
+         (when (empty? v)
+           (add-infer-result!
+             results-atom
+             (infer-result path 
+                           (-class clojure.lang.IPersistentList [(make-Union #{})]))))
+         (with-meta
+           (list* (map (fn [e]
+                         (track results-atom e (conj path (seq-entry))))
+                       v))
+           (meta v)))
 
        (and (seq? v)
             (not (list? v)))
-       (letfn [(wrap-lseq [v]
-                 (with-meta
-                   (lazy-seq
-                     (if (empty? v)
-                       v
-                       (cons (track results-atom
-                                    (first v)
-                                    (conj path (seq-entry)))
-                             (wrap-lseq (rest v)))))
-                   (meta v)))]
-         (wrap-lseq v))
+       (letfn [(wrap-lseq [v could-be-empty?]
+                 (lazy-seq
+                   (if (empty? v)
+                     (let []
+                       (when could-be-empty?
+                         (add-infer-result!
+                           results-atom
+                           (infer-result 
+                             path 
+                             (-class clojure.lang.ISeq [(make-Union #{})]))))
+                       v)
+                     (cons (track results-atom
+                                  (first v)
+                                  (conj path (seq-entry)))
+                           (wrap-lseq (rest v)
+                                      false)))))]
+         (with-meta
+           (wrap-lseq v true)
+           (meta v)))
 
        (instance? clojure.lang.ITransientVector v)
        (let [cnt (count v)]
@@ -1332,6 +1466,13 @@
                 (instance? clojure.lang.PersistentArrayMap v))
             (every? keyword? (keys v)))
        (let [ks (set (keys v))]
+         (when (empty? v)
+           (add-infer-result!
+             results-atom
+             (infer-result path
+                           (-class clojure.lang.IPersistentMap
+                                   [{:op :union :types #{}}
+                                    {:op :union :types #{}}]))))
          (reduce
            (fn [m k]
              (let [orig-v (get m k)
@@ -1344,8 +1485,16 @@
            v
            ks))
 
-       ;(instance? clojure.lang.IAtom v)
-       ;(reify
+        (instance? clojure.lang.IAtom v)
+        (let [new-path (conj path (atom-contents))
+              _ (track results-atom @v new-path)
+              _ (add-watch
+                  v
+                  new-path
+                  (fn [_ _ _ new]
+                    (future
+                      (track results-atom new new-path))))]
+          v)
 
        ((some-fn keyword? nil? false?) v)
        (do
@@ -1386,6 +1535,13 @@
      clojure.test
      clojure.string})
 
+(defn dummy-sym [env vsym]
+  {:op :const
+   :type :symbol
+   :form `'~vsym
+   :env env
+   :val vsym})
+
 (defn wrap-var-deref [expr vsym *ns*]
   (do
     (println (str "Instrumenting " vsym " in " (ns-name *ns*) 
@@ -1411,12 +1567,6 @@
              :var (:var expr)}
             (dummy-sym (:env expr) *ns*)]}))
 
-(defn dummy-sym [env vsym]
-  {:op :const
-   :type :symbol
-   :form `'~vsym
-   :env env
-   :val vsym})
 
 (defn wrap-def-init [expr vsym *ns*]
   ;(prn ((juxt identity class) (-> expr :env :ns)))
@@ -1620,16 +1770,106 @@
                                                     (pprint (unparse-type t)))))
                       :else (unmunge n))}))}})
 
+(defn relevant-aliases 
+  "Returns all referenced aliases from the type
+  environment."
+  [env]
+  {:pre [(map? env)]
+   :post [(set? %)
+          (every? symbol? %)]}
+  (reduce
+    (fn [as [v t]]
+      (into as (fv env t true)))
+    #{}
+    (type-env env)))
+
+(defn recursive-alias? [env a]
+  {:pre [(symbol? a)]}
+  (contains?
+    (fv env
+        (resolve-alias env (-alias a))
+        true)
+    a))
+
+(defn squash-horizonally
+  "Join aliases that refer to exactly
+  one HMap with the same keyset.
+  If maps are recursively defined, don't
+  merge them.
+  
+  eg. {a1 '{:a Int}
+       a2 '{:a Bool}}
+      => 
+      {a1 '{:a (U Int Bool)}
+       a2 a1}
+
+  eg. {a1 '{:a a2}
+       a2 '{:a (U nil a1)}}
+      => 
+      {a1 '{:a a2}
+       a2 '{:a (U nil a1)}}
+  "
+  [env config]
+  (let [as (relevant-aliases env)
+        _ (assert (set? as))
+        ksets (apply merge-with into
+                     (->> (alias-env env)
+                          (filter (fn [[k t]]
+                                    (and (contains? as k)
+                                         (HMap? t))))
+                          (map (fn [[a t]]
+                                 {:pre [(HMap? t)]}
+                                 {(HMap-keyset t) #{a}}))))
+        env (reduce
+              (fn [env [kset as]]
+                (if (< 1 (count as))
+                  (let [_ (prn "Merging" kset as)
+                        ;; join all aliases non-recursive aliases
+                        as (remove #(recursive-alias? env %) as)
+                        _ (prn "Removed recursive aliases, merging:" as)
+                        atyp (apply join* (map #(resolve-alias env (-alias %)) as))
+                        [anew arst] [(first as) (rest as)]
+                        ;; rewrite anew to joined type
+                        env (update-alias-env env assoc anew atyp)
+                        ;; arst all point to a
+                        env (reduce (fn [env aold]
+                                      (update-alias-env env assoc aold (-alias anew)))
+                                    env
+                                    arst)]
+                    env)
+                  env))
+              env
+              ksets)]
+    env))
+
 (defn populate-envs [env config]
   #_(prn "populating")
-  (let [env (generate-tenv config env @results-atom)
+  (let [;; create recursive types
         env (reduce
               (fn [env [v t]]
-                (let [[t env] (alias-hmap-type env config t)
-                      [t env] (squash-all env config t)]
+                (let [;; create graph nodes from HMap types
+                      [t env] (alias-hmap-type env config t)
+                      ;; squash local recursive types
+                      [t env] (squash-all env config t)
+                      ;; trim redundant aliases in local types
+                      [t env] (follow-aliases env (assoc config :simplify? true) t)
+                      ]
                   (update-type-env env assoc v t)))
               env
-              (type-env env))]
+              (type-env env))
+        ;; ensure all HMaps correspond to an alias
+        env (alias-single-HMaps env config)
+        ;; merge aliases that point to HMaps
+        ;; with the same keys (they must point to *exactly*
+        ;; one top-level HMap, not a union etc.)
+        env (squash-horizonally env config)
+        _ (prn "finished squash-horizonally")
+        ;; Clean up redundant aliases and inline simple
+        ;; type aliases.
+        _ (prn "Start follow-all")
+        env (follow-all env (assoc config :simplify? false))
+        _ (prn "end follow-all")
+        ]
     #_(prn "done populating")
     env))
 
@@ -1677,24 +1917,24 @@
   "Turn the currently inferred type environment
   into type aliases. Also print the alias environment."
   []
-  (let [env (populate-envs (init-env) (init-config))]
-    (visualize
-      env
-      {:current-ns 'clojure.core.typed.test.mini-occ
-       :top-levels 
-       :all
-       #_
-       #{;`take-map
-         ; `a-b-nested
-         ;'clojure.core.typed.test.mini-occ/parse-exp
-         ;'clojure.core.typed.test.mini-occ/parse-prop
-         ;`mymapv
-         `pprint
-         }
-       :viz-args {:options (-> viz-configs :options :projector)
-                  :node->descriptor (-> viz-configs
-                                        :node->descriptor
-                                        :label-with-keyset)}})))
+  (let [ns 'clojure.core.typed.test.mini-occ]
+    (binding [*ann-for-ns* (fn [] ns)]
+      (let [env (populate-envs (init-env) (init-config))]
+        (visualize
+          env
+          {:current-ns ns
+           :top-levels 
+           #{;`take-map
+             ; `a-b-nested
+             ;'clojure.core.typed.test.mini-occ/parse-exp
+             'clojure.core.typed.test.mini-occ/parse-prop
+             ;`mymapv
+             ;`pprint
+             }
+           :viz-args {:options (-> viz-configs :options :projector)
+                      :node->descriptor (-> viz-configs
+                                            :node->descriptor
+                                            :label-with-keyset)}})))))
 
 (defn fv
   "Returns the aliases referred in this type, in order of
@@ -1767,25 +2007,26 @@
                       :or {current-ns (#'current-ns)}
                       :as config}]
   (binding [*ann-for-ns* (fn [] current-ns)]
-    ;(prn (#'current-ns))
-    (let [relevant (atom #{})
-          type-env-edge-map 
+    (prn (#'current-ns))
+    (let [type-env-edge-map 
           (reduce
             (fn [g [v t]]
               (if (or (= :all top-levels)
                       (contains? top-levels v))
                 (let [fvs (fv env t)]
-                  (swap! relevant into fvs)
+                  (prn (unparse-type t))
+                  (prn fvs)
                   (assoc g v fvs))
                 g))
             {}
             (type-env env))
 
-          ;_ (prn "relevant" @relevant)
+          _ (prn "type-env-edge-map" type-env-edge-map)
 
           alias-env-edge-map
           (loop [g {}
-                 wl (select-keys (alias-env env) @relevant)]
+                 wl (select-keys (alias-env env) 
+                                 (apply concat (vals type-env-edge-map)))]
             (if (empty? wl)
               g
               (let [[v t] (first wl)
@@ -1801,8 +2042,13 @@
                                         (set (keys wl))
                                         #{v})))))))
 
-          edge-map (merge type-env-edge-map
-                          alias-env-edge-map)
+          edge-map (merge-with 
+                     (fn [& args]
+                       (assert nil "Overlap?"))
+                     type-env-edge-map
+                     alias-env-edge-map)
+
+          _ (prn edge-map)
 
           nodes (into #{}
                       (map (fn [[v t]]
@@ -1972,6 +2218,7 @@
               (symbol? ns))]}
    (binding [*ann-for-ns* #(or (some-> ns the-ns) *ns*)]
      (-> (init-env)
+         (generate-tenv config @results-atom)
          (populate-envs config)
          (envs-to-annotations config)))))
 
@@ -1984,6 +2231,13 @@
 ;; TESTS
 
 (comment
+
+  (binding [*ns* (the-ns 'clojure.core.typed.test.mini-occ)]
+    (-> (generate-tenv (init-env) (init-config) @results-atom)
+        (envs-to-annotations (init-config))
+        pprint)
+    )
+
 (defmacro defntrack [n & args]
   `(def ~n (track-def-init
              '~(symbol (str (ns-name *ns*)) (str n))

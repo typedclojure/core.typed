@@ -5,6 +5,7 @@
             [com.gfredericks.test.chuck.generators :as gen']
             [clojure.test.check.generators :as gen]
             [clojure.core.typed :as t]
+            [clojure.pprint :refer [pprint]]
             [clojure.core.typed.runtime-infer :refer :all]))
 
 (defmacro with-tmp-aliases [env as & body]
@@ -566,3 +567,110 @@
         {:op :IFn, 
          :arities [{:op :IFn1, :dom [], :rng {:op :class, :class java.lang.Long, :args []}}]}
         {:op :IFn, :arities [{:op :IFn1, :dom [{:op :unknown}], :rng {:op :class, :class java.lang.Long, :args []}}]})))
+
+(deftest squash-horizonally-test
+  (is (let [config (init-config)
+            env (as-> (init-env) env
+                  (update-alias-env env
+                                    assoc 
+                                    'foo (prs '{:baz Long})
+                                    'bar (prs '{:baz Boolean}))
+                  (binding [*envs* (atom env)]
+                    (update-type-env env
+                                     assoc 
+                                     `var1 (prs foo)
+                                     `var2 (prs bar))))
+            env (squash-horizonally env config)
+            env (follow-all env (assoc config :simplify? false))]
+        (prn env)
+        (= (get (type-env env) `var1)
+           (get (type-env env) `var2)))))
+
+(defn anns-from-tenv [tenv]
+  (let [ns (create-ns (gensym))]
+    (binding [*ann-for-ns* (constantly ns)
+              *ns* ns]
+      (let [_ (prn (current-ns))
+            env (as-> (init-env) env
+                  (update-type-env env merge tenv))
+            config (init-config)
+            env (populate-envs env config)
+            anns (envs-to-annotations env config)]
+        (pprint anns)))))
+
+(let [st-type (prs
+                '{:quads
+                  (Vec
+                    '{:klingons java.lang.Long,
+                      :quadrant (Vec java.lang.Long),
+                      :stars java.lang.Long,
+                      :bases java.lang.Long}),
+                  :stardate
+                  '{:start java.lang.Long,
+                    :current java.lang.Long,
+                    :end java.lang.Long},
+                  :current-klingons (Vec Nothing),
+                  :starting-klingons java.lang.Long,
+                  :lrs-history (Vec java.lang.String),
+                  :current-sector (Vec java.lang.Long),
+                  :enterprise
+                  '{:photon_torpedoes java.lang.Long,
+                    :sector (Vec java.lang.Long),
+                    :quadrant (Vec (U java.lang.Integer java.lang.Long)),
+                    :energy java.lang.Long,
+                    :damage
+                    '{:phasers java.lang.Long,
+                      :warp_engines java.lang.Long,
+                      :damage_control java.lang.Long,
+                      :long_range_sensors java.lang.Long,
+                      :short_range_sensors java.lang.Long,
+                      :computer_display java.lang.Long,
+                      :photon_torpedo_tubes java.lang.Long,
+                      :shields java.lang.Long},
+                    :is_docked false,
+                    :shields java.lang.Long}})]
+  (anns-from-tenv {'t1 st-type
+                   't2 st-type}))
+
+(let [t (prs
+  [(U
+    '{:exp '{:name Sym, :E ':var},
+      :P ':is,
+      :type '{:T ':intersection, :types (Set Nothing)}}
+    '{:P ':not,
+      :p
+      '{:P ':=,
+        :exps
+        (Set
+         (U
+          '{:name Sym, :E ':var}
+          '{:args (Vec '{:name Sym, :E ':var}),
+            :fun '{:name Sym, :E ':var},
+            :E ':app}))}}
+    '{:P ':=,
+      :exps
+      (Set
+       (U
+        '{:name Sym, :E ':var}
+        '{:args (Vec '{:name Sym, :E ':var}),
+          :fun '{:name Sym, :E ':var},
+          :E ':app}))}
+    '{:P (U ':or ':and),
+      :ps
+      (Set
+       (U
+        '{:exp '{:name Sym, :E ':var},
+          :P ':is,
+          :type '{:T ':intersection, :types (Set Nothing)}}
+        '{:P ':=,
+          :exps
+          (Set
+           (U
+            '{:name Sym, :E ':var}
+            '{:args (Vec '{:name Sym, :E ':var}),
+              :fun '{:name Sym, :E ':var},
+              :E ':app}))}))})
+   :->
+   Any])]
+(anns-from-tenv {'unparse-prop1 t
+                 'unparse-prop2 t}))

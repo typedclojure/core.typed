@@ -9,9 +9,6 @@
                  [org.clojure/core.match "0.2.0-alpha12"]
                  [org.clojure/core.async "0.2.371"]
                  [org.clojure/tools.trace "0.7.5" :exclusions [org.clojure/clojure]]
-                 ; CLJS fireplace REPL
-                 [com.cemerick/piggieback "0.1.3" :exclusions [org.clojure/tools.reader
-                                                               org.clojure/clojurescript]]
                  [org.clojure/jvm.tools.analyzer "0.6.1" :exclusions [org.clojure/clojure 
                                                                       org.clojure/clojurescript]]
                  [org.clojure/tools.analyzer.jvm "0.6.8"]
@@ -24,20 +21,18 @@
                  [org.clojure/test.check "0.9.0"]
                  [rhizome "0.2.5"]
                  ]
-  ;; for tools.reader 0.9.2
-  :aot [#_.clojure.tools.reader.impl.ExceptionInfo
-        ;; for asm-all
-        #_.org.objectweb.asm.Type
-        #_.org.objectweb.asm.Opcodes]
 
   ; fireplace repl middleware
-  :repl-options {:nrepl-middleware [#_cemerick.piggieback/wrap-cljs-repl
-                                    #_clojure.core.typed.repl/wrap-clj-repl]}
-
-  :plugins [[lein-typed "0.3.1"]
-            [org.typedclojure/mranderson "0.4.4"]]
-  :core.typed {:check [clojure.core.typed.test.records]
-               :check-cljs []}
+  :profiles {:dev {:dependencies [[com.cemerick/piggieback "0.2.1"
+                                   :exclusions [org.clojure/tools.reader
+                                                org.clojure/clojurescript]]
+                                  [org.clojure/tools.nrepl "0.2.10"]]
+                   ; CLJS fireplace REPL
+                   :repl-options {:repl-options {:port 64499}
+                                  ;:nrepl-middleware [cemerick.piggieback/wrap-cljs-repl]
+                                  }
+                   }
+             }
 
   :injections [(require 'clojure.core.typed)
                (clojure.core.typed/install)]
@@ -59,8 +54,4 @@
                "module-rt/test/clojure"
                "module-rt/test/cljs"]
 
-  :profiles {:dev {:repl-options {:port 64499}}}
-
-  :cljsbuild {:builds {}}
-
-  :dev-dependencies [])
+  :cljsbuild {:builds {}})
