@@ -20,9 +20,13 @@
             ((impl/v 'clojure.core.typed.util-cljs/emit-form) expr))))
 
 (defn constant-expr [expr]
-  {:pre [(#{:quote} (:op expr))
-         (#{:const} (:op (:expr expr)))]}
-  (-> expr :expr :val))
+  {:pre [(#{:const :quote} (:op expr))]}
+  (case (:op expr)
+    :quote
+    (do (assert (#{:const} (:op (:expr expr))))
+        (-> expr :expr :val))
+    :const
+    (-> expr :val)))
 
 (defn do-statements-value [cexprs]
   ((impl/impl-case

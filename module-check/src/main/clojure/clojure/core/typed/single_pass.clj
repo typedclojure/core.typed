@@ -19,6 +19,7 @@
             [clojure.java.io :as io]
             [clojure.repl :as repl]
             [clojure.string :as string]
+            [clojure.core.typed.profiling :as p]
             [clojure.core.typed.utils :as ctu]
             [clojure.tools.analyzer :as analyzer]
             [clojure.tools.analyzer :as ta]
@@ -47,16 +48,25 @@
   ([form] (analyze form (ana.jvm/empty-env) {}))
   ([form env] (analyze form env {}))
   ([form env opts]
-   (env/ensure (ana.jvm/global-env)
-     (-> (analyze* (merge env (select-keys (meta form) [:line :column :ns :file])) form opts)
-         uniquify-locals))))
+   (with-bindings (merge {Compiler/LOADER          (RT/makeClassLoader)
+                          #'analyzer/macroexpand-1 (fn [form args]
+                                                     (macroexpand-1 form))
+                          #'*ns*                   (or (some-> (:ns env the-ns))
+                                                       *ns*)}
+                         (:bindings opts))
+     (env/ensure (p/p ::global-env (ana.jvm/global-env))
+                 (let [ast (p/p ::analyze* (analyze* (merge env (select-keys (meta form) [:line :column :ns :file])) form opts))
+                       ast (p/p ::uniquify-locals
+                                (uniquify-locals ast))]
+                   ast)))))
 
 ; eval might already be monkey-patched, eval' avoids infinite looping
 (defn eval' [frm]
-  (. clojure.lang.Compiler (eval frm)))
+  (p/p ::eval'
+   (. clojure.lang.Compiler (eval frm))))
 
 (defn eval-ast [opts ast]
-  (let [frm (emit-form/emit-form ast)
+  (let [frm (p/p ::emit-form (emit-form/emit-form ast))
         ;_ (prn "form" frm)
         result (eval' frm)]  ;; eval the emitted form rather than directly the form to avoid double macroexpansion
     (merge ast {:result result})))
@@ -128,11 +138,12 @@
            (merge ;; rebinds *ns* during analysis
                   ;; FIXME unclear which map needs to have *ns*, especially post TAJ 0.3.0
                   (let [;_ (prn "eval" mform *ns*)
-                        ast (analyze mform (assoc env :ns (ns-name *ns*))
+                        ast (p/p ::analyze
+                                 (analyze mform (assoc env :ns (ns-name *ns*))
                                      (-> opts 
                                          (dissoc :bindings-atom)
-                                         (assoc-in [:bindings #'*ns*] *ns*)))]
-                    (eval-fn opts ast))
+                                         (assoc-in [:bindings #'*ns*] *ns*))))]
+                    (p/p :eval-fn (eval-fn opts ast)))
                   {:raw-forms raw-forms})))))))
 
 (defn analyze-form
@@ -144,9 +155,7 @@
   evaluated in the current namespace"
   ([form] `(ast ~form {}))
   ([form opt]
-   `(binding [analyzer/macroexpand-1 (fn [form# env#]
-                                       (macroexpand-1 form#))]
-      (analyze+eval '~form ~opt))))
+   `(analyze+eval '~form ~opt)))
 
 ;;;;;;;;;;;;;;;;;;;;;;;
 ;; Utils
@@ -1644,7 +1653,7 @@
                       {:file file}))
          expr-ast (try
                     (with-bindings (analyzer-bindings-one env)
-                      (Compiler/analyze context form))
+                      (p/p ::Compiler_analyze (Compiler/analyze context form)))
                     (catch RuntimeException e
                       (throw (repl/root-cause e))))]
      (with-bindings (merge {;#'ana/macroexpand-1 macroexpand-1
@@ -1657,7 +1666,7 @@
                             ;#'*ns*              (the-ns (:ns env))
                             }
                            (:bindings opts))
-       (-> (analysis->map expr-ast env opts)
+       (-> (p/p ::analysis->map (analysis->map expr-ast env opts))
            (assoc :top-level true))))))
 
 (defn forms-seq
@@ -1774,14 +1783,56 @@
 
   (ast (Integer. (+ 1 1)))
 
-  (ast (map io/file [1 2]))
+  (time (ast (map io/file ["a" "b"])))
+  (time (clojure.lang.Compiler/eval '(map io/file ["a" "b"])))
 
+  (time
   (ast (do 
          (require '[clojure.repl :refer [pst]])
-         (pst)))
+         (pst 1000)))
+  )
+  (time (clojure.lang.Compiler/eval 
+                                       '(do 
+                                          (require '[clojure.repl :refer [pst]])
+                                          (pst 1000))))
+
+  (defmacro time-both [form]
+    `(do (p/profile :info :foo (time (ast ~form)))
+         (time (clojure.lang.Compiler/eval '~form))
+         nil))
+
+  (time
   (ast (deftype A [a b]
          Object
          (toString [this])))
+  )
+  (time (clojure.lang.Compiler/eval '(deftype A [a b]
+                                       Object
+                                       (toString [this]))))
+
+  (time-both 
+    (do
+      (deftype A [a b]
+        Object
+        (toString [this]))
+      (deftype A [a b]
+        Object
+        (toString [this]))
+      (deftype A [a b]
+        Object
+        (toString [this]))
+      (deftype A [a b]
+        Object
+        (toString [this]))
+      (deftype A [a b]
+        Object
+        (toString [this]))
+      (deftype A [a b]
+        Object
+        (toString [this]))
+      (deftype A [a b]
+        Object
+        (toString [this]))))
   
   ;children
   ; - what about optional keys? eg. :local-binding's :init? do we need an :optional case, or
