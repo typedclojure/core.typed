@@ -36,7 +36,10 @@
 
 (defn map-expr-at [expr key]
   (impl/impl-case
-    :clojure (let [_ (assert (#{:const} (:op expr)))
+    :clojure (let [expr (if (#{:quote} (:op expr))
+                          (:expr expr)
+                          expr)
+                   _ (assert (#{:const} (:op expr)))
                    v (:val expr)]
                (assert (contains? v key) key)
                (get v key))
