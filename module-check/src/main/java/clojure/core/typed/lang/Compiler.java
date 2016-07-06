@@ -6819,7 +6819,7 @@ public static Object macroexpand1(Object x) {
         try
           {
                     ISeq args = RT.cons(form, RT.cons(Compiler.LOCAL_ENV.get(), form.next()));
-          return v.applyTo(args);
+          return ((IFn)TYPED_MACRO_LOOKUP.invoke(v)).applyTo(args);
           }
         catch(ArityException e)
           {
@@ -7284,7 +7284,6 @@ static Var lookupVar(Symbol sym, boolean internNew, boolean registerMacro) {
 			}
 	if(var != null && (!var.isMacro() || registerMacro))
 		registerVar(var);
-  var = (Var)TYPED_MACRO_LOOKUP.invoke(var);
 	return var;
 }
 static Var lookupVar(Symbol sym, boolean internNew) {
