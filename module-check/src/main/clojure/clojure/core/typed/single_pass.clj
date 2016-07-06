@@ -1653,10 +1653,10 @@
                     (when-let [file (and (not= *file* "NO_SOURCE_FILE")
                                          *file*)]
                       {:file file}))
-         _ (prn "analyze*" form *ns*)
+         ;_ (prn "analyze*" form *ns*)
          expr-ast (try
                     (with-bindings (analyzer-bindings-one env)
-                      (prn "inner ns" *ns*)
+                      ;(prn "inner ns" *ns*)
                       (p/p ::Compiler_analyze (Compiler/analyze context form)))
                     (catch RuntimeException e
                       (throw (repl/root-cause e))))]
