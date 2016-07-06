@@ -175,22 +175,24 @@
    `(field-accessor ~class-obj '~field ~obj)))
 
 (defn- field-accessor [^Class class-obj field obj]
+  (p/p ::field-accessor
   (let [^java.lang.reflect.Field
         field (.getDeclaredField class-obj (name field))]
     (.setAccessible field true)
     (let [ret (.get field obj)]
       (if (instance? Boolean ret)
         (boolean ret)
-        ret))))
+        ret)))))
 
 (defn- method-accessor [^Class class-obj method obj types & args]
+  (p/p ::method-accessor
   (let [^java.lang.reflect.Method
         method (.getMethod class-obj (name method) (into-array Class types))]
     (.setAccessible method true)
     (try
       (.invoke method obj (object-array args))
       (catch java.lang.reflect.InvocationTargetException e
-        (throw (repl/root-cause e))))))
+        (throw (repl/root-cause e)))))))
 
 (defn- when-column-map [expr]
   (let [field (try (.getDeclaredField (class expr) "column")
@@ -1651,18 +1653,14 @@
                     (when-let [file (and (not= *file* "NO_SOURCE_FILE")
                                          *file*)]
                       {:file file}))
+         _ (prn "analyze*" form *ns*)
          expr-ast (try
                     (with-bindings (analyzer-bindings-one env)
+                      (prn "inner ns" *ns*)
                       (p/p ::Compiler_analyze (Compiler/analyze context form)))
                     (catch RuntimeException e
                       (throw (repl/root-cause e))))]
      (with-bindings (merge {;#'ana/macroexpand-1 macroexpand-1
-                            ;#'ana/create-var    create-var
-                            ;#'ana/parse         parse
-                            ;#'ana/var?          var?
-                            ;#'elides            (merge {:fn    #{:line :column :end-line :end-column :file :source}
-                            ;                            :reify #{:line :column :end-line :end-column :file :source}}
-                            ;                           elides)
                             ;#'*ns*              (the-ns (:ns env))
                             }
                            (:bindings opts))
@@ -1701,23 +1699,23 @@
   (let [uri (uri-for-ns ns-sym)]
     (LineNumberingPushbackReader. (io/reader uri))))
 
-(defmacro ^:private analyzer-bindings [source-path pushback-reader]
-  `(merge
-     {Compiler/LOADER (RT/makeClassLoader)
-      Compiler/SOURCE_PATH (str ~source-path)
-      Compiler/SOURCE (str ~source-path)
-      Compiler/METHOD nil
-      Compiler/LOCAL_ENV nil
-      Compiler/LOOP_LOCALS nil
-      Compiler/NEXT_LOCAL_NUM 0
-      RT/CURRENT_NS @RT/CURRENT_NS
-      Compiler/LINE_BEFORE (.getLineNumber ~pushback-reader)
-      Compiler/LINE_AFTER (.getLineNumber ~pushback-reader)
-      RT/UNCHECKED_MATH @RT/UNCHECKED_MATH
-      #'*warn-on-reflection* *warn-on-reflection*
-      Compiler/COLUMN_BEFORE (.getColumnNumber ~pushback-reader)
-      Compiler/COLUMN_AFTER (.getColumnNumber ~pushback-reader)
-      RT/DATA_READERS @RT/DATA_READERS}))
+(defn analyzer-bindings [source-path ^LineNumberingPushbackReader pushback-reader]
+  (merge
+    {Compiler/LOADER (RT/makeClassLoader)
+     Compiler/SOURCE_PATH (str source-path)
+     Compiler/SOURCE (str source-path)
+     Compiler/METHOD nil
+     Compiler/LOCAL_ENV nil
+     Compiler/LOOP_LOCALS nil
+     Compiler/NEXT_LOCAL_NUM 0
+     RT/CURRENT_NS @RT/CURRENT_NS
+     Compiler/LINE_BEFORE (.getLineNumber pushback-reader)
+     Compiler/LINE_AFTER (.getLineNumber pushback-reader)
+     RT/UNCHECKED_MATH @RT/UNCHECKED_MATH
+     #'*warn-on-reflection* *warn-on-reflection*
+     Compiler/COLUMN_BEFORE (.getColumnNumber pushback-reader)
+     Compiler/COLUMN_AFTER (.getColumnNumber pushback-reader)
+     RT/DATA_READERS @RT/DATA_READERS}))
 
 (defn analyze-file
   "Takes a file path and optionally a pushback reader.
@@ -1809,6 +1807,8 @@
   (time (clojure.lang.Compiler/eval '(deftype A [a b]
                                        Object
                                        (toString [this]))))
+
+  (ast (do (let [] (defn foooooooo [a]))))
 
   (time-both 
     (do

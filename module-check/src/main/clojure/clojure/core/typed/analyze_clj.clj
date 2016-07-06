@@ -78,6 +78,9 @@
           nil)))
    })
 
+(defn typed-macro-lookup [var]
+  (get typed-macros var var))
+
 ;; copied from tools.analyze.jvm to insert `typed-macros`
 (defn macroexpand-1
   "If form represents a macro form or an inlineable function,returns its expansion,

@@ -43,10 +43,10 @@ public class Compiler implements Opcodes{
 
   static IFn REQUIRE = Clojure.var("clojure.core", "require");
   static {
-    REQUIRE.invoke(Clojure.read("clojure.tools.analyzer"));
+    REQUIRE.invoke(Clojure.read("clojure.core.typed.analyze-clj"));
   }
 
-  static IFn MACROEXPAND1 = Clojure.var("clojure.tools.analyzer", "macroexpand-1");
+  static IFn TYPED_MACRO_LOOKUP = (IFn) Clojure.var("clojure.core.typed.analyze-clj", "typed-macro-lookup");
 
 	// clojure.lang.RT privates
 	static Keyword LINE_KEY = Keyword.intern(null, "line");
@@ -6786,8 +6786,100 @@ public static Object preserveTag(ISeq src, Object dst) {
 	return dst;
 }
 
+public static Object macroexpand1(Object x) {
+  if(x instanceof ISeq)
+    {
+    ISeq form = (ISeq) x;
+    Object op = RT.first(form);
+    if(isSpecial(op))
+      return x;
+    //macro expansion
+    Var v = isMacro(op);
+    if(v != null)
+      {
+        // Do not check specs while inside clojure.spec
+        if(! "clojure/spec.clj".equals(SOURCE_PATH.deref()))
+          {
+          try
+            {
+              final Namespace checkns = Namespace.find(Symbol.intern("clojure.spec"));
+              if (checkns != null)
+                {
+                  final Var check = Var.find(Symbol.intern("clojure.spec/macroexpand-check"));
+                  if ((check != null) && (check.isBound()))
+                    check.applyTo(RT.cons(v, RT.list(form.next())));
+                }
+              Symbol.intern("clojure.spec");
+            }
+          catch(IllegalArgumentException e)
+            {
+            throw new CompilerException((String) SOURCE_PATH.deref(), lineDeref(), columnDeref(), e);
+            }
+          }
+        try
+          {
+                    ISeq args = RT.cons(form, RT.cons(Compiler.LOCAL_ENV.get(), form.next()));
+          return v.applyTo(args);
+          }
+        catch(ArityException e)
+          {
+            // hide the 2 extra params for a macro
+            throw new ArityException(e.actual - 2, e.name);
+          }
+      } else
+      {
+      if(op instanceof Symbol)
+        {
+        Symbol sym = (Symbol) op;
+        String sname = sym.getName();
+        //(.substring s 2 5) => (. s substring 2 5)
+        if(sym.getName().charAt(0) == '.')
+          {
+          if(RT.length(form) < 2)
+            throw new IllegalArgumentException(
+                "Malformed member expression, expecting (.member target ...)");
+          Symbol meth = Symbol.intern(sname.substring(1));
+          Object target = RT.second(form);
+          if(HostExpr.maybeClass(target, false) != null)
+            {
+            target = ((IObj)RT.list(IDENTITY, target)).withMeta(RT.map(TAG_KEY,CLASS));
+            }
+          return preserveTag(form, RT.listStar(DOT, target, meth, form.next().next()));
+          }
+        else if(namesStaticMember(sym))
+          {
+          Symbol target = Symbol.intern(sym.getNamespace());
+          Class c = HostExpr.maybeClass(target, false);
+          if(c != null)
+            {
+            Symbol meth = Symbol.intern(sym.getName());
+            return preserveTag(form, RT.listStar(DOT, target, meth, form.next()));
+            }
+          }
+        else
+          {
+          //(s.substring 2 5) => (. s substring 2 5)
+          //also (package.class.name ...) (. package.class name ...)
+          int idx = sname.lastIndexOf('.');
+//          if(idx > 0 && idx < sname.length() - 1)
+//            {
+//            Symbol target = Symbol.intern(sname.substring(0, idx));
+//            Symbol meth = Symbol.intern(sname.substring(idx + 1));
+//            return RT.listStar(DOT, target, meth, form.rest());
+//            }
+          //(StringBuilder. "foo") => (new StringBuilder "foo") 
+          //else 
+          if(idx == sname.length() - 1)
+            return RT.listStar(NEW, Symbol.intern(sname.substring(0, idx)), form.next());
+          }
+        }
+      }
+    }
+  return x;
+}
+
 static Object macroexpand(Object form) {
-	Object exf = MACROEXPAND1.invoke(form, null);
+	Object exf = macroexpand1(form);
 	if(exf != form)
 		return macroexpand(exf);
 	return form;
@@ -6804,7 +6896,7 @@ private static Expr analyzeSeq(C context, ISeq form, String name) {
 			RT.map(LINE, line, COLUMN, column));
 	try
 		{
-		Object me = MACROEXPAND1.invoke(form, null);
+		Object me = macroexpand1(form);
 		if(me != form)
 			return analyze(context, me, name);
 
@@ -7192,6 +7284,7 @@ static Var lookupVar(Symbol sym, boolean internNew, boolean registerMacro) {
 			}
 	if(var != null && (!var.isMacro() || registerMacro))
 		registerVar(var);
+  var = (Var)TYPED_MACRO_LOOKUP.invoke(var);
 	return var;
 }
 static Var lookupVar(Symbol sym, boolean internNew) {
