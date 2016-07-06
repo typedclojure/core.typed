@@ -16,10 +16,7 @@
                     third-arg)
         _ (map? third-arg)
         {{tsyns-quoted :ann} :val} third-arg
-        tsyns (if (seq? tsyns-quoted)
-                ;; unquote
-                (second tsyns-quoted)
-                tsyns-quoted)
+        tsyns tsyns-quoted
         _ (assert (map? tsyns))
         tbindings (binding [prs/*parse-type-in-ns* (cu/expr-ns expr)]
                     (mapv (comp prs/parse-type :type) (:params tsyns)))

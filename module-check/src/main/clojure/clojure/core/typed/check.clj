@@ -1678,8 +1678,11 @@
     (err/int-error "clojure.lang.MultiFn constructor requires an expected type"))
   (when-not (== 4 (count args))
     (err/int-error "Wrong arguments to clojure.lang.MultiFn constructor"))
-  (when-not (= (:val hierarchy-expr) #'clojure.core/global-hierarchy)
-    (err/int-error "Multimethod hierarchy cannot be customised"))
+  (let [hierarchy-expr (if (#{:quote} (:op hierarchy-expr))
+                         (:expr hierarchy-expr)
+                         hierarchy-expr)]
+    (when-not (= (:val hierarchy-expr) #'clojure.core/global-hierarchy)
+      (err/int-error "Multimethod hierarchy cannot be customised")))
   (when-not (= (:val default-expr) :default)
     (err/int-error "Non :default default dispatch value NYI"))
   (let [mm-name (:val nme-expr)
