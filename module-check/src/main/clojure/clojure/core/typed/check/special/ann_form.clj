@@ -18,10 +18,7 @@
   (let [[_ _ texpr] statements
         tsyn-quoted (ast-u/map-expr-at texpr :type)
         tsyn (impl/impl-case
-               :clojure (if (seq? tsyn-quoted)
-                          ;; unquote
-                          (second tsyn-quoted)
-                          tsyn-quoted)
+               :clojure tsyn-quoted
                :cljs tsyn-quoted)]
     tsyn))
 
