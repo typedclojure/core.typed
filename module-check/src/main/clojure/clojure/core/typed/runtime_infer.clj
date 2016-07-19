@@ -1147,6 +1147,7 @@
          (symbol? f)
          (alias? t)]
    :post [(map? env)]}
+  #_
   (prn "Try merging" f
        "with" (:name t))
   (let [tks (keysets env t)
