@@ -1347,6 +1347,9 @@
                     env (map -alias fvs))]
     [t env]))
 
+(defn add-tmp-aliases [env as]
+  (update-alias-env env merge (zipmap as (repeat nil))))
+
 (declare generate-tenv)
 
 ; ppenv : Env -> nil
