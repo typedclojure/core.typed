@@ -330,6 +330,7 @@
    :post [(set? %)]}
   (set (keys (:map t))))
 
+; keysets : Env Type (Set Type) -> Keysets
 (defn keysets
   ([env t] (keysets env t #{}))
   ([env t seen]
@@ -561,7 +562,8 @@
     #{t}))
 
 (defn flatten-unions [ts]
-  {:post [(set? %)]}
+  {:pre [(every? type? ts)]
+   :post [(set? %)]}
   (into #{} 
         (mapcat flatten-union)
         ts))
@@ -596,11 +598,13 @@
               (concat (:arities t1)
                       (:arities t2)))))
 
+; should-join-HMaps? : HMap HMap -> Bool
 (defn should-join-HMaps? [t1 t2]
-  ;; join if the keys are the same, 
-  ;; (TODO)
-  ;; and common
-  ;; keys are not always different keywords
+  {:pre [(HMap? t1)
+         (HMap? t2)]}
+  ;; join if the required keys are the same, 
+  ;; TODO and if 75% of the keys are the same
+  ;; TODO and if common keys are not always different keywords
   (let [t1-map (:map t1)
         t2-map (:map t2)]
     (and (= (set (keys t1-map))
@@ -905,11 +909,7 @@
   {:pre [(type? v)]
    :post [(type? %)]}
   (case (:op v)
-    (:val 
-      :alias
-      :unknown
-      :Top)
-      v
+    (:val :alias :unknown :Top) v
     :HMap (update v :map (fn [m]
                            (reduce-kv
                              (fn [m k v]
@@ -1141,18 +1141,24 @@
 
 (declare fv)
 
+; try-merge-aliases : Env Config Sym Alias -> Env
 (defn try-merge-aliases [env config f t]
   {:pre [(map? env)
          (symbol? f)
          (alias? t)]
    :post [(map? env)]}
-  ;(prn "Try merging" f
-  ;     "with" (:name t))
+  (prn "Try merging" f
+       "with" (:name t))
   (let [tks (keysets env t)
         fks (keysets env (-alias f))]
-    (if (and (seq (set/intersection tks fks))
-             (not (alias? (resolve-alias env (-alias f))))
-             (not (alias? (resolve-alias env t))))
+    (cond
+      ;; if there's some subset of keysets that are
+      ;; identical in both, collapse the entire thing.
+      ;; TODO is this too aggresssive? Shouldn't the keysets
+      ;; be exactly indentical?
+      (and (seq (set/intersection tks fks))
+           (not (alias? (resolve-alias env (-alias f))))
+           (not (alias? (resolve-alias env t))))
       (let [;_ (prn "Merging" f
             ;       "with" (:name t))
             ]
@@ -1166,8 +1172,10 @@
                                           (join
                                             (get m f)
                                             (subst-alias oldt (-alias f) t))))))))
-      env)))
 
+      :else env)))
+
+; squash : Env Config Alias -> Env
 (defn squash
   "Recur down an alias and
   merge types based on their keysets.
@@ -1216,12 +1224,14 @@
                        #{t}))
                (conj done t))))))
 
+; simple-alias? : Env Config Alias -> Bool
 (defn simple-alias? [env config a]
   (let [a-res (resolve-alias env a)
         res (not (contains? (set (fv env a-res true)) (:name a)))]
     ;(prn "simple-alias?" (:name a) res)
     res))
 
+; follow-aliases-in-type : Env Config Type -> Type
 (defn follow-aliases-in-type [env config t]
   (reduce
     (fn [t f]
@@ -1249,6 +1259,7 @@
     t
     (fv env t)))
 
+; follow-aliases-in-alias-env : Env Config -> Env
 (defn follow-aliases-in-alias-env [env config]
   (reduce 
     (fn [env f]
@@ -1286,6 +1297,7 @@
     env
     (keys (alias-env env))))
 
+; follow-aliases : Env Config Type -> '[Type Env]
 (defn follow-aliases
   "Rename aliases to avoid redundant paths.
   Also delete unnecessary aliases for simple types.
@@ -1304,6 +1316,7 @@
     ;(prn "Finish follow-aliases")
     [t env]))
 
+; follow-all : Env Config -> Env
 (defn follow-all
   "Squash all aliases referenced by a type environment."
   [env config]
@@ -1317,6 +1330,7 @@
         env (follow-aliases-in-alias-env env config)]
     env))
 
+; squash-all : Env Config Type -> '[Type Env]
 (defn squash-all 
   "Make recursive types when possible."
   [env config t]
@@ -1333,18 +1347,16 @@
                     env (map -alias fvs))]
     [t env]))
 
-(defn add-tmp-aliases [env as]
-  (update-alias-env env merge (zipmap as (repeat nil))))
+(declare generate-tenv)
 
-(declare generate-tenv ppenv)
-
+; ppenv : Env -> nil
 (defn ppenv [env]
   (pprint (into {}
                 (map (fn [[k v]]
                        [k (unparse-type v)]))
                 env)))
 
-
+; type-of : Any -> Kw
 (defn type-of [v]
   (cond
     (nil? v) :nil
@@ -1357,13 +1369,6 @@
     (fn? v) :fn
     (instance? clojure.lang.ITransientCollection v) :transient
     :else :other))
-
-;WeakIdentityRefMap
-#_
-(Ref (Map Int (Vec '[(U nil WeakReference)
-                     (Ref '{:infer-results (Set InferResult)
-                            :path Path
-                            :aliases (Set Path)})])))
 
 ; track : (Atom InferResultEnv) Value Path -> Value
 (defn track 
@@ -1505,6 +1510,7 @@
                (add-infer-result! results-atom (infer-result path (-class (class v) [])))
                v)))))
 
+; track-var : (IFn [Var -> Value] [(Atom Result) Var Sym -> Value])
 (defn track-var'
   ([vr] (track-var' results-atom vr *ns*))
   ([results-atom vr ns]
@@ -1518,6 +1524,7 @@
 (defmacro track-var [v]
   `(track-var' (var ~v)))
 
+; track-def-init : Sym Sym Value -> Value
 (defn track-def-init [vsym ns val]
   {:pre [(symbol? vsym)
          (namespace vsym)]}
@@ -1529,12 +1536,14 @@
 ;; Analysis compiler pass
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
+; ns-exclusions : (Set Sym)
 (def ns-exclusions
   '#{clojure.core
      clojure.core.typed
      clojure.test
      clojure.string})
 
+; dummy-sym : Env Sym -> TAExpr
 (defn dummy-sym [env vsym]
   {:op :const
    :type :symbol
@@ -1542,6 +1551,7 @@
    :env env
    :val vsym})
 
+; wrap-var-deref : TAExpr Sym Namespace -> TAExpr
 (defn wrap-var-deref [expr vsym *ns*]
   (do
     (println (str "Instrumenting " vsym " in " (ns-name *ns*) 
@@ -1567,7 +1577,7 @@
              :var (:var expr)}
             (dummy-sym (:env expr) *ns*)]}))
 
-
+; wrap-var-deref : TAExpr Sym Namespace -> TAExpr
 (defn wrap-def-init [expr vsym *ns*]
   ;(prn ((juxt identity class) (-> expr :env :ns)))
   (do
@@ -1589,6 +1599,7 @@
             (dummy-sym (:env expr) (:ns (:env expr)))
             expr]}))
 
+; check : (IFn [TAExpr -> TAExpr] [TAExpr CTType -> TAExpr]
 (defn check
   "Assumes collect-expr is already called on this AST."
   ([expr] (check expr nil))
