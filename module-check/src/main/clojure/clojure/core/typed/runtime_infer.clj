@@ -1469,7 +1469,8 @@
              (infer-result path
                            (-class clojure.lang.IPersistentSet
                                    [{:op :union :types #{}}]))))
-         (into #{}
+         ;; preserve sorted sets
+         (into (empty v)
                (map (fn [e]
                       (track results-atom e (conj path (set-entry)))))
                v))
