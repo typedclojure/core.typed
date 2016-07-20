@@ -1403,9 +1403,11 @@
              (infer-result path 
                            (-class clojure.lang.IPersistentList [(make-Union #{})]))))
          (with-meta
-           (list* (map (fn [e]
-                         (track results-atom e (conj path (seq-entry))))
-                       v))
+           (or
+             (list* (map (fn [e]
+                           (track results-atom e (conj path (seq-entry))))
+                         v))
+             ())
            (meta v)))
 
        (and (seq? v)
