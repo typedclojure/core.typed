@@ -1402,13 +1402,15 @@
              results-atom
              (infer-result path 
                            (-class clojure.lang.IPersistentList [(make-Union #{})]))))
-         (with-meta
-           (or
-             (list* (map (fn [e]
-                           (track results-atom e (conj path (seq-entry))))
-                         v))
-             ())
-           (meta v)))
+         (let [res 
+               (with-meta
+                 (apply list
+                        (map (fn [e]
+                               (track results-atom e (conj path (seq-entry))))
+                             v))
+                 (meta v))]
+           (assert (list? res))
+           res))
 
        (and (seq? v)
             (not (list? v)))
