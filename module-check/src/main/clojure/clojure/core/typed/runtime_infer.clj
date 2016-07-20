@@ -202,6 +202,9 @@
   {:op :unknown})
 
 (defn fn-dom-path [arity pos]
+  (assert (< pos arity)
+          (str "Arity: " arity
+               "Position:" pos))
   {:op :fn-domain
    :arity arity :position pos})
 
@@ -1387,10 +1390,13 @@
                      _ (add-infer-result! results-atom ir)]
                  (with-meta
                    (fn [& args]
-                     (let [blen (impl/bounded-length args 20) ;; apply only realises 20 places
+                     (let [limit 20
+                           blen (impl/bounded-length args limit) ;; apply only realises 20 places
                            args (map-indexed
                                   (fn [n v]
-                                    (track results-atom v (conj path (fn-dom-path blen n))))
+                                    (if (< n blen)
+                                      (track results-atom v (conj path (fn-dom-path blen n)))
+                                      v))
                                   args)]
                        (track results-atom (apply v args) (conj path (fn-rng-path blen)))))
                    (meta v)))
