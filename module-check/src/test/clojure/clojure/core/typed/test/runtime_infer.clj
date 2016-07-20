@@ -586,6 +586,10 @@
         (= (get (type-env env) `var1)
            (get (type-env env) `var2)))))
 
+(deftest track-test
+  ;; avoid NPE for list*
+  (is (track (atom {}) '() [])))
+
 (defn anns-from-tenv [tenv]
   (let [ns (create-ns (gensym))]
     (binding [*ann-for-ns* (constantly ns)
