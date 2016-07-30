@@ -284,14 +284,14 @@
    :post [(or (instance? clojure.reflect.Field %)
               (nil? %))]}
   (-> expr
-      ana/reflect-validated
+      #_ana/reflect-validated
       :reflected-field)) 
 
 (defn MethodExpr->Method [expr]
   {:pre []
    :post [(or (nil? %) (instance? clojure.reflect.Method %))]}
   (-> expr
-      ana/reflect-validated
+      #_ana/reflect-validated
       :reflected-method))
 
 (defn NewExpr->Ctor [expr]
@@ -299,7 +299,7 @@
    :post [(or (instance? clojure.reflect.Constructor %)
               (nil? %))]}
   (-> expr
-      ana/reflect-validated
+      #_ana/reflect-validated
       :reflected-ctor))
 
 ;FIXME I think this hurts more than it helps
