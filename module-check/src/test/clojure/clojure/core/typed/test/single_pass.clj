@@ -465,6 +465,8 @@
 #_(tr/untrace-vars clojure.tools.analyzer.passes.uniquify/-uniquify-locals)
 #_(tr/untrace-vars clojure.tools.analyzer.passes.uniquify/uniquify-locals*)
 
+;; FIXME add defprotocol to each test
+#_
 (deftest NewInstanceMethod-test
   (defprotocol Foo
     (bar [this a]))
