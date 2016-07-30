@@ -123,18 +123,19 @@
                                                        (dissoc opts :expected)))
                                        statements)
                  ret-expr (analyze+eval ret (assoc env :ns (ns-name *ns*)) opts)]
-             (-> {:op         :do
-                  :top-level  true
-                  :form       mform
-                  :statements statements-expr
-                  :ret        ret-expr
-                  :children   [:statements :ret]
-                  :env        env
-                  :result     (:result ret-expr)
-                  ;; could be nil if ret is unanalyzed
-                  ctu/expr-type (ctu/expr-type ret-expr)
-                  :raw-forms  raw-forms}
-               source-info/source-info))
+             (merge
+               (-> {:op         :do
+                    :top-level  true
+                    :form       mform
+                    :statements statements-expr
+                    :ret        ret-expr
+                    :children   [:statements :ret]
+                    :env        env
+                    :result     (:result ret-expr)
+                    :raw-forms  raw-forms}
+                   source-info/source-info)
+               (when (ctu/expr-type ret-expr)
+                 {ctu/expr-type (ctu/expr-type ret-expr)})))
            (merge ;; rebinds *ns* during analysis
                   ;; FIXME unclear which map needs to have *ns*, especially post TAJ 0.3.0
                   (let [;_ (prn "eval" mform *ns*)
@@ -153,9 +154,7 @@
 (defmacro ast
   "Returns the abstract syntax tree representation of the given form,
   evaluated in the current namespace"
-  ([form] `(ast ~form {}))
-  ([form opt]
-   `(analyze+eval '~form ~opt)))
+  ([form] `(analyze+eval '~form)))
 
 ;;;;;;;;;;;;;;;;;;;;;;;
 ;; Utils
@@ -464,7 +463,7 @@
        :tag tag
        :o-tag tag
        :atom (atom {})
-       :children nil}))
+       :children []}))
 
   ;  {:op   :binding
   ;   :doc  "Node for a binding symbol"
@@ -486,13 +485,18 @@
           ;_ (prn "binding init local-binding" (keys local-binding)
           ;       (:op local-binding))
           init (analysis->map (.init bi) env opt)
-          name (:name local-binding)]
+          tag (:tag init)
+          ;_ (prn "tag" tag)
+          name (if tag
+                 (with-meta (:name local-binding)
+                            {:tag tag})
+                 (:name local-binding))]
       (assert (symbol? name) "bindinginit")
       {:op :binding
        :form name
        :name name
        :env (inherit-env init env)
-       :tag (:tag init)
+       :tag tag
        :o-tag (:o-tag init)
        :local :unknown
        :init init
@@ -548,17 +552,20 @@
     [expr env opt]
     {:post [%]}
     (let [b (analysis->map (.b expr) env opt)
-          form (:name b)]
+          form (:name b)
+          lcl (dissoc ((:locals env) form)
+                      :init)]
       (assert (symbol? form))
       (assert (contains? (:locals env) form)
               (str form))
       ;(prn "LocalBindingExpr" env)
-      (assoc (dissoc ((:locals env) form)
-                     :init)
+      ;(prn "local" (:form lcl))
+      ;(prn "local" (meta (:form lcl)))
+      (assoc lcl
              :op :local
+             :children []
              ;; form has new metadata
-             :env env
-             :children [])))
+             :env env)))
 
   ;; Methods
   ; {:op   :static-call
