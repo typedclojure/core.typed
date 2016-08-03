@@ -429,8 +429,14 @@
                                            opt)
                             :body? true)]
             (assert (vector? binds))
+            (assert (every? #{:binding} (map :op binds)))
             {:op (if loop? :loop :let)
-             :form (list (if loop? 'loop* 'let*) 'TODO)
+             :form (list (if loop? 'loop* 'let*) 
+                         (vec
+                           (mapcat vector
+                                   (map :name binds)
+                                   (map (comp :form :init) binds)))
+                         (:form body))
              :env (inherit-env body top-env)
              :bindings binds
              :body body
@@ -487,8 +493,7 @@
           tag (:tag init)
           ;_ (prn "tag" tag)
           name (if tag
-                 (with-meta (:name local-binding)
-                            {:tag tag})
+                 (vary-meta (:name local-binding) assoc :tag tag)
                  (:name local-binding))]
       (assert (symbol? name) "bindinginit")
       {:op :binding
@@ -1077,9 +1082,10 @@
           body (assoc (analysis->map (.body obm) (assoc menv :loop-id loop-id) opt)
                       :body? true)
           name (symbol (field Compiler$NewInstanceMethod name obm))]
+      (assert (#{:binding} (:op this)))
       {:op :method
        :env (env-location env obm)
-       :this (assoc this :op :binding)
+       :this this
        :bridges ()
        :name name
        :loop-id loop-id
@@ -1133,20 +1139,20 @@
                           :loop-id     loop-id
                           :loop-locals (count params-expr)})
           body (analysis->map (.body obm) body-env opt)]
-      (merge
-        {:op :fn-method
-         :form form
-         :loop-id loop-id
-         :variadic? (boolean rest-param)
-         :params params-expr
-         :fixed-arity (count required-params)
-         :body (assoc body :body? true)
-         :env env
-         :tag (:tag body)
-         :o-tag (:o-tag body)
-         ;; Map LocalExpr@xx -> LocalExpr@xx
-         ;;:locals (map analysis->map (keys (.locals obm)) (repeat env) (repeat opt))
-         :children [:params :body]})))
+      (assert (every? #{:binding} (map :op params-expr)))
+      {:op :fn-method
+       :form form
+       :loop-id loop-id
+       :variadic? (boolean rest-param)
+       :params params-expr
+       :fixed-arity (count required-params)
+       :body (assoc body :body? true)
+       :env env
+       :tag (:tag body)
+       :o-tag (:o-tag body)
+       ;; Map LocalExpr@xx -> LocalExpr@xx
+       ;;:locals (map analysis->map (keys (.locals obm)) (repeat env) (repeat opt))
+       :children [:params :body]}))
 
   ; {:op   :fn
   ;  :doc  "Node for a fn* special-form expression"
@@ -1345,7 +1351,7 @@
        :expr the-expr
        :tag (:tag the-expr)
        :o-tag (:o-tag the-expr)
-       :children [:meta :children]}))
+       :children [:meta :expr]}))
 
   ;; do
   ; {:op   :do
