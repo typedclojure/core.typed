@@ -456,13 +456,12 @@
                  (analysis->map init env opt))
           form (.sym lb)
           tag (ju/maybe-class (.tag lb))]
+      ;(prn form (meta form) tag)
       {:op :local
        :name form
        :form form
        :env (inherit-env init env)
        :tag tag
-       :o-tag tag
-       :atom (atom {})
        :children []}))
 
   ;  {:op   :binding
@@ -552,7 +551,12 @@
     [expr env opt]
     {:post [%]}
     (let [b (analysis->map (.b expr) env opt)
-          form (:name b)
+          tag (.tag expr)
+          form (let [nme (:name b)]
+                 (if (.tag expr)
+                   (vary-meta nme assoc :tag tag)
+                   nme))
+          _ (assert (symbol? form))
           lcl (dissoc ((:locals env) form)
                       :init)]
       (assert (symbol? form))
@@ -564,6 +568,9 @@
       (assoc lcl
              :op :local
              :children []
+             :tag tag
+             :form form
+             :name form
              ;; form has new metadata
              :env env)))
 

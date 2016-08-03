@@ -653,6 +653,11 @@
   #_
   (is (-> (ast (ns foo)) emit-form))
   #_(is (-> (ast {:form '(ns foo)}) :val))
+  ; should not reflect
+  #_
+  (is (-> (ast (fn loading []
+                 (.getClass ^Object loading)))
+          emit-form))
   )
 
 (deftest KeywordInvoke-test

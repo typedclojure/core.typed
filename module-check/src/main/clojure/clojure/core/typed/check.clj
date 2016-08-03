@@ -1861,14 +1861,12 @@
   (def/check-def check expr expected))
 
 (add-check-method :deftype
-  [{expired-class :class-name :keys [fields methods env] :as expr} & [expected]]
-  {:pre [(class? expired-class)]
+  [{:keys [fields methods env] :as expr} & [expected]]
+  {:pre []
    :post [(-> % u/expr-type r/TCResult?)]}
   ;TODO check fields match, handle extra fields in records
-  ;(prn "Checking deftype definition:" expired-class)
   (binding [vs/*current-env* env]
-    (let [compiled-class 
-          (-> expired-class coerce/Class->symbol coerce/symbol->Class)
+    (let [compiled-class (:class-name expr)
           _ (assert (class? compiled-class))
           nme (coerce/Class->symbol compiled-class)
           field-syms (map :name fields)
