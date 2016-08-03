@@ -3591,7 +3591,7 @@ static class StaticInvokeExpr implements Expr, MaybePrimitiveExpr{
 
 }
 
-static class InvokeExpr implements Expr{
+public static class InvokeExpr implements Expr{
 	public final Expr fexpr;
 	public final Object tag;
 	public final IPersistentVector args;

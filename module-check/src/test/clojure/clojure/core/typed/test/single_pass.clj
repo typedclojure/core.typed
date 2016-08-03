@@ -621,7 +621,7 @@
 (deftest CatchExpr-test
   (is 
     ;; FIXME why is :ns different?
-    (= #{:loop-locals :ns :loop-id :file :o-tag :column :line :once :context :tag :atom}
+    (= #{:loop-locals :ns :loop-id :file :column :line :once :context :tag}
        (leaf-diff
          (-> (ast (try (catch Exception e))) :fn :methods first :body :ret
              :catches first :body :ret)

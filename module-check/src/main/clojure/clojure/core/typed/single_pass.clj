@@ -912,10 +912,10 @@
   Compiler$InvokeExpr
   (analysis->map
     [expr env opt]
-    (let [fexpr (analysis->map (field Compiler$InvokeExpr fexpr expr) env opt)
-          args (mapv #(analysis->map % env opt) (field Compiler$InvokeExpr args expr))
+    (let [fexpr (analysis->map (.fexpr expr) env opt)
+          args (mapv #(analysis->map % env opt) (.args expr))
           env (env-location env expr)
-          tag (ju/maybe-class (field Compiler$InvokeExpr tag expr))
+          tag (.tag expr)
           form (list* (emit-form/emit-form fexpr) (map emit-form/emit-form args))]
       (cond
         ;; TAJ always compiles :keyword-invoke sites where possible, Compiler.java
@@ -940,6 +940,9 @@
          :tag tag
          :o-tag tag
          :args args
+         ;; TODO find more metadata
+         :meta (when tag
+                 {:tag tag})
          :children [:fn :args]})))
 
          ;:is-protocol (field Compiler$InvokeExpr isProtocol expr)
