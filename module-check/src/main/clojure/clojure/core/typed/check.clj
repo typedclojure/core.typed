@@ -1505,10 +1505,9 @@
     (if (cu/should-rewrite?)
       (let [ctarget (add-type-hints ctarget)
             cargs (mapv add-type-hints cargs)
-            nexpr (let [e (assoc expr :target ctarget)]
-                    (if cargs
-                      (assoc e :args cargs)
-                      e))
+            nexpr (assoc expr 
+                         :target ctarget
+                         :args cargs)
             ;_ (prn (-> nexpr :target ((juxt :o-tag :tag))))
             rewrite (try-resolve-reflection nexpr)]
         ;(prn "rewrite" (:op rewrite))

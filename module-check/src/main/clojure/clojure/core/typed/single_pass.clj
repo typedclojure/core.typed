@@ -634,41 +634,51 @@
   ;          [:validated? "`true` if the method call could be resolved at compile time"]
   ;          ^:optional
   ;          [:class "If :validated? the class or interface the method belongs to"]]}
+  ; {:op   :host-interop
+  ;  :doc  "Node for a no-arg instance-call or for an instance-field that couldn't be resolved at compile time"
+  ;  :keys [[:form "`(. target m-or-f)`"]
+  ;         ^:children
+  ;         [:target "An AST node representing the target object"]
+  ;         [:m-or-f "Symbol naming the no-arg method or field to lookup in the target"]
+  ;         [:assignable? "`true`"]]}
   (analysis->map
     [expr env opt]
     (let [^java.lang.reflect.Method
-          rmethod (field Compiler$InstanceMethodExpr method expr)
-          ;_ (prn rmethod)
+          rmethod (.method expr)
           method (when rmethod
                    (@#'reflect/method->map rmethod))
           cls (some-> rmethod .getDeclaringClass)
-          target (merge (analysis->map (field Compiler$InstanceMethodExpr target expr) env opt)
+          target (merge (analysis->map (.target expr) env opt)
                         (when cls
                           {:tag cls
                            :o-tag cls}))
           args (mapv #(merge (analysis->map %1 env opt)
                              (when %2 {:tag %2 :o-tag %2}))
-                     (field Compiler$InstanceMethodExpr args expr)
+                     (.args expr)
                      (if rmethod
                        (.getParameterTypes rmethod)
                        (repeat nil)))
-          method-name (symbol (field Compiler$InstanceMethodExpr methodName expr))
-          tag (ju/maybe-class (field Compiler$InstanceMethodExpr tag expr))]
+          method-name (symbol (.methodName expr))
+          tag (ju/maybe-class (.tag expr))]
       (merge
-        {:op :instance-call
-         :form (list '. (emit-form/emit-form target)
+        {:form (list '. (emit-form/emit-form target)
                      (list* method-name (map emit-form/emit-form args)))
          :env (env-location env expr)
-         :instance target
-         :method method-name
          :args args
          :tag tag
          :o-tag tag
-         :children [:instance :args]}
-        (when method
-          {:validated? true
+         }
+        (if method
+          {:op :instance-call
+           :instance target
+           :method method-name
+           :children [:instance :args]
+           :validated? true
            :class cls
-           :reflected-method method}))))
+           :reflected-method method}
+          {:op :host-interop
+           :target target
+           :children [:target :args]}))))
 
   ;; Fields
   ;{:op   :static-field
@@ -710,31 +720,43 @@
   ;          [:instance "An AST node representing the instance to lookup the symbol on"]
   ;          [:assignable? "`true` if the field is set!able"]
   ;          [:class "The class the field belongs to"]]}
+  ; {:op   :host-interop
+  ;  :doc  "Node for a no-arg instance-call or for an instance-field that couldn't be resolved at compile time"
+  ;  :keys [[:form "`(. target m-or-f)`"]
+  ;         ^:children
+  ;         [:target "An AST node representing the target object"]
+  ;         [:m-or-f "Symbol naming the no-arg method or field to lookup in the target"]
+  ;         [:assignable? "`true`"]]}
+
   (analysis->map
     [expr env opt]
     (let [^java.lang.reflect.Field
-          rfield (field Compiler$InstanceFieldExpr field expr)
+          rfield (.field expr)
           mfield (when rfield
                    (@#'reflect/field->map rfield))
-          target (merge (analysis->map (field Compiler$InstanceFieldExpr target expr) env opt)
+          target (merge (analysis->map (.target expr) env opt)
                         (when rfield
                           {:tag (.getDeclaringClass rfield)
                            :o-tag (.getDeclaringClass rfield)}))
-          fstr (field Compiler$InstanceFieldExpr fieldName expr)
-          tag (ju/maybe-class (field Compiler$InstanceFieldExpr tag expr))]
+          fstr (.fieldName expr)
+          tag (ju/maybe-class (.tag expr))]
       (merge
-        {:op :instance-field
-         :form (list (symbol (str ".-" fstr)) (emit-form/emit-form target))
+        {:form (list (symbol (str "." fstr)) (emit-form/emit-form target))
          :env (env-location env expr)
-         :instance target
-         :class (field Compiler$InstanceFieldExpr targetClass expr)
-         :field (symbol fstr)
          :tag tag
-         :o-tag tag
-         :children [:instance]}
-        (when rfield
-          {:validated? true
-           :reflected-field mfield}))))
+         :o-tag tag}
+        (if rfield
+          {:op :instance-field
+           :class (.targetClass expr)
+           :field (symbol fstr)
+           :instance target
+           :validated? true
+           :reflected-field mfield
+           :children [:instance]}
+          {:op :host-interop
+           :m-or-f (symbol fstr)
+           :target target
+           :children [:target]}))))
 
   ; {:op   :new
   ;  :doc  "Node for a new special-form expression"

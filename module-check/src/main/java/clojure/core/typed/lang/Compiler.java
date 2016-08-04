@@ -219,7 +219,9 @@ static
 
 	}
 
-	static final public Var WARN_ON_REFLECTION = (Var) Clojure.var("clojure.core", "*warn-on-reflection*");
+// don't use the actual WARN_ON_REFLECTION because core.typed might be able
+// to resolve the reflection.
+	static final public Var WARN_ON_REFLECTION = Var.create(RT.F);
 
 
 //symbol->localbinding
@@ -1148,7 +1150,7 @@ static public abstract class HostExpr implements Expr, MaybePrimitiveExpr{
 static abstract class FieldExpr extends HostExpr{
 }
 
-static class InstanceFieldExpr extends FieldExpr implements AssignableExpr{
+public static class InstanceFieldExpr extends FieldExpr implements AssignableExpr{
 	public final Expr target;
 	public final Class targetClass;
 	public final java.lang.reflect.Field field;
@@ -1458,7 +1460,7 @@ static abstract class MethodExpr extends HostExpr{
 	}
 }
 
-static class InstanceMethodExpr extends MethodExpr{
+public static class InstanceMethodExpr extends MethodExpr{
 	public final Expr target;
 	public final String methodName;
 	public final IPersistentVector args;
