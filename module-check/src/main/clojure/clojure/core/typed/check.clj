@@ -1928,7 +1928,8 @@
               maybe-check-method
               (fn [{:keys [env] :as inst-method}]
                 ;; returns a vector of checked methods
-                {:post [(vector? %)]}
+                {:pre [(#{:method} (:op inst-method))]
+                 :post [(vector? %)]}
                 (if-not (check-method? inst-method)
                   [inst-method]
                   (do
@@ -1943,13 +1944,9 @@
                             ;_ (prn "inst-method" inst-method)
                             _ (assert (:this inst-method))
                             _ (assert (:params inst-method))
+                            _ (assert (:method inst-method))
                             ; minus the target arg
-                            method-sig (first (filter 
-                                                (fn [{:keys [name required-params]}]
-                                                  (and (= (count (:parameter-types inst-method))
-                                                          (count required-params))
-                                                       (#{(munge method-nme)} name)))
-                                                (:methods inst-method)))]
+                            method-sig (:method inst-method)]
                         (if-not method-sig
                           (err/tc-delayed-error (str "Internal error checking deftype " nme " method: " method-nme)
                                                 :return [inst-method])

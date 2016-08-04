@@ -1084,9 +1084,12 @@
                    (assoc :loop-locals (count params)))
           body (assoc (analysis->map (.body obm) (assoc menv :loop-id loop-id) opt)
                       :body? true)
+          method (when-let [m (.method obm)]
+                   (@#'reflect/method->map m))
           name (symbol (field Compiler$NewInstanceMethod name obm))]
       (assert (#{:binding} (:op this)))
       {:op :method
+       :method method
        :env (env-location env obm)
        :this this
        :bridges ()
@@ -1246,7 +1249,7 @@
   (analysis->map
     [expr env opt]
     ;(prn "NewInstanceExpr")
-    (let [src (field-accessor Compiler$ObjExpr 'src expr)
+    (let [src (.src expr)
           reify? (= 'reify* (first src))
           ord-fields (when (not reify?)
                        (nth src 3))
@@ -1269,7 +1272,7 @@
           menv (update-in env [:locals] merge (into {}
                                                     (map (juxt :name identity) fields))) 
           methods (mapv #(analysis->map %1 menv (assoc opt :new-instance-method-form %2))
-                        (field Compiler$NewInstanceExpr methods expr)
+                        (.methods expr)
                         ms)
           name (symbol (str (:ns env)) (peek (string/split (.name expr) #"\.")))
           class-name (.compiledClass expr) ;or  #_(.internalName expr) ?
@@ -1278,7 +1281,7 @@
                        (concat
                          (map (fn [^java.lang.reflect.Method m]
                                 (.getDeclaringClass m))
-                              (vals (field Compiler$NewInstanceExpr mmap expr)))
+                              (vals (.mmap expr)))
                          [clojure.lang.IType]))
           tag (.getJavaClass expr)]
       ;(prn :compiled-class (.compiledClass expr))
@@ -1631,6 +1634,7 @@
   Compiler$MethodParamExpr
   (analysis->map
     [expr env opt]
+    (assert nil "MethodParamExpr")
     (let []
       (merge
         {:op :method-param

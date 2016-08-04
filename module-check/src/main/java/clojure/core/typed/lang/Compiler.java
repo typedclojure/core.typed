@@ -4161,7 +4161,7 @@ static public class ObjExpr implements Expr{
 	IPersistentSet varCallsites;
 	boolean onceOnly = false;
 
-	Object src;
+	public Object src;
 
     IPersistentMap opts = PersistentHashMap.EMPTY;
 
@@ -7608,9 +7608,9 @@ public static Object compile(Reader rdr, String sourcePath, String sourceName) t
 
 static public class NewInstanceExpr extends ObjExpr{
 	//IPersistentMap optionsMap = PersistentArrayMap.EMPTY;
-	IPersistentCollection methods;
+	public IPersistentCollection methods;
 
-	Map<IPersistentVector,java.lang.reflect.Method> mmap;
+	public Map<IPersistentVector,java.lang.reflect.Method> mmap;
 	Map<IPersistentVector,Set<Class>> covariants;
 
 	public NewInstanceExpr(Object tag){
@@ -8065,6 +8065,8 @@ public static class NewInstanceMethod extends ObjMethod{
 	Class retClass;
 	Class[] exclasses;
 
+  public java.lang.reflect.Method method;
+
 	static Symbol dummyThis = Symbol.intern(null,"dummy_this_dlskjsdfower");
 	private IPersistentVector parms;
 
@@ -8202,6 +8204,7 @@ public static class NewInstanceMethod extends ObjMethod{
 
 			method.retType = Type.getType(method.retClass);
 			method.exclasses = m.getExceptionTypes();
+      method.method = m;
 
 			for(int i = 0; i < parms.count(); i++)
 				{
