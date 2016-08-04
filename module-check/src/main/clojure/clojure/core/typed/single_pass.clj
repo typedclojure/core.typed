@@ -1634,7 +1634,6 @@
   Compiler$MethodParamExpr
   (analysis->map
     [expr env opt]
-    (assert nil "MethodParamExpr")
     (let []
       (merge
         {:op :method-param
