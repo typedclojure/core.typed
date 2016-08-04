@@ -672,6 +672,9 @@
   (is (emit-form (ast (let []))))
   (is (nil? (eval (emit-form (ast (defmulti blah first)))))))
 
+(deftest host-emit-form
+  (is (emit-form (ast (fn [a b] (.getParent a b))))))
+
 #_(emit-form
 (ast
 (let* [v__4413__auto__ (def nth-path-multimethod)]

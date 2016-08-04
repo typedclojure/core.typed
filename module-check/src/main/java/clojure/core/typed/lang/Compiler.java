@@ -1029,7 +1029,7 @@ static public abstract class HostExpr implements Expr, MaybePrimitiveExpr{
 				{
 				ISeq call = (ISeq) ((RT.third(form) instanceof ISeq) ? RT.third(form) : RT.next(RT.next(form)));
 				if(!(RT.first(call) instanceof Symbol))
-					throw new IllegalArgumentException("Malformed member expression");
+					throw new IllegalArgumentException("Malformed member expression: " + form);
 				Symbol sym = (Symbol) RT.first(call);
 				Symbol tag = tagOf(form);
 				PersistentVector args = PersistentVector.EMPTY;

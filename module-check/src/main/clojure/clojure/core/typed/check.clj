@@ -1483,8 +1483,8 @@
       ana-host/analyze-host-expr
       validate/validate))
 
-(add-check-method :host-interop
-  [{:keys [m-or-f target args] :as expr} & [expected]]
+(defn check-host
+  [{:keys [m-or-f target args] :as expr} expected]
   {:post [(-> % u/expr-type r/TCResult?)]}
   ;(prn "host-interop")
   (let [ctarget (check target)
@@ -1520,6 +1520,14 @@
           ;; TODO field cases
           (give-up)))
       (give-up))))
+
+(add-check-method :host-interop
+  [{:keys [m-or-f target] :as expr} & [expected]]
+  (check-host expr expected))
+
+(add-check-method :host-call
+  [{:keys [m-or-f target args] :as expr} & [expected]]
+  (check-host expr expected))
 
 (defn clojure-lang-call? [^String m]
   (or 

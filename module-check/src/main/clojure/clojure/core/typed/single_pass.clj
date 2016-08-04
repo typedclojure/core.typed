@@ -634,13 +634,15 @@
   ;          [:validated? "`true` if the method call could be resolved at compile time"]
   ;          ^:optional
   ;          [:class "If :validated? the class or interface the method belongs to"]]}
-  ; {:op   :host-interop
-  ;  :doc  "Node for a no-arg instance-call or for an instance-field that couldn't be resolved at compile time"
-  ;  :keys [[:form "`(. target m-or-f)`"]
-  ;         ^:children
-  ;         [:target "An AST node representing the target object"]
-  ;         [:m-or-f "Symbol naming the no-arg method or field to lookup in the target"]
-  ;         [:assignable? "`true`"]]}
+  ;  {:op   :host-call
+  ;   :doc  "Node for a host interop call"
+  ;   :keys [[:form "`(.method target arg*)`"]
+  ;          [:method "Symbol naming the method to call"]
+  ;          ^:children
+  ;          [:target "An AST node representing the target object"]
+  ;          ^:children
+  ;          [:args "A vector of AST nodes representing the args passed to the method call"]]}
+
   (analysis->map
     [expr env opt]
     (let [^java.lang.reflect.Method
@@ -663,20 +665,19 @@
       (merge
         {:form (list '. (emit-form/emit-form target)
                      (list* method-name (map emit-form/emit-form args)))
+         :method method-name
          :env (env-location env expr)
          :args args
          :tag tag
-         :o-tag tag
-         }
+         :o-tag tag}
         (if method
           {:op :instance-call
            :instance target
-           :method method-name
            :children [:instance :args]
            :validated? true
            :class cls
            :reflected-method method}
-          {:op :host-interop
+          {:op :host-call
            :target target
            :children [:target :args]}))))
 
