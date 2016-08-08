@@ -647,7 +647,23 @@
          (-> (ast (letfn [(a [])])) :fn :methods first :body :ret :bindings)
          (-> (taj (letfn [(a [])])) :bindings))))
   (is (= (-> (ast (letfn [(a [])])) :fn :methods first :body :ret emit-form)
-         (-> (taj (letfn [(a [])])) emit-form))))
+         (-> (taj (letfn [(a [])])) emit-form)))
+  (is (=
+       (-> (ast
+             (letfn [(a [] b)
+                     (b [])]))
+           :fn :methods first
+           :body
+           :ret
+           :bindings
+           first
+           :init
+           :methods first :body :ret
+           (select-keys [:local :name])
+           )
+       {:local :letfn
+        :name 'b__#0}
+      )))
 
 (deftest ns-form-test
   #_

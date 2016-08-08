@@ -458,15 +458,24 @@
   Compiler$LocalBinding
   (analysis->map
     [lb env opt]
-    (let [init (when-let [init (.init lb)]
-                 (analysis->map init env opt))
-          form (.sym lb)
-          tag (ju/maybe-class (.tag lb))]
+    (let [; commented to avoid Stackoverflow in mutually recursive letfn
+          ;init (when-let [init (.init lb)]
+          ;       (analysis->map init env opt))
+          tag (ju/maybe-class (.tag lb))
+          form (let [nme (.sym lb)]
+                 (if tag
+                   (vary-meta nme assoc :tag tag)
+                   nme))
+          local-kind (or (:local (get (:locals env) form))
+                         :unknown)
+          ]
+      (assert (symbol? form))
       ;(prn form (meta form) tag)
       {:op :local
+       :local local-kind
        :name form
        :form form
-       :env (inherit-env init env)
+       :env env
        :tag tag
        :children []}))
 
@@ -494,15 +503,17 @@
           ;_ (prn "tag" tag)
           name (if tag
                  (vary-meta (:name local-binding) assoc :tag tag)
-                 (:name local-binding))]
+                 (:name local-binding))
+          local-kind (:local local-binding)]
       (assert (symbol? name) "bindinginit")
+      (assert (keyword? local-kind) "bindinginit")
       {:op :binding
        :form name
        :name name
        :env (inherit-env init env)
        :tag tag
        :o-tag (:o-tag init)
-       :local :unknown
+       :local local-kind
        :init init
        :children [:init]}))
 
@@ -517,25 +528,29 @@
   ;          [:body "Synthetic :do node (with :body? `true`) representing the body of the letfn expression"]]}
   (analysis->map
     [expr env opt]
-    (let [binding-inits (mapv #(-> (analysis->map % env opt)
-                                   (assoc :local :letfn
-                                          :op :binding))
-                              (.bindingInits expr))
-          benv (update-in env [:locals] merge
-                          (into {}
-                                (map 
-                                  (fn [{:keys [name] :as b}]
-                                    [name
-                                     {:op :binding :env env
-                                      :name name
-                                      :form name
-                                      :local :letfn}])
-                                  binding-inits)))
-          binding-inits (mapv #(assoc % :env benv) binding-inits)
-          body (-> (analysis->map (.body expr) 
-                                  (update-in env [:locals] merge 
-                                             (zipmap (map :name binding-inits) binding-inits))
-                                  opt)
+    (let [orig-env env
+          ; grab just the binding names first,
+          ; so we can set up the correct environments
+          ; when translating the binding-inits.
+          local-bindings (mapv #(analysis->map (.binding ^Compiler$BindingInit %)
+                                               env opt)
+                               (.bindingInits expr))
+          env (update-in env [:locals] merge
+                         (into {}
+                               (map 
+                                 (fn [{:keys [name] :as b}]
+                                   {:pre [(symbol? name)]}
+                                   [name
+                                    {:op :binding
+                                     :env env
+                                     :name name
+                                     :form name
+                                     ;; informs binding inits
+                                     :local :letfn}])
+                                 local-bindings)))
+          ; all bindings are in scope at once
+          binding-inits (mapv #(analysis->map % env opt) (.bindingInits expr))
+          body (-> (analysis->map (.body expr) env opt)
                    (assoc :body? true))]
       {:op :letfn
        :form (list 'letfn*
@@ -543,7 +558,7 @@
                            (list* (:name b) (map emit-form/emit-form (:methods (:init b)))))
                          binding-inits)
                    (emit-form/emit-form body))
-       :env (inherit-env body env)
+       :env (inherit-env body orig-env)
        :bindings binding-inits
        :body body
        :tag (:tag body)
@@ -554,30 +569,15 @@
   Compiler$LocalBindingExpr
   (analysis->map
     [expr env opt]
-    {:post [%]}
+    {:post []}
     (let [b (analysis->map (.b expr) env opt)
-          tag (.tag expr)
-          form (let [nme (:name b)]
-                 (if (.tag expr)
-                   (vary-meta nme assoc :tag tag)
-                   nme))
-          _ (assert (symbol? form))
-          lcl (dissoc ((:locals env) form)
-                      :init)]
-      (assert (symbol? form))
-      (assert (contains? (:locals env) form)
-              (str form))
-      ;(prn "LocalBindingExpr" env)
-      ;(prn "local" (:form lcl))
-      ;(prn "local" (meta (:form lcl)))
-      (assoc lcl
-             :op :local
-             :children []
-             :tag tag
-             :form form
-             :name form
-             ;; form has new metadata
-             :env env)))
+          local-kind (:local (get (:locals env) 
+                                  (:form b)))
+          ]
+      (assert (keyword? local-kind))
+      (assoc b 
+             :env env
+             :local local-kind)))
 
   ;; Methods
   ; {:op   :static-call
@@ -1223,7 +1223,7 @@
                   :local :fn})
           menv (assoc env :once once)
           menv (if this
-                 (update-in menv [:locals] assoc (:name this) this)
+                 (assoc-in menv [:locals (:name this)] this)
                  menv)
           ;variadic-method (when-let [variadic-method (.variadicMethod expr)]
           ;                  (analysis->map variadic-method menv (assoc opt :fn-method-forms fn-method-forms)))
