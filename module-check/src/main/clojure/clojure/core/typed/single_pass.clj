@@ -466,7 +466,7 @@
           tag (ju/maybe-class (.tag lb))
           form (let [nme (.sym lb)]
                  (if tag
-                   (vary-meta nme assoc :tag tag)
+                   (vary-meta nme assoc :tag (symbol (.getName tag)))
                    nme))
           local-kind (or (:local (get (:locals env) form))
                          :unknown)
@@ -501,11 +501,12 @@
           ;_ (prn "binding init local-binding" (keys local-binding)
           ;       (:op local-binding))
           init (analysis->map (.init bi) env opt)
-          tag (:tag init)
+          tag (ju/maybe-class (:tag init))
           ;_ (prn "tag" tag)
-          name (if tag
-                 (vary-meta (:name local-binding) assoc :tag tag)
-                 (:name local-binding))
+          name (let [nme (:name local-binding)]
+                 (if tag
+                   (vary-meta nme assoc :tag (symbol (.getName tag)))
+                   nme))
           local-kind (:local local-binding)]
       (assert (symbol? name) "bindinginit")
       (assert (keyword? local-kind) "bindinginit")
