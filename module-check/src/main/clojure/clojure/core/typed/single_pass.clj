@@ -67,7 +67,9 @@
 
 (defn eval-ast [opts ast]
   (let [frm (p/p ::emit-form (emit-form/emit-form ast))
-        ;_ (prn "form" frm)
+        ;_ (binding [*print-meta* true
+        ;            *print-dup* true]
+        ;    (prn "form" frm))
         result (eval' frm)]  ;; eval the emitted form rather than directly the form to avoid double macroexpansion
     (merge ast {:result result})))
 
@@ -571,11 +573,27 @@
     [expr env opt]
     {:post []}
     (let [b (analysis->map (.b expr) env opt)
+          tag (or ;; occurrence-specific tag
+                  (.tag expr)
+                  ;; binding tag
+                  (:tag b))
+          tag (when tag
+                (ju/maybe-class tag))
+          _ (assert ((some-fn nil? class?) tag))
+          form (let [form (:form b)]
+                 (if (and tag
+                          ;; don't overwrite binding tag
+                          (not (:tag b)))
+                   (vary-meta form assoc :tag (symbol (.getName tag)))
+                   (vary-meta form dissoc :tag)))
           local-kind (:local (get (:locals env) 
                                   (:form b)))
           ]
       (assert (keyword? local-kind))
-      (assoc b 
+      (assert (= :local (:op b)))
+      (assoc b
+             :tag tag
+             :form form
              :env env
              :local local-kind)))
 
