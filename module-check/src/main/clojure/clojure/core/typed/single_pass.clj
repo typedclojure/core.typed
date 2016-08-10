@@ -1162,10 +1162,13 @@
     (let [loop-id (gensym "loop_")
           opt (dissoc opt :fn-method-forms)
           rest-param (when-let [rest-param (.restParm obm)]
-                       (assoc (analysis->map rest-param env opt)
-                              :variadic? true
-                              :local :arg
-                              :op :binding))
+                       (-> (analysis->map rest-param env opt)
+                           (assoc 
+                             :variadic? true
+                             :local :arg
+                             :op :binding)
+                           ; & arg cannot have metadata
+                           (update :form vary-meta dissoc :tag)))
           required-params (mapv #(assoc (analysis->map %1 env opt)
                                         :variadic? false
                                         :local :arg
