@@ -544,6 +544,10 @@
         {:foo true}))
   )
 
+(deftest primitive-local-test
+  (is (ast (let [a 1])))
+  (is (ast (let [a 1] a))))
+
 (deftest CaseExpr-test
   (is 
     (= #{:loop-locals :children :ns :loop-id :name :file :val :type :op :o-tag :literal? 
