@@ -618,7 +618,7 @@
                #(reify 
                   clojure.lang.ILookupThunk
                   (get [thunk target]
-                    (.a ^Refl target))))))
+                    (.a ^Refl target)))))))
 
 (deftest TryExpr-test
   ;; body
