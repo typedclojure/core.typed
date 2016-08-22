@@ -501,8 +501,8 @@
           ;_ (prn "binding init local-binding" (keys local-binding)
           ;       (:op local-binding))
           init (analysis->map (.init bi) env opt)
-          tag (ju/maybe-class (:tag init))
-          ;_ (prn "tag" tag)
+          tag (ju/maybe-class (:tag local-binding))
+          ;_ (prn "BindingInit tag" tag)
           name (let [nme (:name local-binding)]
                  (if tag
                    (vary-meta nme assoc :tag (symbol (.getName tag)))

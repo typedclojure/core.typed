@@ -376,6 +376,24 @@
          (-> (ast (.getName (java.io.File. "a"))) :instance)
          (-> (taj (.getName (java.io.File. "a"))) :instance)))))
 
+(deftest deftype-test
+  (is (ast (deftype Inst [abc]
+             Object
+             (toString [this]
+               (fn [] (.toString this))
+               "")))))
+
+(deftest defrecord-test
+  (is (->
+        (ast (defrecord Inst [abc]
+               Object
+               (toString [this]
+                 (fn [] (.toString this))
+                 "")))
+        emit-form
+        pprint
+        )))
+
 (deftest InstanceFieldExpr-test
   ;;FIXME
   #_
@@ -594,6 +612,13 @@
        (leaf-diff
          (ast (set! *warn-on-reflection* true))
          (taj (set! *warn-on-reflection* true))))))
+
+(deftest local-reflection-test
+  (is (ast (do (deftype Refl [a])
+               #(reify 
+                  clojure.lang.ILookupThunk
+                  (get [thunk target]
+                    (.a ^Refl target))))))
 
 (deftest TryExpr-test
   ;; body
