@@ -3539,6 +3539,9 @@
 
 (deftest anon-fn
   (is-tc-e (inc ((fn [a :- Num] a) 1)))
+  (is-tc-e (fn foo 
+             ([a :- Num] :- Num (foo 1 a))
+             ([a :- Num b :- Num] :- Num b)))
   (is-tc-e (inc ((fn foo 
                    ([a :- Num] :- Num (foo 1 a))
                    ([a :- Num b :- Num] :- Num b))
