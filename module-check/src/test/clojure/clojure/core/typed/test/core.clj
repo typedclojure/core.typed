@@ -4346,6 +4346,12 @@
                [Any -> nil :filters {:then ff :else tt} :object {:id 0}]))
   (testing "def"
     (is-tc-e #(def a 1) [-> (Var1 (Val 1))])
+    ;; :dynamic metadata works
+    (is-tc-e (do (def ^:dynamic *blob* 1)
+                 (tc-ignore
+                   (assert (-> #'*blob*
+                               meta
+                               :dynamic)))))
     (is-tc-err #(def a 1) [-> (Var1 (Val 2))])
     (is-tc-e #(def a 1) 
              [-> (Var1 (Val 1)) :filters {:then tt :else ff}])

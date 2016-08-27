@@ -436,6 +436,9 @@ static class DefExpr implements Expr{
 	public final String source;
 	public final int line;
 	public final int column;
+  // var name with the metadata attached to def
+  public final Symbol sym;
+
 	final static Method bindRootMethod = Method.getMethod("void bindRoot(Object)");
 	final static Method setTagMethod = Method.getMethod("void setTag(clojure.lang.Symbol)");
 	final static Method setMetaMethod = Method.getMethod("void setMeta(clojure.lang.IPersistentMap)");
@@ -443,7 +446,7 @@ static class DefExpr implements Expr{
 	final static Method symintern = Method.getMethod("clojure.lang.Symbol intern(String, String)");
 	final static Method internVar = Method.getMethod("clojure.lang.Var refer(clojure.lang.Symbol, clojure.lang.Var)");
 
-	public DefExpr(String source, int line, int column, Var var, Expr init, Expr meta, boolean initProvided, boolean isDynamic, boolean shadowsCoreMapping){
+	public DefExpr(String source, int line, int column, Var var, Expr init, Expr meta, boolean initProvided, boolean isDynamic, boolean shadowsCoreMapping, Symbol sym){
 		this.source = source;
 		this.line = line;
 		this.column = column;
@@ -453,6 +456,7 @@ static class DefExpr implements Expr{
 		this.isDynamic = isDynamic;
 		this.shadowsCoreMapping = shadowsCoreMapping;
 		this.initProvided = initProvided;
+		this.sym = sym;
 	}
 
     private boolean includesExplicitMetadata(MapExpr expr) {
@@ -616,7 +620,8 @@ static class DefExpr implements Expr{
 			Expr meta = mm.count()==0 ? null:analyze(context == C.EVAL ? context : C.EXPRESSION, mm);
 			return new DefExpr((String) SOURCE.deref(), lineDeref(), columnDeref(),
 			                   v, analyze(context == C.EVAL ? context : C.EXPRESSION, RT.third(form), v.sym.getName()),
-			                   meta, RT.count(form) == 3, isDynamic, shadowsCoreMapping);
+			                   meta, RT.count(form) == 3, isDynamic, shadowsCoreMapping,
+                         sym);
 		}
 	}
 }

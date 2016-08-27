@@ -366,17 +366,17 @@
   (analysis->map
     [expr env opt]
     (let [env (env-location env expr)
-          init? (field Compiler$DefExpr initProvided expr)
-          init (analysis->map (field Compiler$DefExpr init expr) env opt)
-          meta (when-let [meta (field Compiler$DefExpr meta expr)]
+          init? (.initProvided expr)
+          init (analysis->map (.init expr) env opt)
+          meta (when-let [meta (.meta expr)]
                  (analysis->map meta env opt))
           children (into (into [] (when meta [:meta]))
                          (when init? [:init]))
-          ^clojure.lang.Var var (field Compiler$DefExpr var expr)
-          name (.sym var)]
+          ^clojure.lang.Var var (.var expr)
+          name (.sym expr)]
       (merge 
         {:op :def
-         :form (list* 'def name 
+         :form (list* 'def name
                       (when init?
                         [(emit-form/emit-form init)]))
          :tag clojure.lang.Var

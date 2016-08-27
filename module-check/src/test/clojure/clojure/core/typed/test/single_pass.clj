@@ -614,6 +614,13 @@
            )
        'Object)))
 
+(deftest def-metadata 
+  (is (-> (ast (def ^:dynamic *blob*))
+           emit-form
+           second
+           meta
+           :dynamic)))
+
 (deftest CaseExpr-test
   (is 
     (= #{:loop-locals :children :ns :loop-id :name :file :val :type :op :o-tag :literal? 
