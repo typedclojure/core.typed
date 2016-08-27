@@ -577,7 +577,7 @@
     [expr env opt]
     {:post []}
     (let [b (analysis->map (.b expr) env opt)
-          tag (.getJavaClass expr)
+          tag (ju/maybe-class (.tag expr))
           ;_ (prn "post tag" tag)
           _ (assert ((some-fn nil? class?) tag))
           ;; don't inherit binding :tag
