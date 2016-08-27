@@ -1808,16 +1808,18 @@
 
 (add-check-method :throw
   [{:keys [exception] :as expr} & [expected]]
-  (let [cexception (check exception (r/ret (c/RClass-of Throwable)))]
+  (let [cexception (check exception (r/ret (c/RClass-of Throwable)))
+        ret (below/maybe-check-below
+              (r/ret (c/Un)
+                     (fo/-FS fl/-bot fl/-bot) 
+                     obj/-empty
+                     ;never returns normally
+                     (r/-flow fl/-bot))
+              expected)]
+    ;(prn "throw ret" ret)
     (assoc expr
            :exception cexception
-           u/expr-type (below/maybe-check-below
-                         (r/ret (c/Un)
-                                (fo/-FS fl/-bot fl/-bot) 
-                                obj/-empty
-                                ;never returns normally
-                                (r/-flow fl/-bot))
-                         expected))))
+           u/expr-type ret)))
 
 (add-check-method :recur
   [{args :exprs :keys [env] :as expr} & [expected]]
