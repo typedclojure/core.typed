@@ -466,7 +466,7 @@
     (let [; commented to avoid Stackoverflow in mutually recursive letfn
           ;init (when-let [init (.init lb)]
           ;       (analysis->map init env opt))
-          tag (.getJavaClass lb)
+          tag (ju/maybe-class (.tag lb))
           ;_ (prn "LocalBinding tag" tag)
           form (let [nme (.sym lb)
                      b-sym (.tag lb)]
