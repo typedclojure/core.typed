@@ -426,7 +426,7 @@ static Symbol resolveSymbol(Symbol sym){
 
 }
 
-static class DefExpr implements Expr{
+public static class DefExpr implements Expr{
 	public final Var var;
 	public final Expr init;
 	public final Expr meta;
