@@ -4352,6 +4352,8 @@
                    (assert (-> #'*blob*
                                meta
                                :dynamic)))))
+    ; bad metadata
+    (is-tc-err (def ^{:npe (inc nil)} a 1))
     (is-tc-err #(def a 1) [-> (Var1 (Val 2))])
     (is-tc-e #(def a 1) 
              [-> (Var1 (Val 1)) :filters {:then tt :else ff}])

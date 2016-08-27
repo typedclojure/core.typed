@@ -387,8 +387,10 @@
         (when init?
           {:init init})
         (when meta
-          (assert (= :quote (:op meta)))
-          {:meta (:expr meta)})
+          {:meta
+           (case (:op meta)
+             :quote (:expr meta)
+             :map meta)})
         (when-not (empty? children)
           {:children children}))))
 
