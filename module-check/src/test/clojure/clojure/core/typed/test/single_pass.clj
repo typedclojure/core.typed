@@ -619,7 +619,16 @@
            emit-form
            second
            meta
-           :dynamic)))
+           :dynamic))
+  ;; arglists
+  (is (= 
+        (list 'quote '([a]))
+        (-> (ast (defn foo [a]))
+            emit-form
+            second
+            meta
+            :arglists
+            ))))
 
 (deftest CaseExpr-test
   (is 

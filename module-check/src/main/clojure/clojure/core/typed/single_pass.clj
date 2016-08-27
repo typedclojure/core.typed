@@ -373,7 +373,18 @@
           children (into (into [] (when meta [:meta]))
                          (when init? [:init]))
           ^clojure.lang.Var var (.var expr)
-          name (.sym expr)]
+          ;; massage arglists to get rid of quote,
+          ;; emit-form already adds an extra one.
+          name (vary-meta (.sym expr)
+                          (fn [m]
+                            (if (contains? m :arglists)
+                              (update m :arglists
+                                      (fn [a]
+                                        (if (and (seq? a)
+                                                 (#{'quote} (first a)))
+                                          (second a)
+                                          a)))
+                              m)))]
       (merge 
         {:op :def
          :form (list* 'def name
