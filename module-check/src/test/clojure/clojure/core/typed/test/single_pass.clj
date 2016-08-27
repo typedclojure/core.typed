@@ -215,7 +215,7 @@
          (:ret (taj (fn [a]))))
        ))
   (is (=
-       #{:loop-id :o-tag :line :tag :atom :assignable?}
+       #{:loop-id :o-tag :variadic? :line :arg-id :tag :atom :assignable?}
        (leaf-diff
          (-> (ast (fn [a] a)) :methods first :body :ret)
          (-> (taj (fn [a] a)) :ret :methods first :body :ret))))
@@ -232,7 +232,7 @@
 
 (deftest InvokeExpr-test
   (is (=
-       #{:body? :loop-id :o-tag :column :line :form :tag :arglists :raw-forms}
+       #{:body? :meta :loop-id :o-tag :column :line :form :tag :arglists :raw-forms}
        (leaf-diff
          (ast ((do (fn []))))
          (taj ((fn []))))))
@@ -242,7 +242,7 @@
            (= (:op (taj (:a nil)))
               :keyword-invoke)))
   (is (=
-       #{:o-tag :column :line :tag}
+       #{:o-tag :column :line :tag :meta}
        (leaf-diff
          (ast (:a nil 1))
          (taj (:a nil 1))))))
@@ -391,7 +391,6 @@
                  (fn [] (.toString this))
                  "")))
         emit-form
-        pprint
         )))
 
 (deftest InstanceFieldExpr-test
