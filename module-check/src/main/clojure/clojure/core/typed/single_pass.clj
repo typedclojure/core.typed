@@ -17,6 +17,7 @@
                          Compiler$LiteralExpr Compiler$ConstantExpr Compiler$ObjMethod Compiler$Expr))
   (:require [clojure.reflect :as reflect]
             [clojure.java.io :as io]
+            [clojure.pprint :as pp]
             [clojure.repl :as repl]
             [clojure.string :as string]
             [clojure.core.typed.profiling :as p]
@@ -68,8 +69,10 @@
 (defn eval-ast [opts ast]
   (let [frm (p/p ::emit-form (emit-form/emit-form ast))
         ;_ (binding [*print-meta* true
-        ;            *print-dup* true]
-        ;    (prn "form" frm))
+        ;            ;*print-dup* true
+        ;            ]
+        ;    (prn "form")
+        ;    (pp/pprint frm))
         result (eval' frm)]  ;; eval the emitted form rather than directly the form to avoid double macroexpansion
     (merge ast {:result result})))
 
@@ -463,10 +466,12 @@
     (let [; commented to avoid Stackoverflow in mutually recursive letfn
           ;init (when-let [init (.init lb)]
           ;       (analysis->map init env opt))
-          tag (ju/maybe-class (.tag lb))
-          form (let [nme (.sym lb)]
-                 (if tag
-                   (vary-meta nme assoc :tag (symbol (.getName tag)))
+          tag (.getJavaClass lb)
+          ;_ (prn "LocalBinding tag" tag)
+          form (let [nme (.sym lb)
+                     b-sym (.tag lb)]
+                 (if b-sym
+                   (vary-meta nme assoc :tag b-sym)
                    nme))
           local-kind (or (:local (get (:locals env) form))
                          :unknown)
@@ -475,7 +480,7 @@
       ;(prn form (meta form) tag)
       {:op :local
        :local local-kind
-       :name form
+       :name (.sym lb)
        :form form
        :env env
        :tag tag
@@ -503,16 +508,14 @@
           init (analysis->map (.init bi) env opt)
           tag (ju/maybe-class (:tag local-binding))
           ;_ (prn "BindingInit tag" tag)
-          name (let [nme (:name local-binding)]
-                 (if tag
-                   (vary-meta nme assoc :tag (symbol (.getName tag)))
-                   nme))
+          ;; contains :tag metadata
+          name (:name local-binding)
           local-kind (:local local-binding)]
       (assert (symbol? name) "bindinginit")
       (assert (keyword? local-kind) "bindinginit")
       {:op :binding
        :form name
-       :name name
+       :name (with-meta name nil)
        :env (inherit-env init env)
        :tag tag
        :o-tag (:o-tag init)
@@ -574,19 +577,19 @@
     [expr env opt]
     {:post []}
     (let [b (analysis->map (.b expr) env opt)
-          tag (or ;; occurrence-specific tag
-                  (.tag expr)
-                  ;; binding tag
-                  (:tag b))
-          tag (when tag
-                (ju/maybe-class tag))
+          tag (.getJavaClass expr)
+          ;_ (prn "post tag" tag)
           _ (assert ((some-fn nil? class?) tag))
-          form (let [form (:form b)]
-                 (if (and tag
-                          ;; don't overwrite binding tag
-                          (not (:tag b)))
-                   (vary-meta form assoc :tag (symbol (.getName tag)))
+          ;; don't inherit binding :tag
+          form (let [form (:form b)
+                     occ-tag-sym (.tag expr)
+                     b-tag-sym (-> form meta :tag)]
+                 (if occ-tag-sym
+                   (vary-meta form assoc :tag occ-tag-sym)
                    (vary-meta form dissoc :tag)))
+          ;_ (prn "LocalBindingExpr" form tag 
+          ;       (.tag expr)
+          ;       (:tag b))
           local-kind (:local (get (:locals env) 
                                   (:form b)))
           ]

@@ -566,6 +566,54 @@
   (is (ast (let [a 1])))
   (is (ast (let [a 1] a))))
 
+(deftest local-tag-test
+  (is (=
+       (-> (ast (let [a "a"]))
+           emit-form
+           first
+           second
+           second
+           second
+           first
+           meta
+           :tag)
+       nil))
+  (is (=
+       (-> (ast (let [^Object a "a"]))
+           emit-form
+           first
+           second
+           second
+           second
+           first
+           meta
+           :tag)
+       'Object))
+  (is (=
+       (-> (ast (let [a "a"]
+                  ^Object a))
+           emit-form
+           first
+           second
+           second
+           last
+           meta
+           :tag
+           )
+       'Object))
+  (is (=
+       (-> (ast (let [^Object a "a"]
+                  ^Object a))
+           emit-form
+           first
+           second
+           second
+           last
+           meta
+           :tag
+           )
+       'Object)))
+
 (deftest CaseExpr-test
   (is 
     (= #{:loop-locals :children :ns :loop-id :name :file :val :type :op :o-tag :literal? 
@@ -613,12 +661,46 @@
          (ast (set! *warn-on-reflection* true))
          (taj (set! *warn-on-reflection* true))))))
 
+;; from clojure.test-helper
+(defmacro with-err-string-writer
+  "Evaluate with err pointing to a temporary StringWriter, and
+   return err contents as a string."
+  [& body]
+  `(let [s# (java.io.StringWriter.)]
+     (binding [*err* s#]
+       ~@body
+       (str s#))))
+
+;; from clojure.test-helper
+(defmacro with-err-print-writer
+  "Evaluate with err pointing to a temporary PrintWriter, and
+   return err contents as a string."
+  [& body]
+  `(let [s# (java.io.StringWriter.)
+         p# (java.io.PrintWriter. s#)]
+     (binding [*err* p#]
+       ~@body
+       (str s#))))
+
+;; from clojure.test-helper
+(defmacro should-not-reflect
+  "Turn on all warning flags, and test that reflection does not occur
+   (as identified by messages to *err*)."
+  [form]
+  `(binding [*warn-on-reflection* true]
+     (is (nil? (re-find #"^Reflection warning" (with-err-string-writer ~form))))
+     (is (nil? (re-find #"^Reflection warning" (with-err-print-writer ~form))))))
+
 (deftest local-reflection-test
-  (is (ast (do (deftype Refl [a])
-               #(reify 
-                  clojure.lang.ILookupThunk
-                  (get [thunk target]
-                    (.a ^Refl target)))))))
+  (is (should-not-reflect
+        (ast (do (deftype Refl [a])
+                 #(reify 
+                    clojure.lang.ILookupThunk
+                    (get [thunk target]
+                      (.a ^Refl target)))))))
+  (is (should-not-reflect
+        (ast (fn [^Object a]
+               (.getParent ^java.io.File a))))))
 
 (deftest TryExpr-test
   ;; body
@@ -699,11 +781,10 @@
   (is (-> (ast (ns foo)) emit-form))
   #_(is (-> (ast {:form '(ns foo)}) :val))
   ; should not reflect
-  #_
-  (is (-> (ast (fn loading []
-                 (.getClass ^Object loading)))
-          emit-form))
-  )
+  (is (should-not-reflect
+        (-> (ast (fn loading []
+                   (.getClass ^Object loading)))
+            emit-form))))
 
 (deftest KeywordInvoke-test
   (is (= (:result (ast (#(:a %) {:a 1})))
