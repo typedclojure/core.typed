@@ -82,7 +82,11 @@
                     (check-fn init))
             cmeta (when meta
                     (binding [vs/*current-env* (:env meta)
-                              vs/*current-expr* meta]
+                              vs/*current-expr* meta
+                              ;; emit-form does not currently
+                              ;; emit :meta nodes in a :def. Don't
+                              ;; try and rewrite it, just type check.
+                              vs/*can-rewrite* false]
                       (check-fn meta)))
             inferred (r/ret-t (u/expr-type cinit))
             _ (assert (r/Type? inferred))
