@@ -331,18 +331,22 @@
 
 (deftest MetaExpr-test
   (is (= 
-        (:op (ast ^:a #()))
-        (:op (taj ^:a #()))))
-  (is (= 
-        {:a true}
-        (select-keys (emit-form (:meta (ast ^:a #()))) [:a])
-        (select-keys (emit-form (:meta (taj ^:a #()))) [:a])))
+        :with-meta
+        (:op (ast ^{:a (+ 1)} #()))
+        (:op (taj ^{:a (+ 1)} #()))))
+  (is (and
+        (= ;; qualified
+           `{:a (+ 1)}
+           (select-keys (emit-form (:meta (ast ^{:a (+ 1)} #()))) [:a]))
+        ;; unqualified
+        (= '{:a (+ 1)}
+           (select-keys (emit-form (:meta (taj ^{:a (+ 1)} #()))) [:a]))))
   (is 
-    (= {:a true}
-       (meta (emit-form (ast ^:a #())))))
+    (= `{:a (+ 1)}
+       (meta (emit-form (ast ^{:a (+ 1)} #())))))
   (is 
-    (= (meta (eval (emit-form (ast ^:a #()))))
-       {:a true}))
+    (= (meta (eval (emit-form (ast ^{:a (inc 1)} #()))))
+       {:a 2}))
   )
 
 (deftest IfExpr-test
@@ -382,6 +386,14 @@
              (toString [this]
                (fn [] (.toString this))
                "")))))
+
+(deftest invoke-meta-test
+  (is (=
+       '{:a (nil)}
+       (-> (ast ^{:a (nil)} (#'+ 1 1))
+           emit-form
+           meta)))
+  )
 
 (deftest defrecord-test
   (is (->
@@ -601,6 +613,16 @@
            )
        'Object))
   (is (=
+       (-> (ast (let [a "a"]
+                  ^{:a (nil)} a))
+           emit-form
+           first
+           second
+           second
+           last
+           meta)
+       '{:a (nil)}))
+  (is (=
        (-> (ast (let [^Object a "a"]
                   ^Object a))
            emit-form
@@ -611,7 +633,27 @@
            meta
            :tag
            )
-       'Object)))
+       'Object))
+  (is (=
+       '{:a (inc 1)}
+       (-> (ast (let [^{:a (inc 1)} a "a"]
+                  a))
+           emit-form
+           first
+           second
+           second
+           second
+           first
+           meta
+           ))))
+
+(deftest fn-method-meta
+  (is (= '{:a (nil)}
+         (-> (ast (fn ^{:a (nil)} []))
+             emit-form
+             second
+             first
+             meta))))
 
 (deftest def-metadata 
   (is (-> (ast (def ^:dynamic *blob*))

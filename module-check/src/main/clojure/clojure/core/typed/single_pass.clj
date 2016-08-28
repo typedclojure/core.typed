@@ -220,12 +220,25 @@
     (when field
       {:file (field-accessor (class expr) 'source expr)})))
 
-(defn- env-location [env expr]
-  (merge env
-         (when-line-map expr)
-         (when-column-map expr)
-         ;; only adds the suffix of the path
-         #_(when-source-map expr)))
+(defn- when-form-meta [form]
+  (let [m (meta form)]
+    (when (map? m)
+      (into {}
+            (filter
+              (fn [[k v]]
+                (and (#{:line :column
+                        :end-line :end-column} k)
+                     (integer? v))))
+            m))))
+
+(defn- env-location 
+  ([env expr & [form]]
+   (merge env
+          (when-line-map expr)
+          (when-column-map expr)
+          (when-form-meta form)
+          ;; only adds the suffix of the path
+          #_(when-source-map expr))))
 
 (defn- inherit-env [expr env]
   (merge env
@@ -365,7 +378,7 @@
   Compiler$DefExpr
   (analysis->map
     [expr env opt]
-    (let [env (env-location env expr)
+    (let [env (env-location env expr (.form expr))
           init? (.initProvided expr)
           init (analysis->map (.init expr) env opt)
           meta (when-let [meta (.meta expr)]
@@ -387,9 +400,11 @@
                               m)))]
       (merge 
         {:op :def
-         :form (list* 'def name
-                      (when init?
-                        [(emit-form/emit-form init)]))
+         :form (with-meta
+                 (list* 'def name
+                        (when init?
+                          [(emit-form/emit-form init)]))
+                 (meta (.form expr)))
          :tag clojure.lang.Var
          :o-tag clojure.lang.Var
          :env env
@@ -449,13 +464,15 @@
             (assert (vector? binds))
             (assert (every? #{:binding} (map :op binds)))
             {:op (if loop? :loop :let)
-             :form (list (if loop? 'loop* 'let*) 
-                         (vec
-                           (mapcat vector
-                                   (map :name binds)
-                                   (map (comp :form :init) binds)))
-                         (:form body))
-             :env (inherit-env body top-env)
+             :form (with-meta
+                     (list (if loop? 'loop* 'let*) 
+                           (vec
+                             (mapcat vector
+                                     (map :name binds)
+                                     (map (comp :form :init) binds)))
+                           (:form body))
+                     (meta (.form expr)))
+             :env (env-location top-env (.form expr))
              :bindings binds
              :body body
              :tag (:tag body)
@@ -523,6 +540,7 @@
           ;_ (prn "BindingInit tag" tag)
           ;; contains :tag metadata
           name (:name local-binding)
+          ;_ (prn "local metadata" (meta name))
           local-kind (:local local-binding)]
       (assert (symbol? name) "bindinginit")
       (assert (keyword? local-kind) "bindinginit")
@@ -572,12 +590,14 @@
           body (-> (analysis->map (.body expr) env opt)
                    (assoc :body? true))]
       {:op :letfn
-       :form (list 'letfn*
-                   (mapv (fn [b]
-                           (list* (:name b) (map emit-form/emit-form (:methods (:init b)))))
-                         binding-inits)
-                   (emit-form/emit-form body))
-       :env (inherit-env body orig-env)
+       :form (with-meta
+               (list 'letfn*
+                     (mapv (fn [b]
+                             (list* (:name b) (map emit-form/emit-form (:methods (:init b)))))
+                           binding-inits)
+                     (emit-form/emit-form body))
+               (meta (.form expr)))
+       :env (env-location orig-env (.form expr))
        :bindings binding-inits
        :body body
        :tag (:tag body)
@@ -594,12 +614,15 @@
           ;_ (prn "post tag" tag)
           _ (assert ((some-fn nil? class?) tag))
           ;; don't inherit binding :tag
-          form (let [form (:form b)
-                     occ-tag-sym (.tag expr)
-                     b-tag-sym (-> form meta :tag)]
-                 (if occ-tag-sym
-                   (vary-meta form assoc :tag occ-tag-sym)
-                   (vary-meta form dissoc :tag)))
+          form (or ;; contains metadata
+                   (.sym expr)
+                   ;; try and reconstruct, using :tag
+                   (let [form (:form b)
+                         occ-tag-sym (.tag expr)
+                         b-tag-sym (-> form meta :tag)]
+                     (if occ-tag-sym
+                       (vary-meta form assoc :tag occ-tag-sym)
+                       (vary-meta form dissoc :tag))))
           ;_ (prn "LocalBindingExpr" form tag 
           ;       (.tag expr)
           ;       (:tag b))
@@ -611,7 +634,7 @@
       (assoc b
              :tag tag
              :form form
-             :env env
+             :env (env-location env (.sym expr))
              :local local-kind)))
 
   ;; Methods
@@ -628,24 +651,25 @@
   (analysis->map
     [expr env opt]
     (let [^java.lang.reflect.Method
-          rmethod (field Compiler$StaticMethodExpr method expr)
+          rmethod (.method expr)
           ptypes (when rmethod
                    (.getParameterTypes rmethod))
           method (when rmethod
                    (@#'reflect/method->map rmethod))
           args (mapv #(merge (analysis->map %1 env opt)
                              (when %2 {:tag %2 :o-tag %2}))
-                     (field Compiler$StaticMethodExpr args expr)
+                     (.args expr)
                      (if rmethod
                        (.getParameterTypes rmethod)
                        (repeat nil)))
-          method-name (symbol (field Compiler$StaticMethodExpr methodName expr))
-          tag (ju/maybe-class (field Compiler$StaticMethodExpr tag expr))
-          c (field Compiler$StaticMethodExpr c expr)]
+          method-name (symbol (.methodName expr))
+          tag (ju/maybe-class (.tag expr))
+          c (.c expr)]
       (merge
         {:op :static-call
          :env (env-location env expr)
-         :form (list '. c (list* method-name (map emit-form/emit-form args)))
+         :form (with-meta (list '. c (list* method-name (map emit-form/emit-form args)))
+                          (meta (.form expr)))
          :method method-name
          :args args
          :tag tag
@@ -698,8 +722,10 @@
           method-name (symbol (.methodName expr))
           tag (ju/maybe-class (.tag expr))]
       (merge
-        {:form (list '. (emit-form/emit-form target)
-                     (list* method-name (map emit-form/emit-form args)))
+        {:form (with-meta
+                 (list '. (emit-form/emit-form target)
+                       (list* method-name (map emit-form/emit-form args)))
+                 (meta (.form expr)))
          :method method-name
          :env (env-location env expr)
          :args args
@@ -728,16 +754,18 @@
   (analysis->map
     [expr env opt]
     (let [^java.lang.reflect.Field
-          rfield (field Compiler$StaticFieldExpr field expr)
+          rfield (.field expr)
           mfield (when rfield
                    (@#'reflect/field->map rfield))
-          tag (ju/maybe-class (field Compiler$StaticFieldExpr tag expr))
-          c (field Compiler$StaticFieldExpr c expr)
-          fstr (field Compiler$StaticFieldExpr fieldName expr)]
+          tag (ju/maybe-class (.tag expr))
+          c (.c expr)
+          fstr (.fieldName expr)]
       (merge
         {:op :static-field
-         :form (list '. (emit-form/class->sym c)
-                     (symbol (str "-" fstr)))
+         :form (with-meta
+                 (list '. (emit-form/class->sym c)
+                       (symbol (str "-" fstr)))
+                 (meta (.form expr)))
          :env (env-location env expr)
          :class c
          :field (symbol fstr)
@@ -777,7 +805,9 @@
           fstr (.fieldName expr)
           tag (ju/maybe-class (.tag expr))]
       (merge
-        {:form (list (symbol (str "." fstr)) (emit-form/emit-form target))
+        {:form (with-meta
+                 (list (symbol (str "." fstr)) (emit-form/emit-form target))
+                 (meta (.form expr)))
          :env (env-location env expr)
          :tag tag
          :o-tag tag}
@@ -822,13 +852,17 @@
                :env env
                :type :class
                :literal? true
-               :form (emit-form/class->sym c)
+               :form (with-meta
+                       (emit-form/class->sym c)
+                       (meta (second (.form expr))))
                :val c
                :tag Class
                :o-tag Class}]
       (merge
         {:op :new
-         :form (list* 'new (emit-form/emit-form cls) (map emit-form/emit-form args))
+         :form (with-meta
+                 (list* 'new (emit-form/emit-form cls) (map emit-form/emit-form args))
+                 (meta (.form expr)))
          :env 
          ; borrow line numbers from arguments
          (if-let [iexpr (first (filter :line (map :env args)))]
@@ -855,7 +889,9 @@
     (let [keys (mapv #(analysis->map % env opt) (.keys expr))]
       {:op :set
        :env env
-       :form `#{~@(map emit-form/emit-form keys)}
+       :form (with-meta
+               `#{~@(map emit-form/emit-form keys)}
+               (meta (.form expr)))
        :items keys
        :tag clojure.lang.IPersistentSet
        :o-tag clojure.lang.IPersistentSet
@@ -873,7 +909,9 @@
     (let [args (mapv #(analysis->map % env opt) (.args expr))]
       {:op :vector
        :env env
-       :form `[~@(map emit-form/emit-form args)]
+       :form (with-meta
+               `[~@(map emit-form/emit-form args)]
+               (meta (.form expr)))
        :items args
        :tag clojure.lang.IPersistentVector
        :o-tag clojure.lang.IPersistentVector
@@ -896,13 +934,15 @@
       {:op :map
        :env env
        ;; FIXME use transducers when dropping 1.6 support
-       :form (into {}
-                   (map
-                     (fn [k v]
-                       [(emit-form/emit-form k)
-                        (emit-form/emit-form v)])
-                     ks
-                     vs))
+       :form (with-meta
+               (into {}
+                     (map
+                       (fn [k v]
+                         [(emit-form/emit-form k)
+                          (emit-form/emit-form v)])
+                       ks
+                       vs))
+               (meta (.form expr)))
        :keys ks
        :vals vs
        :tag clojure.lang.IPersistentMap
@@ -913,10 +953,11 @@
   Compiler$MonitorEnterExpr
   (analysis->map
     [expr env opt]
-    (let [target (analysis->map (field Compiler$MonitorEnterExpr target expr) env opt)]
+    (let [target (analysis->map (.target expr) env opt)]
       {:op :monitor-enter
        :env env
-       :form (list 'monitor-enter (emit-form/emit-form target))
+       :form (with-meta (list 'monitor-enter (emit-form/emit-form target))
+                        (meta (.form expr)))
        :target target
        :tag nil
        :o-tag nil
@@ -930,11 +971,12 @@
   ;        [:target "An AST node representing the monitor-exit sentinel"]]}
   (analysis->map
     [expr env opt]
-    (let [target (analysis->map (field Compiler$MonitorExitExpr target expr) env opt)]
+    (let [target (analysis->map (.target expr) env opt)]
       (merge
         {:op :monitor-exit
          :env env
-         :form (list 'monitor-exit (emit-form/emit-form target))
+         :form (with-meta (list 'monitor-exit (emit-form/emit-form target))
+                          (meta (.form expr)))
          :target target
          :tag nil
          :o-tag nil
@@ -948,9 +990,10 @@
   ;         [:exception "An AST node representing the exception to throw"]]}
   (analysis->map
     [expr env opt]
-    (let [exception (analysis->map (field Compiler$ThrowExpr excExpr expr) env opt)]
+    (let [exception (analysis->map (.excExpr expr) env opt)]
       {:op :throw
-       :form (list 'throw (emit-form/emit-form exception))
+       :form (with-meta (list 'throw (emit-form/emit-form exception))
+                        (meta (.form expr)))
        :env env
        :exception exception
        :tag nil
@@ -974,7 +1017,9 @@
           args (mapv #(analysis->map % env opt) (.args expr))
           env (env-location env expr)
           tag (.tag expr)
-          form (list* (emit-form/emit-form fexpr) (map emit-form/emit-form args))]
+          meta (meta (.form expr))
+          form (with-meta (list* (emit-form/emit-form fexpr) (map emit-form/emit-form args))
+                          meta)]
       (cond
         ;; TAJ always compiles :keyword-invoke sites where possible, Compiler.java
         ;; only compiles when inside a function body. We follow Compiler.java, there's
@@ -987,6 +1032,7 @@
          :keyword fexpr
          :tag tag
          :o-tag tag
+         :meta meta
          :target (first args)
          :children [:keyword :target]}
 
@@ -998,9 +1044,7 @@
          :tag tag
          :o-tag tag
          :args args
-         ;; TODO find more metadata
-         :meta (when tag
-                 {:tag tag})
+         :meta meta
          :children [:fn :args]})))
 
          ;:is-protocol (field Compiler$InvokeExpr isProtocol expr)
@@ -1020,10 +1064,11 @@
   Compiler$KeywordInvokeExpr
   (analysis->map
     [expr env opt]
-    (let [target (analysis->map (field Compiler$KeywordInvokeExpr target expr) env opt)
-          kw (analysis->map (field Compiler$KeywordInvokeExpr kw expr) env opt)
-          tag (ju/maybe-class (field Compiler$KeywordInvokeExpr tag expr))
-          form (list (emit-form/emit-form kw) (emit-form/emit-form target))]
+    (let [target (analysis->map (.target expr) env opt)
+          kw (analysis->map (.kw expr) env opt)
+          tag (ju/maybe-class (.tag expr))
+          form (with-meta (list (emit-form/emit-form kw) (emit-form/emit-form target))
+                          (meta (.form expr)))]
       {:op :keyword-invoke
        :form form
        :env (env-location env expr)
@@ -1045,8 +1090,11 @@
       {:op :the-var
        :tag clojure.lang.Var
        :o-tag clojure.lang.Var
-       :form (list 'var (symbol (str (ns-name (.ns var))) (str (.sym var))))
-       :env env
+       :form (with-meta (list 'var (symbol (str (ns-name (.ns var))) (str (.sym var))))
+                        (meta (.form expr)))
+       :env (env-location env
+                          expr
+                          (.form expr))
        :var var}))
 
   ;; VarExpr
@@ -1060,13 +1108,13 @@
   (analysis->map
     [expr env opt]
     (let [^clojure.lang.Var var (.var expr)
-          meta (meta var)
           tag-sym (.tag expr)
           tag (ju/maybe-class tag-sym)]
       {:op :var
-       :env env
+       :env (env-location env
+                          expr
+                          (.form expr))
        :var var
-       :meta meta
        :tag tag
        :o-tag tag
        :assignable? (boolean (:dynamic meta))
@@ -1074,8 +1122,7 @@
        :form (with-meta
                (symbol (str (ns-name (.ns var)))
                        (str (.sym var)))
-               (when tag-sym
-                 {:tag tag-sym}))}))
+               (meta (.form expr)))}))
 
   ;; UnresolvedVarExpr
   Compiler$UnresolvedVarExpr
@@ -1122,7 +1169,7 @@
     [obm env {:keys [new-instance-method-form] :as opt}]
     (let [loop-id (gensym "loop_")
           opt (dissoc opt :new-instance-method-form)
-          this (-> (analysis->map ((field Compiler$ObjMethod indexlocals obm) 0) env opt)
+          this (-> (analysis->map ((.indexlocals obm) 0) env opt)
                    (assoc :local :this
                           :op :binding)
                    (dissoc :env))
@@ -1144,11 +1191,11 @@
                       :body? true)
           method (when-let [m (.method obm)]
                    (@#'reflect/method->map m))
-          name (symbol (field Compiler$NewInstanceMethod name obm))]
+          name (symbol (.name obm))]
       (assert (#{:binding} (:op this)))
       {:op :method
        :method method
-       :env (env-location env obm)
+       :env (env-location env obm (.form obm))
        :this this
        :bridges ()
        :name name
@@ -1158,7 +1205,9 @@
        :body body
        :tag (:tag body)
        :o-tag (:o-tag body)
-       :form new-instance-method-form
+       :form (with-meta
+               new-instance-method-form
+               (meta (.form obm)))
        :children [:this :params :body]}))
 
   ; {:op   :fn-method
@@ -1274,12 +1323,15 @@
           tag (.getJavaClass expr)]
       (merge
         {:op :fn
-         :env (env-location env expr)
-         :form (list* 'fn* 
-                      (concat
-                        (when this
-                          [(emit-form/emit-form this)])
-                        (map emit-form/emit-form methods)))
+         :env (env-location env expr
+                            (.form expr))
+         :form (with-meta
+                 (list* 'fn* 
+                        (concat
+                          (when this
+                            [(emit-form/emit-form this)])
+                          (map emit-form/emit-form methods)))
+                 (meta (.form expr)))
          :methods methods
          :variadic? (boolean (.variadicMethod expr))
          :tag   tag
@@ -1353,7 +1405,8 @@
       {:op (if reify? :reify :deftype)
        :form src
        :name name
-       :env (env-location env expr)
+       :env (env-location env expr
+                          (.form expr))
        :methods methods
        :fields fields
        :class-name class-name
@@ -1382,15 +1435,19 @@
   Compiler$InstanceOfExpr
   (analysis->map
     [expr env opt]
-    (let [exp (analysis->map (field Compiler$InstanceOfExpr expr expr) env opt)
-          ^Class cls (field Compiler$InstanceOfExpr c expr)]
+    (let [exp (analysis->map (.expr expr) env opt)
+          ^Class cls (.c expr)]
       {:op :instance?
-       :env env
+       :env (env-location env
+                          expr
+                          (.form expr))
        :class cls
        :target exp
        :tag Boolean/TYPE
        :o-tag Boolean/TYPE
-       :form (list 'instance? (symbol (.getName cls)) (emit-form/emit-form exp))
+       :form (with-meta
+               (list 'instance? (symbol (.getName cls)) (emit-form/emit-form exp))
+               (meta (.form expr)))
        :children [:target]}))
 
   ;; MetaExpr
@@ -1412,8 +1469,11 @@
                     (str "MetaExpr :meta must be a :const or :map node"))
           the-expr (analysis->map (.expr expr) env opt)]
       {:op :with-meta
-       :env env
-       :form (emit-form/emit-form the-expr) ;FIXME add meta
+       :env (env-location env
+                          expr
+                          (.form expr))
+       :form (with-meta (emit-form/emit-form the-expr)
+                        (meta (.form expr)))
        :meta meta
        :expr the-expr
        :tag (:tag the-expr)
@@ -1438,8 +1498,10 @@
                                (recur (conj statements (analysis->map e env opt)) exprs)
                                [statements (analysis->map e env opt)]))]
       {:op :do
-       :env (inherit-env ret env)
-       :form (list* 'do (map emit-form/emit-form (concat statements [ret])))
+       :env (env-location env expr (.form expr))
+       :form (with-meta
+               (list* 'do (map emit-form/emit-form (concat statements [ret])))
+               (meta (.form expr)))
        :statements statements
        :ret ret
        :tag (:tag ret)
@@ -1465,8 +1527,10 @@
           tag (when (.hasJavaClass expr)
                 (.getJavaClass expr))]
       {:op :if
-       :env (env-location env expr)
-       :form (list* 'if (map emit-form/emit-form [test then else]))
+       :env (env-location env expr (.form expr))
+       :form (with-meta
+               (list* 'if (map emit-form/emit-form [test then else]))
+               (meta (.form expr)))
        :test test
        :then then
        :else else
@@ -1522,7 +1586,9 @@
           tag (when (.hasJavaClass expr)
                 (.getJavaClass expr))]
       {:op :case
-       :env (env-location env expr)
+       :env (env-location env expr (.form expr))
+       ;; FIXME reconstruct correct form
+       :form (.form expr)
        :test (assoc the-expr :case-test true)
        :tests tests
        :thens thens
@@ -1550,8 +1616,12 @@
     (let [c (.c expr)]
       (assert (string? c))
       {:op :import
-       :env env
-       :form (list 'clojure.core/import* c)
+       :env (env-location env
+                          expr
+                          (.form expr))
+       :form (with-meta
+               (list 'clojure.core/import* c)
+               (meta (.form expr)))
        :class c
        :tag nil
        :o-tag nil
@@ -1573,10 +1643,14 @@
           tag (when (.hasJavaClass expr)
                 (.getJavaClass expr))]
       {:op :set!
-       :form (list 'set! 
-                   (emit-form/emit-form target)
-                   (emit-form/emit-form val))
-       :env env
+       :form (with-meta
+               (list 'set! 
+                     (emit-form/emit-form target)
+                     (emit-form/emit-form val))
+               (meta (.form expr)))
+       :env (env-location env
+                          expr
+                          (.form expr))
        :target target
        :val val
        :tag tag
@@ -1619,11 +1693,15 @@
                                         opt)
                          :body? true)]
       {:op :catch
-       :form (list 'catch 
-                   (emit-form/emit-form cls)
-                   (emit-form/emit-form local-binding)
-                   (emit-form/emit-form handler))
-       :env env
+       :form (with-meta
+               (list 'catch 
+                     (emit-form/emit-form cls)
+                     (emit-form/emit-form local-binding)
+                     (emit-form/emit-form handler))
+               (meta (.form ctch)))
+       :env (env-location env
+                          ctch
+                          (.form ctch))
        :class cls
        :local local-binding
        :body handler
@@ -1650,12 +1728,16 @@
           tag (when (.hasJavaClass expr)
                 (.getJavaClass expr))]
       {:op :try
-       :form (list* 'try 
-                    (emit-form/emit-form try-expr)
-                    (concat (map emit-form/emit-form catch-exprs)
-                            (when finally-expr
-                              [(list 'finally (emit-form/emit-form finally-expr))])))
-       :env env
+       :form (with-meta
+               (list* 'try 
+                      (emit-form/emit-form try-expr)
+                      (concat (map emit-form/emit-form catch-exprs)
+                              (when finally-expr
+                                [(list 'finally (emit-form/emit-form finally-expr))])))
+               (meta (.form expr)))
+       :env (env-location env
+                          expr
+                          (.form expr))
        :body try-expr
        :catches catch-exprs
        ;; can be nil like in TA
@@ -1682,8 +1764,10 @@
           args (mapv #(analysis->map % env opt) (.args expr))
           tag (.getJavaClass expr)]
       {:op :recur
-       :form (list* 'recur (map emit-form/emit-form args))
-       :env (env-location env expr)
+       :form (with-meta
+               (list* 'recur (map emit-form/emit-form args))
+               (meta (.form expr)))
+       :env (env-location env expr (.form expr))
        ;:loop-locals loop-locals
        :loop-id (:loop-id env)
        :exprs args
