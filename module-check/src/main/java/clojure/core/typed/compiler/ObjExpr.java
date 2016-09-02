@@ -75,13 +75,13 @@ static final public Var COMPILE_FILES = (Var) Clojure.var("clojure.core", "*comp
 
 	public Object src;
 
-    public IPersistentMap opts = PersistentHashMap.EMPTY;
+  public IPersistentMap opts = PersistentHashMap.EMPTY;
 
 	public final static Method voidctor = Method.getMethod("void <init>()");
 	public IPersistentMap classMeta;
 	public boolean canBeDirect;
 
-final static Type IPERSISTENTMAP_TYPE = Type.getType(IPersistentMap.class);
+  final static Type IPERSISTENTMAP_TYPE = Type.getType(IPersistentMap.class);
 
 	public final String name(){
 		return name;

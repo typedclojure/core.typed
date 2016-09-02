@@ -225,6 +225,12 @@ static
 
 	}
 
+	static final public IFn REFERENCE_LOCAL =
+      Clojure.var("clojure.core.typed.compiler", "reference-local");
+
+	static final public IFn NAMESPACE_FOR =
+      Clojure.var("clojure.core.typed.compiler", "namespace-for");
+
 // don't use the actual WARN_ON_REFLECTION because core.typed might be able
 // to resolve the reflection.
 	static final public Var WARN_ON_REFLECTION =
@@ -421,7 +427,7 @@ static Symbol resolveSymbol(Symbol sym){
 		return sym;
 	if(sym.getNamespace() != null)
 		{
-		Namespace ns = namespaceFor(sym);
+		Namespace ns = (Namespace) NAMESPACE_FOR.invoke(sym);
 		if(ns == null || (ns.name.getName() == null ? sym.getNamespace() == null : ns.name.getName().equals(sym.getNamespace())))
 			return sym;
 		return Symbol.intern(ns.name.getName(), sym.getName());
@@ -5780,7 +5786,7 @@ static public class CompilerException extends RuntimeException{
 
 static public Var isMacro(Object op) {
 	//no local macros for now
-	if(op instanceof Symbol && referenceLocal((Symbol) op) != null)
+	if(op instanceof Symbol && REFERENCE_LOCAL.invoke((Symbol) op) != null)
 		return null;
 	if(op instanceof Symbol || op instanceof Var)
 		{
@@ -5797,7 +5803,7 @@ static public Var isMacro(Object op) {
 
 static public IFn isInline(Object op, int arity) {
 	//no local inlines for now
-	if(op instanceof Symbol && referenceLocal((Symbol) op) != null)
+	if(op instanceof Symbol && REFERENCE_LOCAL.invoke((Symbol) op) != null)
 		return null;
 	if(op instanceof Symbol || op instanceof Var)
 		{
@@ -5819,7 +5825,7 @@ static public IFn isInline(Object op, int arity) {
 }
 
 public static boolean namesStaticMember(Symbol sym){
-	return sym.getNamespace() != null && namespaceFor(sym) == null;
+	return sym.getNamespace() != null && NAMESPACE_FOR.invoke(sym) == null;
 }
 
 public static Object preserveTag(ISeq src, Object dst) {
@@ -6132,7 +6138,7 @@ private static Expr analyzeSymbol(Symbol sym) {
 	Symbol tag = tagOf(sym);
 	if(sym.getNamespace() == null) //ns-qualified syms are always Vars
 		{
-		LocalBinding b = referenceLocal(sym);
+		LocalBinding b = (LocalBinding) REFERENCE_LOCAL.invoke(sym);
 		if(b != null)
             {
             return new LocalBindingExpr(b, tag, sym);
@@ -6140,7 +6146,7 @@ private static Expr analyzeSymbol(Symbol sym) {
 		}
 	else
 		{
-		if(namespaceFor(sym) == null)
+		if(NAMESPACE_FOR.invoke(sym) == null)
 			{
 			Symbol nsSym = Symbol.intern(sym.getNamespace());
 			Class c = HostExpr.maybeClass(nsSym, false);
@@ -6198,28 +6204,11 @@ static Object resolve(Symbol sym) {
 	return resolveIn(currentNS(), sym, false);
 }
 
-static Namespace namespaceFor(Symbol sym){
-	return namespaceFor(currentNS(), sym);
-}
-
-static Namespace namespaceFor(Namespace inns, Symbol sym){
-	//note, presumes non-nil sym.ns
-	// first check against currentNS' aliases...
-	Symbol nsSym = Symbol.intern(sym.getNamespace());
-	Namespace ns = inns.lookupAlias(nsSym);
-	if(ns == null)
-		{
-		// ...otherwise check the Namespaces map.
-		ns = Namespace.find(nsSym);
-		}
-	return ns;
-}
-
 static public Object resolveIn(Namespace n, Symbol sym, boolean allowPrivate) {
 	//note - ns-qualified vars must already exist
 	if(sym.getNamespace() != null)
 		{
-		Namespace ns = namespaceFor(n, sym);
+		Namespace ns = (Namespace) NAMESPACE_FOR.invoke(n, sym);
 		if(ns == null)
 			throw Util.runtimeException("No such namespace: " + sym.getNamespace());
 
@@ -6263,7 +6252,7 @@ static public Object maybeResolveIn(Namespace n, Symbol sym) {
 	//note - ns-qualified vars must already exist
 	if(sym.getNamespace() != null)
 		{
-		Namespace ns = namespaceFor(n, sym);
+		Namespace ns = (Namespace) NAMESPACE_FOR.invoke(n, sym);
 		if(ns == null)
 			return null;
 		Var v = ns.findInternedVar(Symbol.intern(sym.getName()));
@@ -6294,7 +6283,7 @@ static Var lookupVar(Symbol sym, boolean internNew, boolean registerMacro) {
 	//note - ns-qualified vars in other namespaces must already exist
 	if(sym.getNamespace() != null)
 		{
-		Namespace ns = namespaceFor(sym);
+		Namespace ns = (Namespace) NAMESPACE_FOR.invoke(sym);
 		if(ns == null)
 			return null;
 		//throw Util.runtimeException("No such namespace: " + sym.ns);
@@ -6372,20 +6361,6 @@ static void closeOver(LocalBinding b, ObjMethod method){
 		}
 }
 
-
-static LocalBinding referenceLocal(Symbol sym) {
-	if(!LOCAL_ENV.isBound())
-		return null;
-	LocalBinding b = (LocalBinding) RT.get(LOCAL_ENV.deref(), sym);
-	if(b != null)
-		{
-		ObjMethod method = (ObjMethod) METHOD.deref();
-		if(b.idx == 0)
-			method.usesThis = true;
-		closeOver(b, method);
-		}
-	return b;
-}
 
 public static Symbol tagOf(Object o){
 	Object tag = RT.get(RT.meta(o), TAG_KEY);

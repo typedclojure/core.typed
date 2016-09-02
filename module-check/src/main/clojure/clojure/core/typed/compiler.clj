@@ -97,7 +97,6 @@
       (symbol? tag) tag
       (string? tag) (symbol nil tag))))
 
-;; TODO bad set!
 #_
 (defn close-over [^Compiler$LocalBinding b 
                   ^Compiler$ObjMethod method]
@@ -106,12 +105,12 @@
   (cast Compiler$ObjMethod method)
   (cond
     (and b method)
-    (let [lb (cast Compiler$LocalBinding (get (.locals method) b))]
+    (let [^Compiler$LocalBinding
+          lb (cast Compiler$LocalBinding (get (.locals method) b))]
       (if (nil? lb)
-        (do (let [o (.objx method)]
-              (set! (.closes o)
-                    (cast IPersistentMap 
-                          (assoc (-> method .objx .closes) b b))))
+        (do (set! (.closes (.objx method))
+                  (cast IPersistentMap 
+                        (assoc (-> method .objx .closes) b b)))
             (close-over b (.parent method)))
         (do (when (zero? (.idx lb))
               (set! (.usesThis method) true))
