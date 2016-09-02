@@ -11,11 +11,11 @@
                          Compiler$MonitorExitExpr Compiler$ThrowExpr Compiler$InvokeExpr Compiler$TheVarExpr Compiler$VarExpr
                          Compiler$UnresolvedVarExpr Compiler$NewInstanceMethod Compiler$FnMethod Compiler$FnExpr
                          Compiler$NewInstanceExpr Compiler$MetaExpr Compiler$BodyExpr Compiler$ImportExpr Compiler$AssignExpr
-                         Compiler$TryExpr$CatchClause Compiler$TryExpr Compiler$C Compiler$LocalBindingExpr Compiler$RecurExpr
+                         Compiler$TryExpr$CatchClause Compiler$TryExpr Compiler$LocalBindingExpr Compiler$RecurExpr
                          Compiler$MapExpr Compiler$IfExpr Compiler$KeywordInvokeExpr Compiler$InstanceFieldExpr Compiler$InstanceOfExpr
-                         Compiler$CaseExpr Compiler$Expr Compiler$SetExpr Compiler$MethodParamExpr 
+                         Compiler$CaseExpr Compiler$SetExpr Compiler$MethodParamExpr 
                          Compiler$LiteralExpr Compiler$ConstantExpr Compiler$KeywordExpr 
-                         Compiler$ObjMethod Compiler$Expr Compiler$NumberExpr
+                         Compiler$ObjMethod Compiler$NumberExpr
                          Compiler$NilExpr Compiler$StringExpr
                          Compiler$BooleanExpr))
   (:require [clojure.reflect :as reflect]
