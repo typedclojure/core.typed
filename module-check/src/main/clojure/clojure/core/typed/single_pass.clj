@@ -4,6 +4,7 @@
   Entry point `analyze`"
   (:import (java.io LineNumberReader InputStreamReader PushbackReader)
            (clojure.lang RT LineNumberingPushbackReader Var)
+           (clojure.core.typed.compiler C)
            (clojure.core.typed.lang 
                          Compiler$DefExpr Compiler$LocalBinding Compiler$BindingInit Compiler$LetExpr
                          Compiler$LetFnExpr Compiler$StaticMethodExpr Compiler$InstanceMethodExpr Compiler$StaticFieldExpr
@@ -15,9 +16,7 @@
                          Compiler$MapExpr Compiler$IfExpr Compiler$KeywordInvokeExpr Compiler$InstanceFieldExpr Compiler$InstanceOfExpr
                          Compiler$CaseExpr Compiler$SetExpr Compiler$MethodParamExpr 
                          Compiler$LiteralExpr Compiler$ConstantExpr Compiler$KeywordExpr 
-                         Compiler$ObjMethod Compiler$NumberExpr
-                         Compiler$NilExpr Compiler$StringExpr
-                         Compiler$BooleanExpr))
+                         Compiler$NumberExpr Compiler$NilExpr Compiler$StringExpr Compiler$BooleanExpr))
   (:require [clojure.reflect :as reflect]
             [clojure.java.io :as io]
             [clojure.pprint :as pp]
@@ -1816,12 +1815,12 @@
           {:Expr-obj expr})))))
 
 (defmulti keyword->Context identity)
-(defmethod keyword->Context :ctx/statement [_] Compiler$C/STATEMENT)
-(defmethod keyword->Context :ctx/expr      [_] #_Compiler$C/EXPRESSION
+(defmethod keyword->Context :ctx/statement [_] C/STATEMENT)
+(defmethod keyword->Context :ctx/expr      [_] #_C/EXPRESSION
   ;; EXPRESSION doesn't work too well, eg. (analyze-form '(let []))
-  Compiler$C/EVAL)
-(defmethod keyword->Context :ctx/return    [_] Compiler$C/RETURN)
-;; :eval Compiler$C/EVAL
+  C/EVAL)
+(defmethod keyword->Context :ctx/return    [_] C/RETURN)
+;; :eval C/EVAL
 
 ;; requires clojure 1.7
 (defn ^:private analyzer-bindings-one [env]
@@ -1846,7 +1845,7 @@
   "Must be called after binding the appropriate Compiler and RT dynamic Vars."
   ([env form] (analyze* env form {}))
   ([env form opts]
-   (let [context Compiler$C/EVAL #_ (keyword->Context (:context env))
+   (let [context C/EVAL #_ (keyword->Context (:context env))
          env (merge env
                     (when-let [file (and (not= *file* "NO_SOURCE_FILE")
                                          *file*)]
@@ -2045,7 +2044,7 @@
         child-expr))
     clojure.pprint/pprint)
 
-  (def in (Compiler/analyze Compiler$C/STATEMENT '(seq 1)))
+  (def in (Compiler/analyze C/STATEMENT '(seq 1)))
   (class in)
   (def method (doto (.getMethod (class in) "eval" (into-array Class []))
                 (.setAccessible true)))
