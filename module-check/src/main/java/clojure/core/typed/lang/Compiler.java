@@ -2139,10 +2139,10 @@ public static class BooleanExpr extends LiteralExpr{
 
 public final static BooleanExpr TRUE_EXPR =
 (BooleanExpr)
-	 Clojure.var("clojure.core.typed.compiler", "TRUE-EXPR").invoke();
+	 ((Var) Clojure.var("clojure.core.typed.compiler", "TRUE-EXPR")).deref();
 public final static BooleanExpr FALSE_EXPR =
 (BooleanExpr)
-	 Clojure.var("clojure.core.typed.compiler", "FALSE-EXPR").invoke();
+	 ((Var) Clojure.var("clojure.core.typed.compiler", "FALSE-EXPR")).deref();
 
 public static class StringExpr extends LiteralExpr{
 	public final String str;
