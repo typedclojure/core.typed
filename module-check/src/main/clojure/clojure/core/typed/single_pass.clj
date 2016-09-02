@@ -9,7 +9,7 @@
                          Compiler$LetFnExpr Compiler$StaticMethodExpr Compiler$InstanceMethodExpr Compiler$StaticFieldExpr
                          Compiler$NewExpr Compiler$EmptyExpr Compiler$VectorExpr Compiler$MonitorEnterExpr
                          Compiler$MonitorExitExpr Compiler$ThrowExpr Compiler$InvokeExpr Compiler$TheVarExpr Compiler$VarExpr
-                         Compiler$UnresolvedVarExpr Compiler$ObjExpr Compiler$NewInstanceMethod Compiler$FnMethod Compiler$FnExpr
+                         Compiler$UnresolvedVarExpr Compiler$NewInstanceMethod Compiler$FnMethod Compiler$FnExpr
                          Compiler$NewInstanceExpr Compiler$MetaExpr Compiler$BodyExpr Compiler$ImportExpr Compiler$AssignExpr
                          Compiler$TryExpr$CatchClause Compiler$TryExpr Compiler$C Compiler$LocalBindingExpr Compiler$RecurExpr
                          Compiler$MapExpr Compiler$IfExpr Compiler$KeywordInvokeExpr Compiler$InstanceFieldExpr Compiler$InstanceOfExpr
@@ -1177,18 +1177,6 @@
         (when (:java-obj opt)
           {:Expr-obj expr}))))
 
-  ;; ObjExprs
-  Compiler$ObjExpr
-  (analysis->map
-    [expr env opt]
-    (assert nil "ObjExprs")
-    (merge
-      {:op :obj-expr
-       :env env
-       :tag (.tag expr)}
-      (when (:java-obj opt)
-        {:Expr-obj expr})))
-
   ;; FnExpr (extends ObjExpr)
   ; {:op   :method
   ;  :doc  "Node for a method in a deftype* or reify* special-form expression"
@@ -1323,8 +1311,8 @@
   Compiler$FnExpr
   (analysis->map
     [expr env opt]
-    (let [once (field-accessor Compiler$ObjExpr 'onceOnly expr)
-          src (field-accessor Compiler$ObjExpr 'src expr)
+    (let [once (.onceOnly expr)
+          src (.src expr)
           ;_ (prn "FnExpr src" src)
           fn-method-forms
           (into {}
