@@ -2131,8 +2131,12 @@ public static class BooleanExpr extends LiteralExpr{
 	}
 }
 
-final static BooleanExpr TRUE_EXPR = new BooleanExpr(true, true);
-final static BooleanExpr FALSE_EXPR = new BooleanExpr(false, false);
+public final static BooleanExpr TRUE_EXPR =
+(BooleanExpr)
+	 Clojure.var("clojure.core.typed.compiler", "TRUE-EXPR").invoke();
+public final static BooleanExpr FALSE_EXPR =
+(BooleanExpr)
+	 Clojure.var("clojure.core.typed.compiler", "FALSE-EXPR").invoke();
 
 public static class StringExpr extends LiteralExpr{
 	public final String str;
@@ -4730,12 +4734,12 @@ abstract public static class ObjMethod{
 	//num->localbinding
 	public IPersistentMap indexlocals = null;
 	Expr body = null;
-	ObjExpr objx;
+	public ObjExpr objx;
 	public PersistentVector argLocals;
 	int maxLocal = 0;
 	int line;
 	int column;
-	boolean usesThis = false;
+	public boolean usesThis = false;
 	PersistentHashSet localsUsedInCatchFinally = PersistentHashSet.EMPTY;
 	protected IPersistentMap methodMeta;
   public final Object form;
