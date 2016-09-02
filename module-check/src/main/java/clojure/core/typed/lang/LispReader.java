@@ -41,7 +41,17 @@ import java.util.Map;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
+import clojure.java.api.Clojure;
+
 public class LispReader{
+
+  static IFn REQUIRE = Clojure.var("clojure.core", "require");
+  static {
+    REQUIRE.invoke(Clojure.read("clojure.core.typed.compiler"));
+  }
+
+	static final public IFn NAMESPACE_FOR =
+      Clojure.var("clojure.core.typed.compiler", "namespace-for");
 
     static final Symbol QUOTE = Symbol.intern("quote");
     static final Symbol THE_VAR = Symbol.intern("var");
@@ -412,7 +422,7 @@ public class LispReader{
                 Symbol ks = Symbol.intern(s.substring(2));
                 Namespace kns;
                 if(ks.getNamespace() != null)
-                    kns = Compiler.namespaceFor(ks);
+                    kns = (Namespace) NAMESPACE_FOR.invoke(ks);
                 else
                     kns = Compiler.currentNS();
                 //auto-resolving keyword

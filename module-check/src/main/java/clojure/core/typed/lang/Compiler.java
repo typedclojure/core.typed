@@ -4746,7 +4746,7 @@ abstract public static class ObjMethod{
 	int line;
 	int column;
 	public boolean usesThis = false;
-	PersistentHashSet localsUsedInCatchFinally = PersistentHashSet.EMPTY;
+	public PersistentHashSet localsUsedInCatchFinally = PersistentHashSet.EMPTY;
 	protected IPersistentMap methodMeta;
   public final Object form;
 
@@ -6341,7 +6341,7 @@ static Namespace currentNS(){
 	return (Namespace) RT.CURRENT_NS.deref();
 }
 
-static void closeOver(LocalBinding b, ObjMethod method){
+public static void closeOver(LocalBinding b, ObjMethod method){
 	if(b != null && method != null)
 		{
         LocalBinding lb = (LocalBinding) RT.get(method.locals, b);

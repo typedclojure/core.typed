@@ -4,7 +4,8 @@
            (clojure.asm.commons Method GeneratorAdapter)
            (clojure.lang 
              Namespace 
-             IPersistentMap)
+             IPersistentMap
+             PersistentHashSet)
            (clojure.core.typed.lang
              Compiler$BooleanExpr
              Compiler$LocalBinding
@@ -98,7 +99,7 @@
       (string? tag) (symbol nil tag))))
 
 #_
-(defn close-over [^Compiler$LocalBinding b 
+(defn close-over [^Compiler$LocalBinding b
                   ^Compiler$ObjMethod method]
   {:post [(nil? %)]}
   (cast Compiler$LocalBinding b)
@@ -109,7 +110,7 @@
           lb (cast Compiler$LocalBinding (get (.locals method) b))]
       (if (nil? lb)
         (do (set! (.closes (.objx method))
-                  (cast IPersistentMap 
+                  (cast IPersistentMap
                         (assoc (-> method .objx .closes) b b)))
             (close-over b (.parent method)))
         (do (when (zero? (.idx lb))
@@ -121,8 +122,6 @@
                               .localsUsedInCatchFinally
                               (.cons (.idx b)))))))))))
 
-(declare close-over)
-
 (defn reference-local [sym]
   (when (bound? #'*local-env*)
     (let [^Compiler$LocalBinding
@@ -133,7 +132,7 @@
               method (cast Compiler$ObjMethod *method*)]
           (when (zero? (.idx b))
             (set! (.usesThis method) true))
-          (close-over b method)))
+          (Compiler/closeOver b method)))
       b)))
 
 (defn namespace-for 
