@@ -2,17 +2,26 @@
   (:refer-clojure :exclude [*warn-on-reflection*])
   (:import (clojure.asm Type)
            (clojure.asm.commons Method GeneratorAdapter)
+           (clojure.core.typed.compiler
+             C)
            (clojure.lang 
+             Var
+             Util
              Namespace 
              IPersistentMap
              PersistentHashSet)
            (clojure.core.typed.lang
+             Reflector
              Compiler$BooleanExpr
+             Compiler$ConstantExpr
              Compiler$LocalBinding
              Compiler$LocalBindingExpr
              Compiler$ObjMethod
-             Compiler$NilExpr)
-  ))
+             Compiler$StaticFieldExpr
+             Compiler$UnresolvedVarExpr
+             Compiler$HostExpr
+             Compiler$VarExpr
+             Compiler$NilExpr)))
 
 (ns-unmap *ns* 'Compiler)
 (import '(clojure.core.typed.lang Compiler))
@@ -152,6 +161,8 @@
        (Namespace/find nssym)
        ns))))
 
+(declare analyze)
+
 (defn analyze-symbol [sym]
   {:pre [(symbol? sym)]}
   (let [tag (tag-of sym)
@@ -159,8 +170,41 @@
             (reference-local sym))]
     (cond
       b (Compiler$LocalBindingExpr. b tag sym)
-      :else (assert "TODO")
-      )))
+      :else
+      (let [ret (when-not (namespace-for sym)
+                  (let [nssym (symbol (namespace sym))
+                        c (Compiler$HostExpr/maybeClass nssym false)]
+                    (when c
+                      (when (Reflector/getField c (name sym) true)
+                        (Compiler$StaticFieldExpr. (line-deref)
+                                                   (column-deref)
+                                                   c
+                                                   (name sym)
+                                                   tag
+                                                   sym))
+                      (throw (Util/runtimeException 
+                               (str "Unable to find static field: " (name sym) " in " c))))))]
+        (if ret
+          ret
+          (let [o (Compiler/resolve sym)]
+            (cond
+              (var? o)
+              (let [^Var v o
+                    _ (when (Compiler/isMacro v)
+                        (throw (Util/runtimeException
+                                 (str "Can't take value of a macro: " v))))]
+                (if (get (meta v) :const)
+                  (analyze C/EXPRESSION
+                           (list 'quote (.get v)))
+                  (do (Compiler/registerVar v)
+                      (Compiler$VarExpr. v tag sym)))))
+
+            (class? o) (Compiler$ConstantExpr. o sym)
+            (symbol? o) (Compiler$UnresolvedVarExpr. o)
+            :else (throw (Util/runtimeException
+                           (str "Unable to resolve symbol: " 
+                                sym 
+                                " in this context")))))))))
 
 (defn analyze
   ([context form] (analyze context form nil))

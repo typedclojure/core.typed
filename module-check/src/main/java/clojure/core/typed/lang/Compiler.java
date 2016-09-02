@@ -225,6 +225,9 @@ static
 
 	}
 
+	static final public IFn ANALYZE_SYMBOL =
+      Clojure.var("clojure.core.typed.compiler", "analyze-symbol");
+
 	static final public IFn REFERENCE_LOCAL =
       Clojure.var("clojure.core.typed.compiler", "reference-local");
 
@@ -5721,7 +5724,7 @@ private static Expr analyze(C context, Object form, String name) {
 				return FALSE_EXPR;
 		Class fclass = form.getClass();
 		if(fclass == Symbol.class)
-			return analyzeSymbol((Symbol) form);
+			return (Expr)ANALYZE_SYMBOL.invoke((Symbol) form);
 		else if(fclass == Keyword.class)
 			return registerKeyword((Keyword) form);
 		else if(form instanceof Number)
@@ -6200,7 +6203,7 @@ static Object resolve(Symbol sym, boolean allowPrivate) {
 	return resolveIn(currentNS(), sym, allowPrivate);
 }
 
-static Object resolve(Symbol sym) {
+public static Object resolve(Symbol sym) {
 	return resolveIn(currentNS(), sym, false);
 }
 
@@ -6324,7 +6327,7 @@ static Var lookupVar(Symbol sym, boolean internNew) {
     return lookupVar(sym, internNew, true);
 }
 
-private static void registerVar(Var var) {
+public static void registerVar(Var var) {
 	if(!VARS.isBound())
 		return;
 	IPersistentMap varsMap = (IPersistentMap) VARS.deref();
