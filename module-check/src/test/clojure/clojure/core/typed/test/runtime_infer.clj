@@ -731,3 +731,102 @@
    Any])]
 (anns-from-tenv {'unparse-prop1 t
                  'unparse-prop2 t}))
+
+(let [t (prs
+          [(U '{:entry1 String}
+              '{:entry2 Boolean}
+              '{:entry3 Boolean})
+           :->
+           Any])]
+  (anns-from-tenv {'config-in t}))
+
+(let [t (prs
+          [(U '{:op :foo
+                :entry1 String}
+              '{:op :bar
+                :entry2 Boolean}
+              '{:op :baz
+                :entry3 Boolean})
+           :->
+           Any])]
+  (anns-from-tenv {'config-in t}))
+
+(let [t (prs
+          [(U ':foo
+              '{:op :bar
+                :entry2 Boolean})
+           :->
+           Any])]
+  (anns-from-tenv {'config-in t}))
+
+;; simplify keywords + seqables to Any
+(let [t (prs
+          [(U ':foo
+              (clojure.lang.Seqable String))
+           :->
+           Any])]
+  (anns-from-tenv {'config-in t}))
+
+;; simplify Sym/Kw + seqable to Any
+(let [t (prs
+          [(U Sym
+              (clojure.lang.Seqable String))
+           :->
+           Any])]
+  (anns-from-tenv {'config-in t}))
+
+;; don't simplify Seqable + nil
+(let [t (prs
+          [(U nil
+              (clojure.lang.Seqable String))
+           :->
+           Any])]
+  (anns-from-tenv {'config-in t}))
+
+;; use optional keys
+(let [t (prs
+          [(U '{:foo String}
+              '{:foo String
+                :bar Boolean})
+           :->
+           Any])]
+  (anns-from-tenv {'config-in t}))
+
+;Any
+(let [t (prs
+          [(U Any
+              '{:foo String
+                :bar Boolean})
+           :->
+           Any])]
+  (anns-from-tenv {'config-in t}))
+
+; Kw simplification
+(let [t (prs
+          [(U ':foo ':bar)
+           :->
+           Any])]
+  (anns-from-tenv {'config-in t}))
+
+; join on class arguments
+(let [t (prs
+          [(U (Vec Integer)
+              (Vec Long))
+           :->
+           Any])]
+  (anns-from-tenv {'config-in t}))
+
+; don't alias args implicitly
+(let [t (prs
+          [[Any :->  Any]
+           :->
+           Any])]
+  (anns-from-tenv {'config-in t}))
+
+; upcast HMaps to Map if they appear in a union
+(let [t (prs
+          [(U '{:foo Any}
+              (clojure.lang.IPersistentMap Any Any))
+           :->
+           Any])]
+  (anns-from-tenv {'config-in t}))

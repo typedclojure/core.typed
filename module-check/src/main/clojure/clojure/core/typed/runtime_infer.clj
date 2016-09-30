@@ -1,4 +1,5 @@
 (ns clojure.core.typed.runtime-infer
+  (:refer-clojure :exclude [any?])
   (:require [clojure.pprint :as pp]
             [clojure.core.typed :as t]
             [clojure.set :as set]
@@ -38,6 +39,12 @@
      '{:op :free
        :name Sym}
      '{:op :Top}))
+
+(def -any {:op :Top})
+
+(defn Any? [m]
+  {:pre [(map? m)]}
+  (#{:Top} (:op m)))
 
 #_
 (defalias PathElem
@@ -247,6 +254,9 @@
    :class cls
    :args args})
 
+(defn -class? [m]
+  (boolean (#{:class} (:op m))))
+
 (defn -val [v]
   {:op :val
    :val v})
@@ -374,7 +384,7 @@
 
 (defn parse-type [m]
   (cond
-    (= 'Any m) {:op :Top}
+    (= 'Any m) -any
     (= '? m) {:op :unknown}
 
     (or (= nil m)
@@ -825,7 +835,9 @@
         (mapcat flatten-union)
         ts))
 
-(declare join-HMaps join*)
+(declare join-HMaps join* pprint join)
+
+(def val? (comp boolean #{:val} :op))
 
 (defn make-Union [args]
   (let [ts (flatten-unions args)
@@ -836,16 +848,96 @@
                                   {:post [(HMap? %)]}
                                   (reduce join-HMaps (first ms) (rest ms))))
                            (vals hmap-by-keys))
+        ;; if we have more than one keyset, then we must
+        ;; have "tagged" maps with a common keyword entry (eg. :op, :type).
+        ;; This ensures we don't keep too much information about generic maps.
+        hmaps-merged (if (> (count hmaps-merged) 1)
+                       (let [_ (assert (every? HMap? hmaps-merged))
+                             common-keys (apply
+                                           set/intersection
+                                           (map (comp set keys :map) hmaps-merged))]
+                         ;; FIXME only simplify for Keyword value, instead of Any.
+                         ;; keep it dumb for now, any common key with Any 
+                         (if (empty? common-keys)
+                           #{(-class clojure.lang.IPersistentMap [-any -any])}
+                           ;; throw out optional keys, merge common keys
+                           (do
+                             ;(prn "throwing out optional keys")
+                             #{{:op :HMap
+                                :map (apply merge-with join
+                                            (map (fn [m]
+                                                   {:pre [(HMap? m)]}
+                                                   (select-keys (:map m) common-keys))
+                                                 hmaps-merged))}})))
+                       hmaps-merged)
         ;_ (prn "hmaps-merged" (map unparse-type hmaps-merged))
-        ts (into hmaps-merged non-hmaps)]
+        ;; join all common classes by their arguments, regardless of their variance
+        non-hmaps (let [{classes true non-classes false} (group-by -class? non-hmaps)
+                        classes (group-by :class classes)
+                        classes (map (fn [cs]
+                                       {:pre [(seq cs)
+                                              (every? -class? cs)
+                                              (apply = (map (comp count :args) cs))]}
+                                       (-class (-> cs first :class)
+                                               (apply mapv join* (map :args cs))))
+                                     (vals classes))]
+                    (into (set classes) non-classes))
+
+        ;; delete HMaps if there's already a Map in this union
+        hmaps-merged (if (some (fn [m]
+                                 (when (-class? m)
+                                   (#{clojure.lang.IPersistentMap} (:class m))))
+                               non-hmaps)
+                       #{}
+                       hmaps-merged)
+
+        ts (into hmaps-merged non-hmaps)
+        
+        ;; simplify multiple keywords to Kw if
+        ts (let [{kws true non-kws false} 
+                 (group-by (fn [v]
+                             (boolean
+                               (when (val? v)
+                                 (keyword? (:val v)))))
+                           ts)]
+             (if (>= (count kws) 2)  ;; tweak simplification threshold here
+               (conj (set non-kws) (-class clojure.lang.Keyword []))
+               ts))
+        ]
+    (assert (set? ts))
     (assert (every? (complement #{:union}) (map :op ts)))
     (cond
+      ;; simplify to Any
+      (some Any? ts) -any
+
+      ;; if there's a mix of collections and non-collection values,
+      ;; return Any
+      (and (or (seq hmaps-merged)
+               (seq (filter (fn [m]
+                              (when (-class? m)
+                                (contains? (conj (set (supers (:class m)))
+                                                 clojure.lang.Seqable)
+                                           clojure.lang.Seqable)))
+                            non-hmaps)))
+           ;; nil is effectively a collection
+           (some (fn [v]
+                   (or
+                     (and (val? v)
+                          (some? (:val v)))
+                     (and (-class? v)
+                          (#{clojure.lang.Symbol
+                             String
+                             clojure.lang.Keyword}
+                            (:class v)))))
+                 non-hmaps))
+      (do
+        ;(prn "simplifying mix of collections and singleton values")
+        -any)
+
       (= 1 (count ts)) (first ts)
       :else 
       {:op :union
        :types ts})))
-
-(declare join)
 
 (defn group-arities [t1 t2]
   {:pre [(#{:IFn} (:op t1))
@@ -1248,8 +1340,6 @@
   ;(prn "resolve-alias" name (keys (alias-env env)))
   (get (alias-env env) name))
 
-(def val? (comp #{:val} :op))
-
 (def kw-val? (every-pred val?  (comp keyword? :val)))
 
 #_ 
@@ -1414,9 +1504,11 @@
                                (:types t)))
                       (do-alias t)
                       t)
-             :IFn1 (-> t
-                       (update :dom #(mapv do-alias %))
-                       (update :rng do-alias))
+             :IFn1 (if (:spec? config)
+                     (-> t
+                         (update :dom #(mapv do-alias %))
+                         (update :rng do-alias))
+                     t)
              t)))
        @env-atom])))
 
@@ -1692,13 +1784,22 @@
 
 (def ^:dynamic *should-track* true)
 
+(def max-track-depth 5)
+
 ; track : (Atom InferResultEnv) Value Path -> Value
 (defn track 
   ([results-atom v path]
    {:pre [(vector? path)]}
    (let []
      (cond
-       (not *should-track*) v
+       ;; cut off path
+       (or
+         (> (count path) max-track-depth)
+         (not *should-track*))
+       (let [ir (infer-result path -any)
+             _ (add-infer-result! results-atom ir)]
+         v)
+
        ;; only accurate up to 20 arguments.
        ;; all arities 21 and over will collapse into one.
        (fn? v) (let [;; if this is never called, remember it is actually a function
@@ -2332,9 +2433,16 @@
               ksets)]
     env))
 
+(declare envs-to-annotations)
+
+(defn debug-output [msg env config]
+  (prn msg)
+  (pprint (envs-to-annotations env config)))
+
 (defn populate-envs [env {:keys [spec?] :as config}]
-  #_(prn "populating")
+  (prn "populating")
   (let [;; create recursive types
+        _ (debug-output "top of populate-envs" env config)
         env (reduce
               (fn [env [v t]]
                 (let [;; create graph nodes from HMap types
@@ -2347,20 +2455,23 @@
                   (update-type-env env assoc v t)))
               env
               (type-env env))
+        ;_ (debug-output "before alias-single-HMaps" env config)
         ;; ensure all HMaps correspond to an alias
         env (alias-single-HMaps env config)
+        ;_ (debug-output "after alias-single-HMaps" env config)
         ;; merge aliases that point to HMaps
         ;; with the same keys (they must point to *exactly*
         ;; one top-level HMap, not a union etc.)
         env (squash-horizonally env config)
-        ;_ (prn "finished squash-horizonally")
+        _ (prn "finished squash-horizonally")
+        ;_ (debug-output "after squash-horizonally" env config)
         ;; Clean up redundant aliases and inline simple
         ;; type aliases.
-        ;_ (prn "Start follow-all")
+        _ (prn "Start follow-all")
         env (follow-all env (assoc config :simplify? false))
-        ;_ (prn "end follow-all")
+        _ (prn "end follow-all")
         ]
-    #_(prn "done populating")
+    (prn "done populating")
     env))
 
 ;(defn order-defaliases [env as]
@@ -2448,9 +2559,12 @@
         tenv (into {}
                    (remove (fn [[k v]]
                              {:pre [(symbol? k)]}
-                             (some-> (find-var (symbol (str (current-ns)) (str k)))
-                                     meta
-                                     :macro)))
+                             (let [s (if (namespace k)
+                                       (symbol (str k))
+                                       (symbol (str (current-ns)) (str k)))]
+                               (some-> (find-var s)
+                                       meta
+                                       :macro))))
                    (type-env env))
         tfvs (into #{}
                    (mapcat
