@@ -835,7 +835,7 @@
         (mapcat flatten-union)
         ts))
 
-(declare join-HMaps join* pprint join)
+(declare join-HMaps join* pprint join kw-val?)
 
 (def val? (comp boolean #{:val} :op))
 
@@ -856,11 +856,22 @@
                              common-keys (apply
                                            set/intersection
                                            (map (comp set keys :map) hmaps-merged))]
-                         ;; FIXME only simplify for Keyword value, instead of Any.
-                         ;; keep it dumb for now, any common key with Any 
-                         (if (empty? common-keys)
+                         (cond
+                           (empty? common-keys)
                            #{(-class clojure.lang.IPersistentMap [-any -any])}
+
+                           ;; if one of the common keys is always mapped to a singleton keyword,
+                           ;; leave this alone.
+                           (some (fn [k]
+                                   (every? (fn [m]
+                                             {:pre [(HMap? m)]}
+                                             (kw-val? (get (:map m) k)))
+                                           hmaps-merged))
+                                 common-keys)
+                           hmaps-merged
+
                            ;; throw out optional keys, merge common keys
+                           :else
                            (do
                              ;(prn "throwing out optional keys")
                              #{{:op :HMap
@@ -894,12 +905,7 @@
         ts (into hmaps-merged non-hmaps)
         
         ;; simplify multiple keywords to Kw if
-        ts (let [{kws true non-kws false} 
-                 (group-by (fn [v]
-                             (boolean
-                               (when (val? v)
-                                 (keyword? (:val v)))))
-                           ts)]
+        ts (let [{kws true non-kws false} (group-by kw-val? ts)]
              (if (>= (count kws) 2)  ;; tweak simplification threshold here
                (conj (set non-kws) (-class clojure.lang.Keyword []))
                ts))

@@ -732,6 +732,7 @@
 (anns-from-tenv {'unparse-prop1 t
                  'unparse-prop2 t}))
 
+;; collapse maps with completely disjoint keys
 (let [t (prs
           [(U '{:entry1 String}
               '{:entry2 Boolean}
@@ -740,6 +741,7 @@
            Any])]
   (anns-from-tenv {'config-in t}))
 
+;; don't collapse common keys with keyword entry
 (let [t (prs
           [(U '{:op :foo
                 :entry1 String}
@@ -751,6 +753,7 @@
            Any])]
   (anns-from-tenv {'config-in t}))
 
+;; upcast Kw + HMap to Any
 (let [t (prs
           [(U ':foo
               '{:op :bar
@@ -792,7 +795,7 @@
            Any])]
   (anns-from-tenv {'config-in t}))
 
-;Any
+;upcast union to Any
 (let [t (prs
           [(U Any
               '{:foo String
