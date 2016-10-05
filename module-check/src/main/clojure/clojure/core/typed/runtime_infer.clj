@@ -835,7 +835,7 @@
         (mapcat flatten-union)
         ts))
 
-(declare join-HMaps join* pprint join kw-val?)
+(declare join-HMaps join* pprint join kw-val? kw-vals?)
 
 (def val? (comp boolean #{:val} :op))
 
@@ -865,7 +865,7 @@
                            (some (fn [k]
                                    (every? (fn [m]
                                              {:pre [(HMap? m)]}
-                                             (kw-val? (get (:map m) k)))
+                                             (kw-vals? (get (:map m) k)))
                                            hmaps-merged))
                                  common-keys)
                            hmaps-merged
@@ -905,10 +905,10 @@
         ts (into hmaps-merged non-hmaps)
         
         ;; simplify multiple keywords to Kw if
-        ts (let [{kws true non-kws false} (group-by kw-val? ts)]
-             (if (>= (count kws) 2)  ;; tweak simplification threshold here
-               (conj (set non-kws) (-class clojure.lang.Keyword []))
-               ts))
+        ;ts (let [{kws true non-kws false} (group-by kw-val? ts)]
+        ;     (if (>= (count kws) 2)  ;; tweak simplification threshold here
+        ;       (conj (set non-kws) (-class clojure.lang.Keyword []))
+        ;       ts))
         ]
     (assert (set? ts))
     (assert (every? (complement #{:union}) (map :op ts)))
@@ -1346,7 +1346,18 @@
   ;(prn "resolve-alias" name (keys (alias-env env)))
   (get (alias-env env) name))
 
-(def kw-val? (every-pred val?  (comp keyword? :val)))
+(defn fully-resolve-alias [env a]
+  (if (alias? a)
+    (recur env (resolve-alias a))
+    a))
+
+(def kw-val? (every-pred val? (comp keyword? :val)))
+
+(defn kw-vals? [t]
+  (boolean
+    (or (kw-val? t)
+        (when (union? t)
+          (every? kw-val? (:types t))))))
 
 #_ 
 (ann likely-HMap-dispatch [HMap -> (U nil '[Kw (Set Kw)])])
@@ -1383,12 +1394,19 @@
                           (map :val))
                         (:types t)))])))
 
+(defn kw-vals->str [v]
+  {:pre [(kw-vals? v)]}
+  (if (val? v)
+    (str (name (:val v)))
+    (apply str (interpose "-" (map (comp name :val) (:types v))))))
+
 (defn alias-single-HMaps
   "Traverse the type and alias environments
   and ensure all HMaps are aliased"
   [env config]
-  (letfn [(do-alias [env-atom t]
-            (let [n (symbol (-> (current-ns) str) "alias")
+  (letfn [(do-alias [env-atom t prefix]
+            {:pre [((some-fn string? nil?) prefix)]}
+            (let [n (symbol (-> (current-ns) str) (str prefix "-alias"))
                   a-atom (atom nil)
                   _ (swap! env-atom 
                            (fn [env]
@@ -1405,7 +1423,24 @@
               [(postwalk t
                          (fn [t]
                            (case (:op t)
-                             :HMap (do-alias env-atom t)
+                             :HMap (let [[k v]
+                                         (first
+                                           (filter (fn [[k v]]
+                                                     (kw-vals? v))
+                                                   (:map t)))]
+                                     (do-alias env-atom t 
+                                               (or
+                                                 ;; try and give a tagged name
+                                                 (when k
+                                                   (str (name k) "-" (kw-vals->str v)))
+                                                 ;; for small number of keys, spell out the keys
+                                                 (when (<= (count (:map t)) 2)
+                                                   (apply str (interpose "-" (map name (keys (:map t))))))
+                                                 ;; otherwise give abbreviated keys
+                                                 (apply str (interpose "-" 
+                                                                       (map (fn [k]
+                                                                              (apply str (take 3 (name k))))
+                                                                            (keys (:map t))))))))
                              t)))
                @env-atom]))]
     (let [env (reduce
@@ -1486,7 +1521,24 @@
                                                 m)))
                                 t)
                         t)
-                    n (symbol (-> (current-ns) str) "alias")
+                    n (symbol (-> (current-ns) str) (or
+                                                      (when (union? t)
+                                                        (let [ts (map #(fully-resolve-alias @env-atom %) (:types t))]
+                                                          (when (every? HMap? ts)
+                                                            (let [common-keys (apply
+                                                                                set/intersection
+                                                                                (map (comp set keys :map) ts))
+                                                                  common-tag (first
+                                                                               (filter
+                                                                                 (fn [k]
+                                                                                   (every? (fn [m]
+                                                                                             {:pre [(HMap? m)]}
+                                                                                             (kw-vals? (get (:map m) k)))
+                                                                                           ts))
+                                                                                 common-keys))]
+                                                              (when common-tag
+                                                                (name common-tag))))))
+                                                      "alias"))
                     a-atom (atom nil)
                     _ (swap! env-atom 
                              (fn [env]
@@ -1790,7 +1842,7 @@
 
 (def ^:dynamic *should-track* true)
 
-(def max-track-depth 5)
+(def ^:dynamic *max-track-depth* 5)
 
 ; track : (Atom InferResultEnv) Value Path -> Value
 (defn track 
@@ -1800,7 +1852,7 @@
      (cond
        ;; cut off path
        (or
-         (> (count path) max-track-depth)
+         (> (count path) *max-track-depth*)
          (not *should-track*))
        (let [ir (infer-result path -any)
              _ (add-infer-result! results-atom ir)]
@@ -2461,21 +2513,21 @@
                   (update-type-env env assoc v t)))
               env
               (type-env env))
-        ;_ (debug-output "before alias-single-HMaps" env config)
+        _ (debug-output "after local aliases" env config)
         ;; ensure all HMaps correspond to an alias
-        env (alias-single-HMaps env config)
-        ;_ (debug-output "after alias-single-HMaps" env config)
+           env (alias-single-HMaps env config)
+           _ (debug-output "after alias-single-HMaps" env config)
         ;; merge aliases that point to HMaps
         ;; with the same keys (they must point to *exactly*
         ;; one top-level HMap, not a union etc.)
         env (squash-horizonally env config)
         _ (prn "finished squash-horizonally")
-        ;_ (debug-output "after squash-horizonally" env config)
-        ;; Clean up redundant aliases and inline simple
-        ;; type aliases.
-        _ (prn "Start follow-all")
-        env (follow-all env (assoc config :simplify? false))
-        _ (prn "end follow-all")
+         _ (debug-output "after squash-horizonally" env config)
+         ;; Clean up redundant aliases and inline simple
+         ;; type aliases.
+         _ (prn "Start follow-all")
+         env (follow-all env (assoc config :simplify? false))
+         _ (prn "end follow-all")
         ]
     (prn "done populating")
     env))
