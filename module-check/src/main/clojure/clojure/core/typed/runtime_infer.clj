@@ -1376,14 +1376,7 @@
   [t]
   {:pre [(HMap? t)]
    :post [((some-fn nil? vector?) %)]}
-  (let [singles (filter (comp (some-fn
-                                ; either a literal keyword
-                                kw-val?
-                                ; or a union of literal keywords
-                                (every-pred (comp #{:union} :op)
-                                            #(every? kw-val? (:types %))))
-                              val)
-                        (:map t))]
+  (let [singles (filter (comp kw-vals? val) (:map t))]
     (when-let [[k t] (and (= (count singles) 1)
                           (first singles))]
       [k (case (:op t)
@@ -1490,11 +1483,7 @@
                         ;; since all members of a union are at the same
                         ;; level, call them the same thing.
                         (make-Union
-                          (map (fn [t]
-                                 (if (alias? t)
-                                   (resolve-alias @env-atom t)
-                                   t))
-                               (:types t)))
+                          (map #(fully-resolve-alias @env-atom %) (:types t)))
 
                         ;; if we are generating specs, we also want aliases
                         ;; for each HMap entry.
