@@ -729,7 +729,7 @@
               :E ':app}))}))})
    :->
    Any])]
-(anns-from-tenv {'unparse-prop1 t
+(anns-from-tenv {;'unparse-prop1 t
                  'unparse-prop2 t}))
 
 ;; collapse maps with completely disjoint keys
