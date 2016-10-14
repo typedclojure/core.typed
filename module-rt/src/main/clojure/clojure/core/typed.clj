@@ -2459,14 +2459,24 @@ for checking namespaces, cf for checking individual forms."}
 
   eg. (runtime-infer) ; infer for *ns*
 
-      (runtime-infer 'my-ns) ; infer for my-ns
+      (runtime-infer :ns 'my-ns) ; infer for my-ns
+
+      (runtime-infer :fuel 0) ; iterations in type inference algorithm
+                              ; (higher = smaller types + more recursive)
   "
-  ([] (runtime-infer *ns*))
-  ([ns]
+  ([] (runtime-infer :ns *ns*))
+  ([& kws]
    (load-if-needed)
    (require '[clojure.core.typed.runtime-infer])
-   ((impl/v 'clojure.core.typed.runtime-infer/runtime-infer)
-    {:ns ns})))
+   (let [m (-> (if (= 1 (count kws))
+                 (do
+                   (err/deprecated-warn
+                     "runtime-infer with 1 arg: use {:ns <ns>}")
+                   {:ns (first kws)})
+                 (apply hash-map kws))
+               (update :ns #(or % *ns*)))]
+     ((impl/v 'clojure.core.typed.runtime-infer/runtime-infer)
+      m))))
 
 (defn spec-infer 
   "Infer and insert specs for a given namespace.

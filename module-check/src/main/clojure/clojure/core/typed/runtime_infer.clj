@@ -357,33 +357,59 @@
 
 (def ^:dynamic *type-var-scope* #{})
 
+(defn map-keys [m]
+  (set (keys m)))
+
 (defn HMap-req-keyset [t]
   {:pre [(HMap? t)]
    :post [(set? %)
           (every? keyword? %)]}
-  (set (keys (::HMap-req t))))
+  (map-keys (::HMap-req t)))
 
-; keysets : Env Type (Set Type) -> Keysets
-(defn keysets
-  ([env t] (keysets env t #{}))
-  ([env t seen]
-   {:post [(set? %)
-           (every? set? %)]}
-   ;(prn "keysets" (unparse-type t))
-   (let [keysets
+(defn HMap-req-opt-keysets [t]
+  {:pre [(HMap? t)]
+   :post [(set? %)
+          (every? set? %)]}
+  (let [req (map-keys (::HMap-req t))]
+    (into #{}
+          (map (fn [s]
+                 (into req s)))
+          (comb/subsets (vec (keys (::HMap-opt t)))))))
+
+; gather-HMap-info : (All [a] [Env Type [HMap -> (Set a)] (Set Type) -> (Set a)])
+(defn gather-HMap-info
+  ([env t f] (gather-HMap-info env t f #{}))
+  ([env t f seen]
+   {:pre [(map? env)
+          (type? t)
+          (set? seen)]
+    :post [(set? %)]}
+   (prn "gather-HMap-info" (unp t))
+   (let [gather-HMap-info
          (fn 
-           ([t] (keysets env t seen))
-           ([t seen] (keysets env t seen)))]
+           ([t] (gather-HMap-info env t f seen))
+           ([t seen] (gather-HMap-info env t f seen)))]
      (case (:op t)
-       :HMap #{(HMap-req-keyset t)}
+       :HMap (f t)
        :union (into #{}
-                    (mapcat keysets)
+                    (mapcat gather-HMap-info)
                     (:types t))
        :alias (if (seen t)
                 #{}
-                (keysets (resolve-alias env t)
-                         (conj seen t)))
+                (gather-HMap-info 
+                  (resolve-alias env t)
+                  (conj seen t)))
        #{}))))
+
+(defn keysets [env t]
+  (gather-HMap-info env t HMap-req-opt-keysets))
+
+(defn HMap-deep-reqs [env t]
+  {:pre [(type? t)]
+   :post [(set? %)
+          (every? map? %)]}
+  (gather-HMap-info env t (fn [m]
+                            #{(::HMap-req m)})))
 
 (defn subst-alias [t old new]
   {:pre [(type? t)
@@ -873,25 +899,56 @@
 
 (def val? (comp boolean #{:val} :op))
 
+(defn merge-HMaps [ms]
+  {:post [(HMap? %)]}
+  (reduce join-HMaps (first ms) (rest ms)))
+
+(defn HMap-common-req-keys [ms]
+  {:pre [(every? HMap? ms)]
+   :post [(set? %)
+          (every? keyword? %)]}
+  (apply
+    set/intersection
+    (map HMap-req-keyset ms)))
+
+(defn HMap-likely-tag-key [hmaps k]
+  {:pre [(every? HMap? hmaps)
+         (keyword? k)]
+   :post [((some-fn nil? keyword?) %)]}
+  (when (every? (fn [m]
+                  {:pre [(HMap? m)]}
+                  (kw-vals? (get (::HMap-req m) k)))
+                hmaps)
+    k))
+
 (defn make-Union [args]
   (let [ts (flatten-unions args)
         {hmaps true non-hmaps false} (group-by HMap? ts)
-        hmap-by-keys (group-by HMap-req-keyset hmaps)
-        ;_ (prn "hmap-by-keys" hmap-by-keys)
-        hmaps-merged (into #{}
-                           (map (fn [ms]
-                                  {:post [(HMap? %)]}
-                                  (reduce join-HMaps (first ms) (rest ms))))
-                           (vals hmap-by-keys))
-        ;_ (prn "merged" hmaps-merged)
+        hmaps (set hmaps)
+        ;_ (prn "hmaps" (mapv unp hmaps))
+        common-keys (or (when (seq hmaps)
+                          (HMap-common-req-keys hmaps))
+                        #{})
+        ;_ (prn "common-keys" common-keys)
+        likely-tag
+        (some #(HMap-likely-tag-key hmaps %) common-keys)
+        ;_ (prn "likely-tag" likely-tag)
+        hmaps-merged (let [hmap-by-keys (when-not likely-tag
+                                          (group-by HMap-req-keyset hmaps))]
+                       ;(prn "hmap-by-keys" hmap-by-keys)
+                       ;; if we don't have common keys, collapse everything.
+                       (if hmap-by-keys
+                         (into #{}
+                               (map merge-HMaps)
+                               (vals hmap-by-keys))
+                         hmaps))
+        ;_ (prn "merged" (mapv unp hmaps-merged))
         ;; if we have more than one keyset, then we must
         ;; have "tagged" maps with a common keyword entry (eg. :op, :type).
         ;; This ensures we don't keep too much information about generic maps.
         hmaps-merged (if (> (count hmaps-merged) 1)
                        (let [_ (assert (every? HMap? hmaps-merged))
-                             common-keys (apply
-                                           set/intersection
-                                           (map HMap-req-keyset hmaps-merged))]
+                             ]
                          ;(prn "common-keys" common-keys)
                          (cond
                            ;; no keys in common, upcast all maps
@@ -899,19 +956,22 @@
                            #{(-class clojure.lang.IPersistentMap [-any -any])}
 
                            ;; if one of the common keys is always mapped to a singleton keyword,
-                           ;; leave this alone.
-                           (some (fn [k]
-                                   (every? (fn [m]
-                                             {:pre [(HMap? m)]}
-                                             (kw-vals? (get (::HMap-req m) k)))
-                                           hmaps-merged))
-                                 common-keys)
-                           hmaps-merged
+                           ;; merge by the value of this key
+                           likely-tag
+                           (let [by-tag (group-by (fn [m]
+                                                    (get (::HMap-req m) likely-tag))
+                                                  hmaps-merged)
+                                 new-maps (into #{}
+                                                (map merge-HMaps)
+                                                (vals by-tag))]
+                             ;(prn "likely-tag" likely-tag)
+                             ;(prn "by-tag" by-tag)
+                             ;(prn "new-maps" new-maps)
+                             new-maps)
 
-                           ;; throw out optional keys, merge common keys
+                           ;; merge common keys as required, rest are optional
                            :else
                            (do
-                             ;(prn "throwing out optional keys")
                              #{{:op :HMap
                                 ;; put all the common required keys as required
                                 ::HMap-req (apply merge-with join
@@ -959,38 +1019,47 @@
         ;     (if (>= (count kws) 2)  ;; tweak simplification threshold here
         ;       (conj (set non-kws) (-class clojure.lang.Keyword []))
         ;       ts))
+        seqable-t? (fn [m]
+                     (boolean
+                       (when (-class? m)
+                         (or (= clojure.lang.Seqable (:class m))
+                             (contains? (set (supers (:class m))) 
+                                        clojure.lang.Seqable)))))
+        atomic-type? (fn [v]
+                       (boolean
+                         (or
+                           (and (val? v)
+                                (some? (:val v)))
+                           (and (-class? v)
+                                (#{clojure.lang.Symbol
+                                   String
+                                   clojure.lang.Keyword}
+                                  (:class v))))))
         ]
     ;(prn "union ts" ts)
     (assert (set? ts))
     (assert (every? (complement #{:union}) (map :op ts)))
     (cond
+      (= 1 (count ts)) (first ts)
+
       ;; simplify to Any
       (some Any? ts) -any
 
       ;; if there's a mix of collections and non-collection values,
       ;; return Any
-      (and (seq hmaps-merged)
-           (let [seqable-t? (fn [m]
-                              (when (-class? m)
-                                (contains? (conj (set (supers (:class m)))
-                                                 clojure.lang.Seqable)
-                                           clojure.lang.Seqable)))
-                 nil-type? (fn [v]
-                             (or
-                               (and (val? v)
-                                    (some? (:val v)))
-                               (and (-class? v)
-                                    (#{clojure.lang.Symbol
-                                       String
-                                       clojure.lang.Keyword}
-                                      (:class v)))))]
-             ;; nil is effectively a collection
-             (seq (filter (some-fn seqable-t? nil-type?) non-hmaps))))
+      ;; Allow `nil` liberally.
+      (let []
+        (and ;; either a map or seqable with an atom
+             (or (seq hmaps-merged)
+                 (seq (filter seqable-t? non-hmaps)))
+             (seq (filter atomic-type? non-hmaps))))
       (do
         ;(prn "simplifying mix of collections and singleton values")
+        ;(prn "hmaps" (seq hmaps-merged))
+        ;(prn "seqables" (filter seqable-t? non-hmaps))
+        ;(prn "atomics" (filter atomic-type? non-hmaps))
         -any)
 
-      (= 1 (count ts)) (first ts)
       :else 
       {:op :union
        :types ts})))
@@ -1003,20 +1072,23 @@
               (concat (:arities t1)
                       (:arities t2)))))
 
-(defn map-keys [m]
-  (set (keys m)))
-
 ; should-join-HMaps? : HMap HMap -> Bool
 (defn should-join-HMaps? [t1 t2]
   {:pre [(HMap? t1)
          (HMap? t2)]}
-  ;; join if the required keys are the same, 
+  ;; join if the required keys are the same,
+  ;; and there is not common key mapped to keywords.
   ;; TODO and if 75% of the keys are the same
   ;; TODO and if common keys are not always different keywords
-  (let [t1-map (::HMap-req t1)
+  (let [ts [t1 t2]
+        t1-map (::HMap-req t1)
         t2-map (::HMap-req t2)]
-    (and (= (set (keys t1-map))
-            (set (keys t2-map)))
+    (and (= (map-keys t1-map)
+            (map-keys t2-map))
+         (not
+           (some
+             #(HMap-likely-tag-key ts %)
+             (HMap-common-req-keys ts)))
          ;; TODO
          #_
          (every?
@@ -1042,15 +1114,22 @@
         t2-req (::HMap-req t2)
         t1-opt (::HMap-opt t1)
         t2-opt (::HMap-opt t2)
+        all-reqs (set/union
+                   (map-keys t1-req)
+                   (map-keys t2-req))
+        common-reqs (set/intersection
+                      (map-keys t1-req)
+                      (map-keys t2-req))
         ;; optional keys
         new-opts (set/union
                    (map-keys t1-opt)
-                   (map-keys t2-opt))
+                   (map-keys t2-opt)
+                   (set/difference
+                     all-reqs
+                     common-reqs))
         ;; required if not optional in either
         new-reqs (set/difference
-                   (set/union
-                     (map-keys t1-req)
-                     (map-keys t2-req))
+                   common-reqs
                    new-opts)]
     ;(prn "join HMaps")
     {:op :HMap
@@ -1058,6 +1137,8 @@
                       (map (fn [k]
                              {:pre [(keyword? k)]}
                              (let [ts (keep k [t1-req t2-req])]
+                               ;(prn "req k" k)
+                               ;(prn "ts" ts)
                                (assert (seq ts))
                                [k (apply join* ts)])))
                       new-reqs)
@@ -1410,7 +1491,7 @@
 
 (defn register-unique-alias [env config sym t]
   (let [sym (if (contains? (alias-env env) sym)
-              (gensym (str sym "__"))
+              (gensym (str (name sym) "__"))
               sym)]
     [sym (register-alias env config sym t)]))
 
@@ -1503,8 +1584,11 @@
                                                  (when k
                                                    (str (name k) "-" (kw-vals->str v)))
                                                  ;; for small number of keys, spell out the keys
-                                                 (when (<= (count (::HMap-req t)) 2)
-                                                   (apply str (interpose "-" (map name (keys (::HMap-req t))))))
+                                                 (when (<= (+ (count (::HMap-req t))
+                                                              (count (::HMap-opt t)))
+                                                           2)
+                                                   (apply str (interpose "-" (map name (concat (keys (::HMap-req t))
+                                                                                               (keys (::HMap-opt t)))))))
                                                  ;; otherwise give abbreviated keys
                                                  (apply str (interpose "-" 
                                                                        (map (fn [k]
@@ -1589,7 +1673,8 @@
                                 t)
                         t)
                     n (symbol (-> (current-ns) str) (or
-                                                      (when (union? t)
+                                                      (when (and (union? t)
+                                                                 (seq (:types t)))
                                                         (let [ts (map #(fully-resolve-alias @env-atom %) (:types t))]
                                                           (when (every? HMap? ts)
                                                             (let [common-keys (apply
@@ -1650,6 +1735,8 @@
        "with" (:name t))
   (let [tks (keysets env t)
         fks (keysets env (-alias f))]
+    ;(prn "merging keysets?"
+    ;     tks fks)
     (cond
       ;; if there's some subset of keysets that are
       ;; identical in both, collapse the entire thing.
@@ -1659,7 +1746,8 @@
            (not (alias? (resolve-alias env (-alias f))))
            (not (alias? (resolve-alias env t))))
       (let [;_ (prn "Merging" f
-            ;       "with" (:name t))
+            ;       "with" (:name t)
+            ;       "with intersection" (set/intersection tks fks))
             ]
         (update-alias-env env
                           (fn [m]
@@ -1668,9 +1756,11 @@
                                 (update (:name t)
                                         (fn [oldt]
                                           {:pre [(type? oldt)]}
-                                          (join
-                                            (get m f)
-                                            (subst-alias oldt (-alias f) t))))))))
+                                          (let [new-type (join
+                                                           (get m f)
+                                                           (subst-alias oldt (-alias f) t))]
+                                            ;(prn "new-type" (unparse-type new-type))
+                                            new-type)))))))
 
       :else env)))
 
@@ -1917,11 +2007,18 @@
    {:pre [(vector? path)]}
    (let []
      (cond
+       ((some-fn keyword? nil? false?) v)
+       (do
+         (add-infer-result! results-atom (infer-result path (-val v)))
+         v)
+
        ;; cut off path
        (or
          (> (count path) *max-track-depth*)
          (not *should-track*))
-       (let [ir (infer-result path -any)
+       (let [;; record as unknown so this doesn't
+             ;; cut off actually recursive types.
+             ir (infer-result path {:op :unknown})
              _ (add-infer-result! results-atom ir)]
          v)
 
@@ -2062,11 +2159,6 @@
                     (future
                       (track results-atom new new-path))))]
           v)
-
-       ((some-fn keyword? nil? false?) v)
-       (do
-         (add-infer-result! results-atom (infer-result path (-val v)))
-         v)
 
        :else (do
                (add-infer-result! results-atom (infer-result path (-class (class v) [])))
@@ -2507,6 +2599,67 @@
         true)
     a))
 
+; Env AliasSym -> (Map Kw (Set KwVals))
+;; gathers all the possible tagged entries under this
+;; alias. Returns a map from keyword entries to a
+;; set of all the tags found used under this alias.
+(defn possibly-tagged-entries-in-alias [env a]
+  (let [deep-reqs (HMap-deep-reqs env (-alias a))
+        combine-kw-vals
+        (fn [reqs]
+          (apply merge-with into
+                 ;; only keep kw valued entries.
+                 (sequence
+                   (comp
+                     (map (fn [req]
+                            (into {}
+                                  (comp
+                                    (filter (comp kw-val? val))
+                                    (map (fn [[k v]]
+                                           {:post [(-> % second first keyword?)]}
+                                           [k #{(:val v)}])))
+                                  req)))
+                     (filter seq))
+                   reqs)))
+        ]
+    ;(prn "deep-reqs" deep-reqs)
+    (combine-kw-vals deep-reqs)))
+
+(defn relevant-alias? [asym relevant-entries kw-reqs]
+  ; ALIAS: KwValsMap => (Map Kw (Set Kw))
+  ; relevant-entries : KwValsMap
+  {:pre [(symbol? asym)
+         (map? relevant-entries)
+         (every? (fn [[k vs]]
+                   (and (keyword? k)
+                        (and (set? vs)
+                             (every? keyword? vs))))
+                 relevant-entries)]
+   :post [((some-fn nil? symbol?) %)]}
+  (let [all-other-kw-vals 
+        (apply merge-with into (vals (dissoc kw-reqs asym)))
+        ]
+    ;; if any other alias contains exactly the
+    ;; same keyword entry, don't merge
+    ;; the current alias.
+    ;; This avoids merging:
+    ;; (defalias A '{:op ':foo, ...})
+    ;; (defalias B '{:op ':bar, ...})
+    (when (every? (fn [[k other-kws]]
+                    (let [rel (get relevant-entries k)]
+                      (prn "rel" rel)
+                      (prn "other-kws" other-kws)
+                      ;; only merge with another map if they
+                      ;; have the same dispatch entry.
+                      ;; Don't want to end up with '{:op (U ':and ':or ...)}.
+                      (if-not rel
+                        true
+                        (and (= 1 (count rel))
+                             (= 1 (count other-kws))
+                             (= rel other-kws)))))
+                  all-other-kw-vals)
+      asym)))
+
 (defn squash-horizonally
   "Join aliases that refer to exactly
   one HMap with the same keyset.
@@ -2540,19 +2693,41 @@
               (fn [env [kset as]]
                 (if (< 1 (count as))
                   (let [;_ (prn "Merging" kset as)
-                        ;; join all aliases non-recursive aliases
+                        ;; join all non-recursive aliases
                         as (remove #(recursive-alias? env %) as)
                         ;_ (prn "Removed recursive aliases, merging:" as)
-                        atyp (apply join* (map #(resolve-alias env (-alias %)) as))
-                        [anew arst] [(first as) (rest as)]
-                        ;; rewrite anew to joined type
-                        env (update-alias-env env assoc anew atyp)
-                        ;; arst all point to a
-                        env (reduce (fn [env aold]
-                                      (update-alias-env env assoc aold (-alias anew)))
-                                    env
-                                    arst)]
-                    env)
+                        ;; don't join aliases that have identical
+                        ;; dispatch entries.
+                        ; kw-reqs : (Map AliasSym (Map Kw (Set Kw)))
+                        kw-reqs (into {}
+                                      (map (fn [a]
+                                             [a (possibly-tagged-entries-in-alias env a)]))
+                                      as)
+                        _ (prn "kw-reqs" kw-reqs)
+                        _ (prn "as before" as)
+                        as (into []
+                                 (comp
+                                   (map (fn [[a relevant-entries]]
+                                          (relevant-alias? a relevant-entries kw-reqs)))
+                                   (filter symbol?))
+                                 kw-reqs)
+                        _ (prn "as after" as)
+                        _ (assert (every? symbol? as))]
+                    (if-not (< 1 (count as))
+                      env
+                      (let [atyp (let [ts (map #(resolve-alias env (-alias %)) as)]
+                                   ;(prn "before merge" (mapv unp ts))
+                                   (apply join* ts))
+                            ;_ (prn "atyp" (unp atyp))
+                            [anew arst] [(first as) (rest as)]
+                            ;; rewrite anew to joined type
+                            env (update-alias-env env assoc anew atyp)
+                            ;; arst all point to a
+                            env (reduce (fn [env aold]
+                                          (update-alias-env env assoc aold (-alias anew)))
+                                        env
+                                        arst)]
+                        env)))
                   env))
               env
               ksets)]
@@ -2564,36 +2739,58 @@
   (prn msg)
   (pprint (envs-to-annotations env config)))
 
+(defn dec-fuel [env]
+  (if (contains? env :fuel)
+    (update env :fuel dec)
+    env))
+
+(defn enough-fuel? [env]
+  (if (contains? env :fuel)
+    (< 0 (:fuel env))
+    true))
+
+(defmacro when-fuel [env & body]
+  `(if (enough-fuel? ~env)
+     (dec-fuel (do ~@body))
+     ~env))
+
 (defn populate-envs [env {:keys [spec?] :as config}]
   (prn "populating")
   (let [;; create recursive types
+        env (if-let [fuel (:fuel config)]
+              (assoc env :fuel fuel)
+              env)
         ;_ (debug-output "top of populate-envs" env config)
-        env (reduce
-              (fn [env [v t]]
-                (let [;; create graph nodes from HMap types
-                      [t env] (alias-hmap-type env config t)
-                      ;; squash local recursive types
-                      [t env] (squash-all env config t)
-                      ;; trim redundant aliases in local types
-                      [t env] (follow-aliases env (assoc config :simplify? true) t)
-                      ]
-                  (update-type-env env assoc v t)))
-              env
-              (type-env env))
+        env (when-fuel env
+              (reduce
+                (fn [env [v t]]
+                  (let [;; create graph nodes from HMap types
+                        [t env] (alias-hmap-type env config t)
+                        ;; squash local recursive types
+                        [t env] (squash-all env config t)
+                        ;; trim redundant aliases in local types
+                        [t env] (follow-aliases env (assoc config :simplify? true) t)
+                        ]
+                    (update-type-env env assoc v t)))
+                env
+                (type-env env)))
         ;_ (debug-output "after local aliases" env config)
         ;; ensure all HMaps correspond to an alias
-           env (alias-single-HMaps env config)
+        env (when-fuel env
+              (alias-single-HMaps env config))
            ;_ (debug-output "after alias-single-HMaps" env config)
         ;; merge aliases that point to HMaps
         ;; with the same keys (they must point to *exactly*
         ;; one top-level HMap, not a union etc.)
-        env (squash-horizonally env config)
+        env (when-fuel env
+              (squash-horizonally env config))
         _ (prn "finished squash-horizonally")
          ;_ (debug-output "after squash-horizonally" env config)
          ;; Clean up redundant aliases and inline simple
          ;; type aliases.
          _ (prn "Start follow-all")
-         env (follow-all env (assoc config :simplify? false))
+         env (when-fuel env
+               (follow-all env (assoc config :simplify? false)))
          _ (prn "end follow-all")
         ]
     (prn "done populating")
@@ -2755,7 +2952,8 @@
   ([env v recur? seen-alias]
    {:pre [(map? env)
           (type? v)]
-    :post [(vector? %)]}
+    :post [(vector? %)
+           (every? symbol? %)]}
    ;(prn "fv" v)
    (let [fv (fn 
               ([v] (fv env v recur? seen-alias))
@@ -3039,10 +3237,13 @@
            (out config))))))
 
 (defn runtime-infer
-  ([{:keys [ns output]}]
+  ([{:keys [ns output fuel]}]
    (replace-generated-annotations ns 
-                                  (assoc (init-config)
-                                         :output output))))
+                                  (merge
+                                    (assoc (init-config)
+                                           :output output)
+                                    (when fuel
+                                      {:fuel fuel})))))
 
 (defn spec-infer
   ([{:keys [ns output]}]

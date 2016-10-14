@@ -23,11 +23,26 @@
   (is (= (join* (prs String))
          (make-Union [(prs String)])
          (prs String)))
+  (is (= (join* (prs Sym))
+         (make-Union [(prs Sym)])
+         (prs Sym)))
+  (is (not= (prs Any)
+            (prs (U Sym String))))
   (is (=
        (prs (U '{:f [? :-> java.lang.Long], :a ?} 
                '{:f [? :-> java.lang.Long]}))
        (prs (HMap :mandatory {:f [? :-> java.lang.Long]} 
                   :optional {:a ?}))))
+  (is (=
+       (join-HMaps
+         (prs '{:f ':op1, :a Any})
+         (prs '{:f ':op2, :a Any}))
+       (join
+         (prs '{:f ':op1, :a Any})
+         (prs '{:f ':op2, :a Any}))
+       (prs (U 
+              '{:f ':op1, :a Any}
+              '{:f ':op2, :a Any}))))
   (checking
     "join maps"
     5
@@ -699,6 +714,12 @@
                  :mandatory {:b Long})))
        #{:b}))
   (is (=
+       (HMap-req-opt-keysets
+         (prs
+           (HMap :optional {:a Long}
+                 :mandatory {:b Long})))
+       #{#{:a :b} #{:b}}))
+  (is (=
        (make-Union
          [(prs
             (HMap :mandatory {:op ':Foo}))
@@ -716,6 +737,20 @@
             (HMap :optional {:op ':Foo
                              :opt String}))])
        (prs (clojure.lang.IPersistentMap Any Any))))
+  (is 
+    (= 
+      (join-HMaps
+        (prs
+          '{:op ':the-foo
+            :the-bar Sym
+            :opt Sym})
+        (prs
+          '{:op ':the-foo
+            :the-bar Sym}))
+      (prs
+        (HMap :mandatory {:op ':the-foo
+                          :the-bar Sym}
+              :optional {:opt Sym}))))
 )
 
 (defn anns-from-tenv [tenv]
@@ -920,7 +955,52 @@
 
 ; optional HMaps test
 (let [t (prs
-          [(HMap :optional {:foo Any})
+          [(HMap :optional {:foo String})
+           :->
+           Any])]
+  (anns-from-tenv {'config-in t}))
+
+(let [t (prs
+          [(U '{:op ':the-foo
+                :the-bar Sym
+                :opt Sym}
+              '{:op ':the-foo
+                :the-bar Sym})
+           :->
+           Any])]
+  (anns-from-tenv {'config-in t}))
+
+(let [t (prs
+          [(U '{:op ':the-bar
+                ;:the-foo String
+                :the-baz String}
+              '{:op ':the-foo
+                ;:the-foo Sym
+                :the-baz Sym})
+           :->
+           Any])]
+  (anns-from-tenv {'config-in t}))
+
+; recursive HMaps test
+(let [t (prs
+          [
+           (U
+           '{:op ':foo
+             :the-bar '{:op ':bar
+                        :the-foo '{:op ':foo
+                                   :the-bar '{:op ':term
+                                              :val Sym}}}}
+           '{:op ':foo
+             :opt Sym
+             :the-bar '{:op ':bar
+                        :the-foo '{:op ':foo
+                                   :the-bar '{:op ':term
+                                              :val Sym}}}}
+             '{:op ':bar
+               :the-foo '{:op ':foo
+                          :the-bar '{:op ':bar
+                                     :the-foo '{:op ':term
+                                                :val Sym}}}})
            :->
            Any])]
   (anns-from-tenv {'config-in t}))
