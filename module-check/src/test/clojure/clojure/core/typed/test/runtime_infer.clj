@@ -20,6 +20,14 @@
      ~@body))
 
 (deftest join-test
+  (is (= (join* (prs String))
+         (make-Union [(prs String)])
+         (prs String)))
+  (is (=
+       (prs (U '{:f [? :-> java.lang.Long], :a ?} 
+               '{:f [? :-> java.lang.Long]}))
+       (prs (HMap :mandatory {:f [? :-> java.lang.Long]} 
+                  :optional {:a ?}))))
   (checking
     "join maps"
     5
@@ -643,6 +651,73 @@
       (require 'clojure.core.typed.test.mini-occ :reload)
       :ok)))
 
+(deftest optional-keys-test
+  (is 
+    (= 
+      (join-HMaps
+        (prs
+          (HMap :optional {:a Any}))
+        (prs
+          (HMap :optional {:a Any})))
+      (prs
+        (HMap :optional {:a Any}))))
+  (is 
+    (= 
+      (join-HMaps
+        (prs
+          (HMap :optional {:a String}))
+        (prs
+          (HMap :mandatory {:a Long})))
+      (prs
+        (HMap :optional {:a (U String Long)}))))
+  (is 
+    (= 
+      (join-HMaps
+        (prs
+          (HMap :mandatory {:op ':Foo}))
+        (prs
+          (HMap :mandatory {:op ':Foo}
+                :optional {:bar String})))
+      (prs
+        (HMap :mandatory {:op ':Foo}
+              :optional {:bar String}))))
+
+  (is (=
+       (HMap-req-keyset
+         (prs
+           (HMap :mandatory {:a Long})))
+       #{:a}))
+  (is (=
+       (HMap-req-keyset
+         (prs
+           (HMap :optional {:a Long})))
+       #{}))
+  (is (=
+       (HMap-req-keyset
+         (prs
+           (HMap :optional {:a Long}
+                 :mandatory {:b Long})))
+       #{:b}))
+  (is (=
+       (make-Union
+         [(prs
+            (HMap :mandatory {:op ':Foo}))
+          (prs
+            (HMap :mandatory {:op ':Foo}
+                  :optional  {:opt String}))])
+       (prs (HMap :mandatory {:op ':Foo}
+                  :optional {:opt String}))))
+  (is (=
+       (make-Union
+         [(prs
+            (HMap :mandatory {:op ':Foo}
+                  :optional {:opt Long}))
+          (prs
+            (HMap :optional {:op ':Foo
+                             :opt String}))])
+       (prs (clojure.lang.IPersistentMap Any Any))))
+)
+
 (defn anns-from-tenv [tenv]
   (let [ns (create-ns (gensym))]
     (binding [*ann-for-ns* (constantly ns)
@@ -718,7 +793,8 @@
        (U
         '{:exp '{:name Sym, :E ':var},
           :P ':is,
-          :type '{:T ':intersection, :types (Set Nothing)}}
+          :type '{:T ':intersection, :types (Set Nothing)}
+          :foo Sym}
         '{:P ':=,
           :exps
           (Set
@@ -830,6 +906,21 @@
 (let [t (prs
           [(U '{:foo Any}
               (clojure.lang.IPersistentMap Any Any))
+           :->
+           Any])]
+  (anns-from-tenv {'config-in t}))
+
+; upcast HMaps to Map if they appear in a union
+(let [t (prs
+          [(U '{:foo Any}
+              (clojure.lang.IPersistentMap Any Any))
+           :->
+           Any])]
+  (anns-from-tenv {'config-in t}))
+
+; optional HMaps test
+(let [t (prs
+          [(HMap :optional {:foo Any})
            :->
            Any])]
   (anns-from-tenv {'config-in t}))

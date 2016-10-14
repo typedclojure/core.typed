@@ -16,7 +16,13 @@
 #_
 (defalias Type
   (U '{:op :val :val Any}
-     '{:op :HMap ::HMap-map (Map Kw Type)}
+     (HMap
+       :mandatory
+       {:op :HMap 
+        ::HMap-req (Map Kw Type)}
+       :optional
+       {::HMap-opt (Map Kw Type)})
+
      '{:op :HVec :vec (Vec Type)}
      '{:op :union :types (Set Type)}
      '{:op :class 
@@ -43,8 +49,9 @@
 (def -any {:op :Top})
 
 (defn Any? [m]
-  {:pre [(map? m)]}
-  (#{:Top} (:op m)))
+  {:pre [(map? m)]
+   :post [(boolean? %)]}
+  (= :Top (:op m)))
 
 #_
 (defalias PathElem
@@ -328,21 +335,33 @@
   {:op :HVec 
    :vec (mapv parse-type v)})
 
-(defn parse-HMap [m]
+(defn parse-literal-HMap [m]
   {:op :HMap
-   ::HMap-map (into {}
+   ::HMap-req (into {}
                     (map (fn [[k v]]
                            [k (parse-type v)]))
-                    m)})
+                    m)
+   ::HMap-opt {}})
+
+(defn parse-HMap [[_ & {:keys [mandatory optional]}]]
+  (let [prs-map (fn [m]
+                  (into {}
+                        (map (fn [[k v]]
+                               [k (parse-type v)]))
+                        m))]
+    {:op :HMap
+     ::HMap-req (prs-map mandatory)
+     ::HMap-opt (prs-map optional)}))
 
 (declare make-Union resolve-alias postwalk)
 
 (def ^:dynamic *type-var-scope* #{})
 
-(defn HMap-keyset [t]
+(defn HMap-req-keyset [t]
   {:pre [(HMap? t)]
-   :post [(set? %)]}
-  (set (keys (::HMap-map t))))
+   :post [(set? %)
+          (every? keyword? %)]}
+  (set (keys (::HMap-req t))))
 
 ; keysets : Env Type (Set Type) -> Keysets
 (defn keysets
@@ -356,7 +375,7 @@
            ([t] (keysets env t seen))
            ([t seen] (keysets env t seen)))]
      (case (:op t)
-       :HMap #{(HMap-keyset t)}
+       :HMap #{(HMap-req-keyset t)}
        :union (into #{}
                     (mapcat keysets)
                     (:types t))
@@ -426,7 +445,7 @@
                 quote (let [in (second m)]
                         (cond
                           (vector? in) (parse-HVec in)
-                          (map? in) (parse-HMap in)
+                          (map? in) (parse-literal-HMap in)
                           (keyword? in) {:op :val :val in}
                           :else (assert nil (str "Bad quote: " m))))
 
@@ -436,6 +455,7 @@
                     (into #{}
                           (map parse-type)
                           (rest m)))
+                HMap (parse-HMap m)
                 Vec (-class clojure.lang.IPersistentVector
                             [(parse-type (second m))])
                 Set (-class clojure.lang.IPersistentSet
@@ -613,30 +633,44 @@
                                   (mapv unparse-type (:vec m)))
             :else `'~(mapv unparse-type (:vec m)))
     :HMap (cond
-            *unparse-spec* (list* (qualify-spec-symbol 'keys)
-                                  [:req-un (into []
-                                                 (let [kns (name (gensym "keys"))]
-                                                   (map (fn [[k v]]
-                                                          ;; must be aliases
-                                                          (let [maybe-kw
-                                                                (when-not (alias? v)
-                                                                  ;; generate aliases just in time
-                                                                  (when-let [atm *spec-aliases*]
-                                                                    ;(prn "spec-aliases" atm)
-                                                                    (let [kw (keyword kns
-                                                                                      (name k))
-                                                                          _ (swap! atm assoc kw v)]
-                                                                      kw)))]
-                                                            (if maybe-kw
-                                                              maybe-kw
-                                                              (unparse-spec (assoc v
-                                                                                   :HMap-entry true)))))))
-                                                 (::HMap-map m))])
+            *unparse-spec* (do
+                             (assert (empty? (::HMap-opt m))
+                                     "TODO spec optional keys unparse-type")
+                             (list* (qualify-spec-symbol 'keys)
+                                    [:req-un (into []
+                                                   (let [kns (name (gensym "keys"))]
+                                                     (map (fn [[k v]]
+                                                            ;; must be aliases
+                                                            (let [maybe-kw
+                                                                  (when-not (alias? v)
+                                                                    ;; generate aliases just in time
+                                                                    (when-let [atm *spec-aliases*]
+                                                                      ;(prn "spec-aliases" atm)
+                                                                      (let [kw (keyword kns
+                                                                                        (name k))
+                                                                            _ (swap! atm assoc kw v)]
+                                                                        kw)))]
+                                                              (if maybe-kw
+                                                                maybe-kw
+                                                                (unparse-spec (assoc v
+                                                                                     :HMap-entry true)))))))
+                                                   (::HMap-req m))]))
             :else
-            `'~(into {}
-                     (map (fn [[k v]]
-                            [k (unparse-type v)]))
-                     (::HMap-map m)))
+            (let [{:keys [::HMap-req ::HMap-opt]} m
+                  unp-map (fn [m]
+                            (into {}
+                                  (map (fn [[k v]]
+                                         [k (unparse-type v)]))
+                                  m))
+                  req (unp-map HMap-req)]
+              (cond
+                (seq HMap-opt)
+                (list* (qualify-typed-symbol 'HMap)
+                       (concat
+                         (when (seq req)
+                           [:mandatory req])
+                         [:optional (unp-map HMap-opt)]))
+                :else `'~req)))
     :IFn1 (let [{:keys [dom rng]} m]
             (assert (every? identity [dom rng]))
             (conj (mapv unparse-type dom)
@@ -841,13 +875,15 @@
 
 (defn make-Union [args]
   (let [ts (flatten-unions args)
-        {hmaps true non-hmaps false} (group-by (comp boolean #{:HMap} :op) ts)
-        hmap-by-keys (group-by (comp set keys ::HMap-map) hmaps)
+        {hmaps true non-hmaps false} (group-by HMap? ts)
+        hmap-by-keys (group-by HMap-req-keyset hmaps)
+        ;_ (prn "hmap-by-keys" hmap-by-keys)
         hmaps-merged (into #{}
                            (map (fn [ms]
                                   {:post [(HMap? %)]}
                                   (reduce join-HMaps (first ms) (rest ms))))
                            (vals hmap-by-keys))
+        ;_ (prn "merged" hmaps-merged)
         ;; if we have more than one keyset, then we must
         ;; have "tagged" maps with a common keyword entry (eg. :op, :type).
         ;; This ensures we don't keep too much information about generic maps.
@@ -855,8 +891,10 @@
                        (let [_ (assert (every? HMap? hmaps-merged))
                              common-keys (apply
                                            set/intersection
-                                           (map (comp set keys ::HMap-map) hmaps-merged))]
+                                           (map HMap-req-keyset hmaps-merged))]
+                         ;(prn "common-keys" common-keys)
                          (cond
+                           ;; no keys in common, upcast all maps
                            (empty? common-keys)
                            #{(-class clojure.lang.IPersistentMap [-any -any])}
 
@@ -865,7 +903,7 @@
                            (some (fn [k]
                                    (every? (fn [m]
                                              {:pre [(HMap? m)]}
-                                             (kw-vals? (get (::HMap-map m) k)))
+                                             (kw-vals? (get (::HMap-req m) k)))
                                            hmaps-merged))
                                  common-keys)
                            hmaps-merged
@@ -875,12 +913,24 @@
                            (do
                              ;(prn "throwing out optional keys")
                              #{{:op :HMap
-                                ::HMap-map (apply merge-with join
+                                ;; put all the common required keys as required
+                                ::HMap-req (apply merge-with join
                                             (map (fn [m]
                                                    {:pre [(HMap? m)]}
-                                                   (select-keys (::HMap-map m) common-keys))
-                                                 hmaps-merged))}})))
+                                                   (select-keys (::HMap-req m) common-keys))
+                                                 hmaps-merged))
+                                ;; all the rest are optional
+                                ::HMap-opt (apply merge-with join
+                                                  (map (fn [m]
+                                                         {:pre [(HMap? m)]}
+                                                         (merge-with join
+                                                                     (::HMap-opt m)
+                                                                     (apply dissoc (::HMap-req m)
+                                                                            common-keys)))
+                                                       hmaps-merged))
+                                }})))
                        hmaps-merged)
+        ;_ (prn "merged" hmaps-merged)
         ;_ (prn "hmaps-merged" (map unparse-type hmaps-merged))
         ;; join all common classes by their arguments, regardless of their variance
         non-hmaps (let [{classes true non-classes false} (group-by -class? non-hmaps)
@@ -910,6 +960,7 @@
         ;       (conj (set non-kws) (-class clojure.lang.Keyword []))
         ;       ts))
         ]
+    ;(prn "union ts" ts)
     (assert (set? ts))
     (assert (every? (complement #{:union}) (map :op ts)))
     (cond
@@ -918,24 +969,23 @@
 
       ;; if there's a mix of collections and non-collection values,
       ;; return Any
-      (and (or (seq hmaps-merged)
-               (seq (filter (fn [m]
+      (and (seq hmaps-merged)
+           (let [seqable-t? (fn [m]
                               (when (-class? m)
                                 (contains? (conj (set (supers (:class m)))
                                                  clojure.lang.Seqable)
                                            clojure.lang.Seqable)))
-                            non-hmaps)))
-           ;; nil is effectively a collection
-           (some (fn [v]
-                   (or
-                     (and (val? v)
-                          (some? (:val v)))
-                     (and (-class? v)
-                          (#{clojure.lang.Symbol
-                             String
-                             clojure.lang.Keyword}
-                            (:class v)))))
-                 non-hmaps))
+                 nil-type? (fn [v]
+                             (or
+                               (and (val? v)
+                                    (some? (:val v)))
+                               (and (-class? v)
+                                    (#{clojure.lang.Symbol
+                                       String
+                                       clojure.lang.Keyword}
+                                      (:class v)))))]
+             ;; nil is effectively a collection
+             (seq (filter (some-fn seqable-t? nil-type?) non-hmaps))))
       (do
         ;(prn "simplifying mix of collections and singleton values")
         -any)
@@ -953,6 +1003,9 @@
               (concat (:arities t1)
                       (:arities t2)))))
 
+(defn map-keys [m]
+  (set (keys m)))
+
 ; should-join-HMaps? : HMap HMap -> Bool
 (defn should-join-HMaps? [t1 t2]
   {:pre [(HMap? t1)
@@ -960,8 +1013,8 @@
   ;; join if the required keys are the same, 
   ;; TODO and if 75% of the keys are the same
   ;; TODO and if common keys are not always different keywords
-  (let [t1-map (::HMap-map t1)
-        t2-map (::HMap-map t2)]
+  (let [t1-map (::HMap-req t1)
+        t2-map (::HMap-req t2)]
     (and (= (set (keys t1-map))
             (set (keys t2-map)))
          ;; TODO
@@ -982,20 +1035,40 @@
 (defn join-HMaps [t1 t2]
   {:pre [(HMap? t1)
          (HMap? t2)
-         (should-join-HMaps? t1 t2)]
+         ;(should-join-HMaps? t1 t2)
+         ]
    :post [(HMap? %)]}
-  (let [t2-map (::HMap-map t2)]
+  (let [t1-req (::HMap-req t1)
+        t2-req (::HMap-req t2)
+        t1-opt (::HMap-opt t1)
+        t2-opt (::HMap-opt t2)
+        ;; optional keys
+        new-opts (set/union
+                   (map-keys t1-opt)
+                   (map-keys t2-opt))
+        ;; required if not optional in either
+        new-reqs (set/difference
+                   (set/union
+                     (map-keys t1-req)
+                     (map-keys t2-req))
+                   new-opts)]
     ;(prn "join HMaps")
     {:op :HMap
-     ::HMap-map (into {}
-                (map (fn [[k1 t1]]
-                       (let [left t1
-                             right (get t2-map k1)]
-                         ;(prn "key" k1)
-                         ;(prn "left" (unparse-type left))
-                         ;(prn "right" (unparse-type right))
-                         [k1 (join left right)])))
-                (::HMap-map t1))}))
+     ::HMap-req (into {}
+                      (map (fn [k]
+                             {:pre [(keyword? k)]}
+                             (let [ts (keep k [t1-req t2-req])]
+                               (assert (seq ts))
+                               [k (apply join* ts)])))
+                      new-reqs)
+     ::HMap-opt (into {}
+                      (map (fn [k]
+                             {:pre [(keyword? k)]}
+                             (let [ts (keep k [t1-req t2-req
+                                               t1-opt t2-opt])]
+                               (assert (seq ts))
+                               [k (apply join* ts)])))
+                      new-opts)}))
 
 ; join : Type Type -> Type
 (defn join [t1 t2]
@@ -1103,7 +1176,7 @@
 (defn join* [& args]
   (letfn [(merge-type [t as]
             {:pre [(type? t)
-                   (not= :union (:op t))
+                   (not (union? t))
                    (set? as)]
              :post [(set? %)]}
             ;(prn "merge-type" (unparse-type t) (mapv unparse-type as))
@@ -1238,7 +1311,7 @@
                (recur env config
                       nxt-pth
                       {:op :HMap
-                       ::HMap-map (assoc (zipmap keys (repeat {:op :unknown}))
+                       ::HMap-req (assoc (zipmap keys (repeat {:op :unknown}))
                                    key type)}))
         :set-entry (recur env config nxt-pth (-class clojure.lang.IPersistentSet [type]))
         :seq-entry (recur env config nxt-pth (-class clojure.lang.ISeq [type]))
@@ -1265,12 +1338,15 @@
    :post [(type? %)]}
   (case (:op v)
     (:val :alias :unknown :Top) v
-    :HMap (update v ::HMap-map (fn [m]
-                           (reduce-kv
-                             (fn [m k v]
-                               (assoc m k (f v)))
-                             {}
-                             m)))
+    :HMap (let [up (fn [m]
+                     (reduce-kv
+                       (fn [m k v]
+                         (assoc m k (f v)))
+                       {}
+                       m))]
+            (-> v
+                (update ::HMap-req up)
+                (update ::HMap-opt up)))
     :class (update v :args (fn [m]
                              (reduce-kv
                                (fn [m k v]
@@ -1376,7 +1452,7 @@
   [t]
   {:pre [(HMap? t)]
    :post [((some-fn nil? vector?) %)]}
-  (let [singles (filter (comp kw-vals? val) (::HMap-map t))]
+  (let [singles (filter (comp kw-vals? val) (::HMap-req t))]
     (when-let [[k t] (and (= (count singles) 1)
                           (first singles))]
       [k (case (:op t)
@@ -1420,20 +1496,22 @@
                                          (first
                                            (filter (fn [[k v]]
                                                      (kw-vals? v))
-                                                   (::HMap-map t)))]
+                                                   (::HMap-req t)))]
                                      (do-alias env-atom t 
                                                (or
                                                  ;; try and give a tagged name
                                                  (when k
                                                    (str (name k) "-" (kw-vals->str v)))
                                                  ;; for small number of keys, spell out the keys
-                                                 (when (<= (count (::HMap-map t)) 2)
-                                                   (apply str (interpose "-" (map name (keys (::HMap-map t))))))
+                                                 (when (<= (count (::HMap-req t)) 2)
+                                                   (apply str (interpose "-" (map name (keys (::HMap-req t))))))
                                                  ;; otherwise give abbreviated keys
                                                  (apply str (interpose "-" 
                                                                        (map (fn [k]
                                                                               (apply str (take 3 (name k))))
-                                                                            (keys (::HMap-map t))))))))
+                                                                            (concat
+                                                                              (keys (::HMap-req t))
+                                                                              (keys (::HMap-opt t)))))))))
                              t)))
                @env-atom]))]
     (let [env (reduce
@@ -1488,7 +1566,7 @@
                         ;; if we are generating specs, we also want aliases
                         ;; for each HMap entry.
                         #_#_:HMap (if (:spec? config)
-                                (update t ::HMap-map
+                                (update t ::HMap-req
                                         (fn [m]
                                           (into {}
                                                 (map (fn [[k v]]
@@ -1516,13 +1594,13 @@
                                                           (when (every? HMap? ts)
                                                             (let [common-keys (apply
                                                                                 set/intersection
-                                                                                (map (comp set keys ::HMap-map) ts))
+                                                                                (map (comp set keys ::HMap-req) ts))
                                                                   common-tag (first
                                                                                (filter
                                                                                  (fn [k]
                                                                                    (every? (fn [m]
                                                                                              {:pre [(HMap? m)]}
-                                                                                             (kw-vals? (get (::HMap-map m) k)))
+                                                                                             (kw-vals? (get (::HMap-req m) k)))
                                                                                            ts))
                                                                                  common-keys))]
                                                               (when common-tag
@@ -2332,7 +2410,7 @@
                    (fn [n]
                      (let [t (-> n meta :type)]
                        (case (:op t)
-                         :HMap (apply str (interpose "-" (sort (map name (keys (::HMap-map t))))))
+                         :HMap (apply str (interpose "-" (sort (map name (keys (::HMap-req t))))))
                          nil)))}
    :cluster->descriptor 
    {:random-color (fn [c]
@@ -2457,7 +2535,7 @@
                                          (HMap? t))))
                           (map (fn [[a t]]
                                  {:pre [(HMap? t)]}
-                                 {(HMap-keyset t) #{a}}))))
+                                 {(HMap-req-keyset t) #{a}}))))
         env (reduce
               (fn [env [kset as]]
                 (if (< 1 (count as))
@@ -2687,7 +2765,9 @@
        (:Top :unknown :val) []
        :HMap (into []
                    (mapcat fv)
-                   (-> v ::HMap-map vals))
+                   (concat
+                     (-> v ::HMap-req vals)
+                     (-> v ::HMap-opt vals)))
        :HVec (into []
                    (mapcat fv)
                    (-> v :vec))
