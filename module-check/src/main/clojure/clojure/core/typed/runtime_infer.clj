@@ -376,6 +376,8 @@
                  (into req s)))
           (comb/subsets (vec (keys (::HMap-opt t)))))))
 
+(declare unp)
+
 ; gather-HMap-info : (All [a] [Env Type [HMap -> (Set a)] (Set Type) -> (Set a)])
 (defn gather-HMap-info
   ([env t f] (gather-HMap-info env t f #{}))
@@ -384,7 +386,7 @@
           (type? t)
           (set? seen)]
     :post [(set? %)]}
-   (prn "gather-HMap-info" (unp t))
+   ;(prn "gather-HMap-info" (unp t))
    (let [gather-HMap-info
          (fn 
            ([t] (gather-HMap-info env t f seen))
@@ -971,6 +973,8 @@
 
                            ;; merge common keys as required, rest are optional
                            :else
+                           hmaps-merged
+                           #_
                            (do
                              #{{:op :HMap
                                 ;; put all the common required keys as required
@@ -2604,6 +2608,7 @@
 ;; alias. Returns a map from keyword entries to a
 ;; set of all the tags found used under this alias.
 (defn possibly-tagged-entries-in-alias [env a]
+  {:post [(map? %)]}
   (let [deep-reqs (HMap-deep-reqs env (-alias a))
         combine-kw-vals
         (fn [reqs]
@@ -2623,7 +2628,9 @@
                    reqs)))
         ]
     ;(prn "deep-reqs" deep-reqs)
-    (combine-kw-vals deep-reqs)))
+    (or
+      (combine-kw-vals deep-reqs)
+      {})))
 
 (defn relevant-alias? [asym relevant-entries kw-reqs]
   ; ALIAS: KwValsMap => (Map Kw (Set Kw))
@@ -2703,15 +2710,15 @@
                                       (map (fn [a]
                                              [a (possibly-tagged-entries-in-alias env a)]))
                                       as)
-                        _ (prn "kw-reqs" kw-reqs)
-                        _ (prn "as before" as)
+                        ;_ (prn "kw-reqs" kw-reqs)
+                        ;_ (prn "as before" as)
                         as (into []
                                  (comp
                                    (map (fn [[a relevant-entries]]
                                           (relevant-alias? a relevant-entries kw-reqs)))
                                    (filter symbol?))
                                  kw-reqs)
-                        _ (prn "as after" as)
+                        ;_ (prn "as after" as)
                         _ (assert (every? symbol? as))]
                     (if-not (< 1 (count as))
                       env

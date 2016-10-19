@@ -972,10 +972,10 @@
 
 (let [t (prs
           [(U '{:op ':the-bar
-                ;:the-foo String
+                :the-foo String
                 :the-baz String}
               '{:op ':the-foo
-                ;:the-foo Sym
+                :the-foo Sym
                 :the-baz Sym})
            :->
            Any])]
@@ -999,6 +999,38 @@
              '{:op ':bar
                :the-foo '{:op ':foo
                           :the-bar '{:op ':bar
+                                     :the-foo '{:op ':term
+                                                :val Sym}}}})
+           :->
+           Any])]
+  (anns-from-tenv {'config-in t}))
+
+(let [t (prs
+          [
+           (U
+           '{:op ':foo
+             :type (U Number ':int ':nil ':faz)
+             :the-bar '{:op ':bar
+                        :type (U ':int ':nil ':faz)
+                        :the-foo '{:op ':foo
+                                   :type (U ':int ':nil ':faz)
+                                   :the-bar '{:op ':term
+                                              :val Sym}}}}
+           '{:op ':foo
+             :type (U ':int ':nil ':faz)
+             :opt Sym
+             :the-bar '{:op ':bar
+                        :type (U ':int ':nil ':faz)
+                        :the-foo '{:op ':foo
+                                   :type (U ':int ':nil ':faz)
+                                   :the-bar '{:op ':term
+                                              :val Sym}}}}
+             '{:op ':bar
+               :type (U ':int ':nil ':faz)
+               :the-foo '{:op ':foo
+                          :type (U ':int ':nil ':faz)
+                          :the-bar '{:op ':bar
+                                     :type (U ':int ':nil ':faz)
                                      :the-foo '{:op ':term
                                                 :val Sym}}}})
            :->
