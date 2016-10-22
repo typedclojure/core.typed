@@ -3198,7 +3198,10 @@
 
 (defn delete-generated-annotations [ns config]
   (impl/with-clojure-impl
-    (update-file (ns-file-name (ns-name ns)) delete-generated-annotations-in-str)))
+    (update-file (ns-file-name (if (symbol? ns)
+                                 ns
+                                 (ns-name ns)))
+                 delete-generated-annotations-in-str)))
 
 (declare infer-anns)
 

@@ -970,6 +970,7 @@
            Any])]
   (anns-from-tenv {'config-in t}))
 
+;; TODO recursive example of this test
 (let [t (prs
           [(U '{:op ':the-bar
                 :the-foo String
