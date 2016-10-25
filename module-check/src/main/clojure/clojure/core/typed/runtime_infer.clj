@@ -566,6 +566,12 @@
   (binding [*unparse-spec* true]
     (unparse-type m)))
 
+(defn kw->sym [k]
+  {:pre [(keyword? k)]
+   :post [(symbol? %)]}
+  (symbol (namespace k)
+          (name k)))
+
 (defn alias->spec-kw [k]
   {:pre [(symbol? k)]
    :post [(keyword? %)]}
@@ -616,6 +622,12 @@
 
 (def ^:dynamic *spec-aliases* nil)
 (def ^:dynamic *used-aliases* nil)
+(def ^:dynamic *multispecs-needed* nil)
+
+(defn spec-cat [args]
+  (assert (even? (count args)))
+  (list* (qualify-spec-symbol 'cat)
+         args))
 
 ; [Node :-> Any]
 (defn unparse-type' [{:as m}]
@@ -651,7 +663,36 @@
                (keyword? t) `'~t
                :else (qualify-typed-symbol 'Any))))
     :union (cond
-             *unparse-spec* (alt-spec (:types m))
+             *unparse-spec* 
+             (let [env *envs*
+                   fully-res (if env
+                               #(fully-resolve-alias @env %)
+                               identity)
+                   ts (map fully-res (:types m))]
+               (if-let [tag (and env
+                                 (every? HMap? ts)
+                                 (HMap-likely-tag-key ts))]
+                 ;; if we have a bunch of maps with a similar key,
+                 ;; generate a multispec
+                 (let [multispecs *multispecs-needed*
+                       nme (gensym (str (when-let [nstr (namespace tag)]
+                                          (str nstr "-"))
+                                        (name tag) "-multi-spec"))
+                       dmulti `(defmulti ~nme ~tag)
+                       dmethods (map (fn [t]
+                                       {:pre [(HMap? t)]}
+                                       (let [this-tag (get (::HMap-req t) tag)
+                                             _ (assert (kw-val? this-tag))]
+                                         `(defmethod ~nme ~(:val this-tag)
+                                            [~'_]
+                                            ~(unparse-type t))))
+                                     (map #(fully-resolve-alias @env %) (:types m)))
+                       _ (when multispecs
+                           (swap! multispecs conj (vec (cons dmulti dmethods))))]
+                   (list (qualify-spec-symbol 'multi-spec)
+                         nme
+                         tag))
+                 (alt-spec (:types m))))
              :else
              (if (empty? (:types m))
                (qualify-typed-symbol 'Nothing)
@@ -661,28 +702,43 @@
                                   (mapv unparse-type (:vec m)))
             :else `'~(mapv unparse-type (:vec m)))
     :HMap (cond
-            *unparse-spec* (do
-                             (assert (empty? (::HMap-opt m))
-                                     "TODO spec optional keys unparse-type")
+            *unparse-spec* (let [specify-keys 
+                                 (fn [entries]
+                                   (into []
+                                         (let [kns (name (gensym "keys"))]
+                                           (map (fn [[k v]]
+                                                  ;; must be aliases
+                                                  (let [maybe-kw
+                                                        (when (or (not (alias? v))
+                                                                  (let [n (:name v)]
+                                                                    ;; it's an alias, but the name isn't correct
+                                                                    (or (not= (name k) (name n))
+                                                                        ;; it's an alias, but the namespace isn't 
+                                                                        ;; correct either
+                                                                        (when (namespace k)
+                                                                          (not= k (keyword n))))))
+                                                          ;; generate aliases just in time
+                                                          (when-let [atm *spec-aliases*]
+                                                            ;(prn "spec-aliases" atm)
+                                                            (let [kw (keyword kns
+                                                                              (name k))
+                                                                  _ (swap! atm assoc kw v)]
+                                                              kw)))]
+                                                    (if maybe-kw
+                                                      maybe-kw
+                                                      (unparse-spec (assoc v
+                                                                           :HMap-entry true)))))))
+                                         entries))]
+                             (assert (empty?
+                                       (filter namespace (concat (keys (::HMap-req m))
+                                                                 (keys (::HMap-opt m)))))
+                                     "TODO specs for namespaced map entries")
                              (list* (qualify-spec-symbol 'keys)
-                                    [:req-un (into []
-                                                   (let [kns (name (gensym "keys"))]
-                                                     (map (fn [[k v]]
-                                                            ;; must be aliases
-                                                            (let [maybe-kw
-                                                                  (when-not (alias? v)
-                                                                    ;; generate aliases just in time
-                                                                    (when-let [atm *spec-aliases*]
-                                                                      ;(prn "spec-aliases" atm)
-                                                                      (let [kw (keyword kns
-                                                                                        (name k))
-                                                                            _ (swap! atm assoc kw v)]
-                                                                        kw)))]
-                                                              (if maybe-kw
-                                                                maybe-kw
-                                                                (unparse-spec (assoc v
-                                                                                     :HMap-entry true)))))))
-                                                   (::HMap-req m))]))
+                                    (concat
+                                      (when-let [e (not-empty (::HMap-req m))]
+                                        [:req-un (specify-keys e)])
+                                      (when-let [e (not-empty (::HMap-opt m))]
+                                        [:opt-un (specify-keys e)]))))
             :else
             (let [{:keys [::HMap-req ::HMap-opt]} m
                   unp-map (fn [m]
@@ -707,7 +763,9 @@
     :IFn (cond
            *unparse-spec* 
            (let [{:keys [arities top-level-def]} m
-                 top-level-var (some-> top-level-def find-var)
+                 top-level-var (when (and (symbol? top-level-def)
+                                          (namespace top-level-def)) ;; testing purposes
+                                 (some-> top-level-def find-var))
                  arglists (some-> top-level-var
                                    meta
                                    :arglists)
@@ -737,7 +795,7 @@
                            arities)
                  doms (cond
                         macro?
-                        [(list* (qualify-spec-symbol 'cat)
+                        [(spec-cat
                                 (concat
                                   ;; macros are very likely to having binding
                                   ;; forms as the first argument if it's always
@@ -764,7 +822,7 @@
                           (fn [{:keys [dom]}]
                             {:pre [dom]}
                             ;(prn "doms" (count dom) (get fixed-name-lookup (count dom)))
-                            (list* (qualify-spec-symbol 'cat)
+                            (spec-cat
                                    (mapcat (fn [n k d]
                                              (let [spec 
                                                    (cond
@@ -785,7 +843,9 @@
                                            (or
                                              (get fixed-name-lookup (count dom))
                                              ;; TODO use rest-arglist here
-                                             (repeatedly #(keyword (name (gensym)))))
+                                             (repeatedly #(keyword (name (apply gensym
+                                                                                (when (symbol? top-level-def)
+                                                                                  [(str top-level-def "-")]))))))
                                            dom)))
                           arities))
                  rngs (if macro?
@@ -822,6 +882,15 @@
                                                                  (list (qualify-spec-symbol '*)
                                                                        (unparse-spec
                                                                          (first (:args m)))))
+                                (#{clojure.lang.IFn} cls) (qualify-core-symbol 'ifn?)
+                                (#{Boolean} cls) (qualify-core-symbol 'boolean?)
+                                (#{clojure.lang.IPersistentSet} cls) (qualify-core-symbol 'set?)
+                                (#{clojure.lang.IPersistentMap} cls)
+                                (list (qualify-spec-symbol 'spec)
+                                      (let [[k v] (:args m)]
+                                        (list (qualify-spec-symbol 'map-of)
+                                              (unparse-spec k)
+                                              (unparse-spec v))))
                                 (#{clojure.lang.IPersistentVector} cls) 
                                 (list (qualify-spec-symbol 'spec)
                                       (list (qualify-spec-symbol 'coll-of)
@@ -913,15 +982,18 @@
     set/intersection
     (map HMap-req-keyset ms)))
 
-(defn HMap-likely-tag-key [hmaps k]
-  {:pre [(every? HMap? hmaps)
-         (keyword? k)]
-   :post [((some-fn nil? keyword?) %)]}
-  (when (every? (fn [m]
-                  {:pre [(HMap? m)]}
-                  (kw-vals? (get (::HMap-req m) k)))
-                hmaps)
-    k))
+(defn HMap-likely-tag-key 
+  ([hmaps] (some #(HMap-likely-tag-key hmaps %)
+                 (HMap-common-req-keys hmaps)))
+  ([hmaps k]
+   {:pre [(every? HMap? hmaps)
+          (keyword? k)]
+    :post [((some-fn nil? keyword?) %)]}
+   (when (every? (fn [m]
+                   {:pre [(HMap? m)]}
+                   (kw-vals? (get (::HMap-req m) k)))
+                 hmaps)
+     k)))
 
 (defn make-Union [args]
   (let [ts (flatten-unions args)
@@ -944,6 +1016,7 @@
                                (map merge-HMaps)
                                (vals hmap-by-keys))
                          hmaps))
+        likely-tag-for-union (atom nil)
         ;_ (prn "merged" (mapv unp hmaps-merged))
         ;; if we have more than one keyset, then we must
         ;; have "tagged" maps with a common keyword entry (eg. :op, :type).
@@ -966,6 +1039,7 @@
                                  new-maps (into #{}
                                                 (map merge-HMaps)
                                                 (vals by-tag))]
+                             (reset! likely-tag-for-union likely-tag)
                              ;(prn "likely-tag" likely-tag)
                              ;(prn "by-tag" by-tag)
                              ;(prn "new-maps" new-maps)
@@ -1065,8 +1139,18 @@
         -any)
 
       :else 
-      {:op :union
-       :types ts})))
+      (let [k @likely-tag-for-union]
+        (merge
+          {:op :union
+           :types (mapv (fn [t]
+                          (if (and (HMap? t)
+                                   k)
+                            (vary-meta t assoc ::union-likely-tag k)
+                            t))
+                        ts)}
+          #_
+          (when-let [k @likely-tag-for-union]
+            {::union-likely-tag k}))))))
 
 (defn group-arities [t1 t2]
   {:pre [(#{:IFn} (:op t1))
@@ -1581,7 +1665,13 @@
                                          (first
                                            (filter (fn [[k v]]
                                                      (kw-vals? v))
-                                                   (::HMap-req t)))]
+                                                   (::HMap-req t)))
+                                         ;; information from a union takes precedence
+                                         [k v] (if-let [upper-k (::union-likely-tag (meta t))]
+                                                 (if-let [[k v] (find (::HMap-req t) upper-k)]
+                                                   [k v]
+                                                   [k v])
+                                                 [k v])]
                                      (do-alias env-atom t 
                                                (or
                                                  ;; try and give a tagged name
@@ -1653,6 +1743,7 @@
 
                         ;; if we are generating specs, we also want aliases
                         ;; for each HMap entry.
+                        ;;(I think this is better done in unparse-type, commenting out)
                         #_#_:HMap (if (:spec? config)
                                 (update t ::HMap-req
                                         (fn [m]
@@ -1677,23 +1768,33 @@
                                 t)
                         t)
                     n (symbol (-> (current-ns) str) (or
-                                                      (when (and (union? t)
-                                                                 (seq (:types t)))
-                                                        (let [ts (map #(fully-resolve-alias @env-atom %) (:types t))]
-                                                          (when (every? HMap? ts)
-                                                            (let [common-keys (apply
-                                                                                set/intersection
-                                                                                (map (comp set keys ::HMap-req) ts))
-                                                                  common-tag (first
-                                                                               (filter
-                                                                                 (fn [k]
-                                                                                   (every? (fn [m]
-                                                                                             {:pre [(HMap? m)]}
-                                                                                             (kw-vals? (get (::HMap-req m) k)))
-                                                                                           ts))
-                                                                                 common-keys))]
-                                                              (when common-tag
-                                                                (name common-tag))))))
+                                                      (let [ts (if (union? t)
+                                                                 (map #(fully-resolve-alias @env-atom %) 
+                                                                      (:types t))
+                                                                 [(fully-resolve-alias @env-atom t)])]
+                                                        (when (every? HMap? ts)
+                                                          (let [common-keys (apply
+                                                                              set/intersection
+                                                                              (map (comp set keys ::HMap-req) ts))
+                                                                common-tag (first
+                                                                             (filter
+                                                                               (fn [k]
+                                                                                 (every? (fn [m]
+                                                                                           {:pre [(HMap? m)]}
+                                                                                           (kw-val? (get (::HMap-req m) k)))
+                                                                                         ts))
+                                                                               common-keys))]
+                                                            (when common-tag
+                                                              (apply str 
+                                                               (interpose "-"
+                                                                          (concat
+                                                                            (cons (name common-tag)
+                                                                                  (map (comp kw->sym
+                                                                                             :val
+                                                                                             common-tag 
+                                                                                             ::HMap-req)
+                                                                                       ts))
+                                                                            ["alias"])))))))
                                                       "alias"))
                     a-atom (atom nil)
                     _ (swap! env-atom 
@@ -2654,8 +2755,8 @@
     ;; (defalias B '{:op ':bar, ...})
     (when (every? (fn [[k other-kws]]
                     (let [rel (get relevant-entries k)]
-                      (prn "rel" rel)
-                      (prn "other-kws" other-kws)
+                      ;(prn "rel" rel)
+                      ;(prn "other-kws" other-kws)
                       ;; only merge with another map if they
                       ;; have the same dispatch entry.
                       ;; Don't want to end up with '{:op (U ':and ':or ...)}.
@@ -2740,11 +2841,18 @@
               ksets)]
     env))
 
-(declare envs-to-annotations)
+(declare envs-to-annotations
+         envs-to-specs)
 
-(defn debug-output [msg env config]
-  (prn msg)
-  (pprint (envs-to-annotations env config)))
+(def ^:dynamic *enable-debugging* nil)
+
+(defn debug-output [msg env {:keys [spec?] :as config}]
+  (when *enable-debugging*
+    (prn msg)
+    (pprint ((if spec?
+               envs-to-specs
+               envs-to-annotations)
+             env config))))
 
 (defn dec-fuel [env]
   (if (contains? env :fuel)
@@ -2767,7 +2875,7 @@
         env (if-let [fuel (:fuel config)]
               (assoc env :fuel fuel)
               env)
-        ;_ (debug-output "top of populate-envs" env config)
+        _ (debug-output "top of populate-envs" env config)
         env (when-fuel env
               (reduce
                 (fn [env [v t]]
@@ -2781,18 +2889,18 @@
                     (update-type-env env assoc v t)))
                 env
                 (type-env env)))
-        ;_ (debug-output "after local aliases" env config)
+        _ (debug-output "after local aliases" env config)
         ;; ensure all HMaps correspond to an alias
         env (when-fuel env
               (alias-single-HMaps env config))
-           ;_ (debug-output "after alias-single-HMaps" env config)
+           _ (debug-output "after alias-single-HMaps" env config)
         ;; merge aliases that point to HMaps
         ;; with the same keys (they must point to *exactly*
         ;; one top-level HMap, not a union etc.)
         env (when-fuel env
               (squash-horizonally env config))
         _ (prn "finished squash-horizonally")
-         ;_ (debug-output "after squash-horizonally" env config)
+         _ (debug-output "after squash-horizonally" env config)
          ;; Clean up redundant aliases and inline simple
          ;; type aliases.
          _ (prn "Start follow-all")
@@ -2831,11 +2939,14 @@
                           (mapcat (fn [[a v]]
                                     {:pre [((some-fn symbol? keyword?) a)]}
                                     (when-not (@aliases-generated a)
+                                      (swap! aliases-generated conj a)
                                       (let [aliases-needed (atom {})
+                                            multispecs-needed (atom #{})
                                             used-aliases (atom #{})
                                             unparse-spec (fn [s]
                                                            (binding [*spec-aliases* aliases-needed
-                                                                     *used-aliases* used-aliases]
+                                                                     *used-aliases* used-aliases
+                                                                     *multispecs-needed* multispecs-needed]
                                                              (unparse-spec s)))
                                             ;; side effects bindings
                                             s (unparse-spec v)
@@ -2845,8 +2956,10 @@
                                                                  (alias->spec-kw a))
                                                                s)]
                                         (conj (vec
-                                                (gen-aliases
-                                                  (prep-alias-map @aliases-needed @used-aliases)))
+                                                (concat
+                                                  (apply concat @multispecs-needed)
+                                                  (gen-aliases
+                                                    (prep-alias-map @aliases-needed @used-aliases))))
                                               current-spec)))))
                           as))
           top-level-types
@@ -2854,9 +2967,11 @@
             (mapcat (fn [[k v]]
                       (let [aliases-needed (atom {})
                             used-aliases (atom #{})
+                            multispecs-needed (atom #{})
                             unparse-spec (fn [s]
                                            (binding [*spec-aliases* aliases-needed
-                                                     *used-aliases* used-aliases]
+                                                     *used-aliases* used-aliases
+                                                     *multispecs-needed* multispecs-needed]
                                              (unparse-spec s)))
                             s (unparse-spec (assoc v :top-level-def k))
                             sym (if (= (namespace k)
@@ -2874,10 +2989,13 @@
                               (list (qualify-spec-symbol 'def)
                                     sym
                                     (unparse-spec v)))]
-                        (conj (gen-aliases
-                                (prep-alias-map
-                                  @aliases-needed
-                                  @used-aliases))
+                        (conj (vec
+                                (concat
+                                  (apply concat @multispecs-needed)
+                                  (gen-aliases
+                                    (prep-alias-map
+                                      @aliases-needed
+                                      @used-aliases))))
                               def-spec))))
             tenv)
           ]
@@ -3256,11 +3374,14 @@
                                       {:fuel fuel})))))
 
 (defn spec-infer
-  ([{:keys [ns output]}]
+  ([{:keys [ns output fuel]}]
    (replace-generated-annotations ns 
-                                  (assoc (init-config)
-                                         :spec? true
-                                         :output output))))
+                                  (merge
+                                    (assoc (init-config)
+                                           :spec? true
+                                           :output output)
+                                    (when fuel
+                                      {:fuel fuel})))))
 
 (defn refresh-runtime-infer []
   (reset! results-atom (initial-results))

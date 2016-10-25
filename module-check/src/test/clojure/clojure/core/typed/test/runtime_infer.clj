@@ -753,17 +753,27 @@
               :optional {:opt Sym}))))
 )
 
-(defn anns-from-tenv [tenv]
+(defn *-from-tenv [f tenv config]
   (let [ns (create-ns (gensym))]
     (binding [*ann-for-ns* (constantly ns)
               *ns* ns]
-      (let [_ (prn (current-ns))
+      (let [_ (prn "Current ns:" (current-ns))
             env (as-> (init-env) env
                   (update-type-env env merge tenv))
-            config (init-config)
             env (populate-envs env config)
-            anns (envs-to-annotations env config)]
+            anns (f env config)]
         (pprint anns)))))
+
+(defn anns-from-tenv [tenv & [config]]
+  (*-from-tenv envs-to-annotations
+               tenv
+               (or config {})))
+
+(defn specs-from-tenv [tenv & [config]]
+  (*-from-tenv envs-to-specs
+               tenv
+               (merge config
+                      {:spec? true})))
 
 (let [st-type (prs
                 '{:quads
@@ -982,35 +992,53 @@
            Any])]
   (anns-from-tenv {'config-in t}))
 
-; recursive HMaps test
+; HMap alias naming test
 (let [t (prs
           [
-           (U
            '{:op ':foo
-             :the-bar '{:op ':bar
-                        :the-foo '{:op ':foo
-                                   :the-bar '{:op ':term
-                                              :val Sym}}}}
-           '{:op ':foo
-             :opt Sym
-             :the-bar '{:op ':bar
-                        :the-foo '{:op ':foo
-                                   :the-bar '{:op ':term
-                                              :val Sym}}}}
-             '{:op ':bar
-               :the-foo '{:op ':foo
-                          :the-bar '{:op ':bar
-                                     :the-foo '{:op ':term
-                                                :val Sym}}}})
+             :the-bar '{:op ':term
+                        :val Sym}}
            :->
            Any])]
-  (anns-from-tenv {'config-in t}))
+  ((juxt specs-from-tenv
+         anns-from-tenv)
+    {'config-in t}))
 
+; recursive HMaps test
+(let [t (prs
+          [(U
+            '{:op ':foo
+              :the-bar '{:op ':term
+                         :val Sym}}
+;           '{:op ':foo
+;             :the-bar '{:op ':bar
+;                        :the-foo '{:op ':foo
+;                                   :the-bar '{:op ':term
+;                                              :val Sym}}}}
+;           '{:op ':foo
+;             :opt Sym
+;             :the-bar '{:op ':bar
+;                        :the-foo '{:op ':foo
+;                                   :the-bar '{:op ':term
+;                                              :val Sym}}}}
+;             '{:op ':bar
+;               :the-foo '{:op ':foo
+;                          :the-bar '{:op ':bar
+;                                     :the-foo '{:op ':term
+;                                                :val Sym}}}}
+)
+           :->
+           Any])]
+  ((juxt specs-from-tenv
+         anns-from-tenv)
+    {'config-in t}))
+
+;; FIXME prefer :op over :type?
 (let [t (prs
           [
            (U
            '{:op ':foo
-             :type (U Number ':int ':nil ':faz)
+             :type (U ':int ':nil ':faz)
              :the-bar '{:op ':bar
                         :type (U ':int ':nil ':faz)
                         :the-foo '{:op ':foo
@@ -1036,4 +1064,8 @@
                                                 :val Sym}}}})
            :->
            Any])]
-  (anns-from-tenv {'config-in t}))
+  (;specs-from-tenv 
+   anns-from-tenv 
+   {'config-in t}
+   {:fuel 0})
+  )
