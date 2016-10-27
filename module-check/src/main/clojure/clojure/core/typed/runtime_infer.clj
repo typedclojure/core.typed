@@ -582,12 +582,23 @@
    :post [(keyword? %)]}
   (keyword (name (current-ns)) (name k)))
 
+(declare resolve-alias-or-nil)
+
+(def ^:dynamic *spec* nil)
+
+(defn buggy-spec-resolve-alias [envs a]
+  (let [a-res (resolve-alias-or-nil envs a)]
+    (when-not a-res
+      (prn "BUG: cannot resolve in simplify-spec-alias" (:name a)))
+    (or a-res
+        -any)))
+
 (defn simplify-spec-alias [a]
   {:pre [(type? a)]
    :post [(type? %)]}
   (if (alias? a)
-    (let [a-res (resolve-alias @*envs* a)]
-      (if (#{:class} (:op a-res))
+    (let [a-res (buggy-spec-resolve-alias @*envs* a)]
+      (if (and a-res (#{:class} (:op a-res)))
         a-res
         a))
     a))
@@ -736,12 +747,14 @@
                                                                           (when (namespace k)
                                                                             (not= k (keyword n))))))
                                                             ;; generate aliases just in time
-                                                            (when-let [atm *spec-aliases*]
-                                                              ;(prn "spec-aliases" atm)
-                                                              (let [kw (keyword kns
-                                                                                (name k))
-                                                                    _ (swap! atm assoc kw v)]
-                                                                kw)))]
+                                                            (when-let [spec-aliases *spec-aliases*]
+                                                              (when-let [envs *envs*]
+                                                                (let [kw (keyword kns
+                                                                                  (name k))
+                                                                      _ (swap! spec-aliases assoc kw v)
+                                                                      _ (swap! envs update-alias-env
+                                                                               kw v)]
+                                                                  kw))))]
                                                       (if maybe-kw
                                                         maybe-kw
                                                         (unparse-spec (assoc v
@@ -1610,6 +1623,16 @@
          (alias? a)
          (symbol? name)]
    :post [(type? %)]}
+  ;(prn "resolve-alias" name (keys (alias-env env)))
+  (if *spec*
+    (buggy-spec-resolve-alias env a)
+    (get (alias-env env) name)))
+
+(defn resolve-alias-or-nil [env {:keys [name] :as a}]
+  {:pre [(map? env)
+         (alias? a)
+         (symbol? name)]
+   :post []}
   ;(prn "resolve-alias" name (keys (alias-env env)))
   (get (alias-env env) name))
 
@@ -2967,7 +2990,11 @@
                            (into a-needed
                                  (map (fn [a]
                                         {:pre [(symbol? a)]}
-                                        [a (resolve-alias @*envs* (-alias a))]))
+                                        [a (or (buggy-spec-resolve-alias @*envs* (-alias a))
+                                               {:op :val
+                                                :val
+                                                (keyword 
+                                                  (str "BUG: CANNOT RESOLVE ALIAS " a))})]))
                                  a-used))
           gen-aliases (fn gen-aliases [as]
                         {:pre [(map? as)]}
@@ -3412,13 +3439,14 @@
 
 (defn spec-infer
   ([{:keys [ns output fuel]}]
-   (replace-generated-annotations ns 
-                                  (merge
-                                    (assoc (init-config)
-                                           :spec? true
-                                           :output output)
-                                    (when fuel
-                                      {:fuel fuel})))))
+   (binding [*spec* true]
+     (replace-generated-annotations ns 
+                                    (merge
+                                      (assoc (init-config)
+                                             :spec? true
+                                             :output output)
+                                      (when fuel
+                                        {:fuel fuel}))))))
 
 (defn refresh-runtime-infer []
   (reset! results-atom (initial-results))
