@@ -634,7 +634,8 @@
   (list* (qualify-spec-symbol 'cat)
          args))
 
-(declare fully-resolve-alias)
+(declare fully-resolve-alias HMap-likely-tag-key
+         kw-val?)
 
 ; [Node :-> Any]
 (defn unparse-type' [{:as m}]
@@ -717,38 +718,50 @@
                                    (into []
                                          (let [kns (name (gensym "keys"))]
                                            (map (fn [[k v]]
+                                                  {:pre [(keyword? k)]}
                                                   ;; must be aliases
-                                                  (let [maybe-kw
-                                                        (when (or (not (alias? v))
-                                                                  (let [n (:name v)]
-                                                                    ;; it's an alias, but the name isn't correct
-                                                                    (or (not= (name k) (name n))
-                                                                        ;; it's an alias, but the namespace isn't 
-                                                                        ;; correct either
-                                                                        (when (namespace k)
-                                                                          (not= k (keyword n))))))
-                                                          ;; generate aliases just in time
-                                                          (when-let [atm *spec-aliases*]
-                                                            ;(prn "spec-aliases" atm)
-                                                            (let [kw (keyword kns
-                                                                              (name k))
-                                                                  _ (swap! atm assoc kw v)]
-                                                              kw)))]
-                                                    (if maybe-kw
-                                                      maybe-kw
-                                                      (unparse-spec (assoc v
-                                                                           :HMap-entry true)))))))
-                                         entries))]
-                             (assert (empty?
-                                       (filter namespace (concat (keys (::HMap-req m))
-                                                                 (keys (::HMap-opt m)))))
-                                     "TODO specs for namespaced map entries")
+                                                  (cond
+                                                    (namespace k) (keyword 
+                                                                    (str "FIXME-SHOULD-BE-NAMESPACED-"
+                                                                         (namespace k))
+                                                                    (name k))
+                                                    :else
+                                                    (let [maybe-kw
+                                                          (when (or (not (alias? v))
+                                                                    (let [n (:name v)]
+                                                                      ;; it's an alias, but the name isn't correct
+                                                                      (or (not= (name k) (name n))
+                                                                          ;; it's an alias, but the namespace isn't 
+                                                                          ;; correct either
+                                                                          (when (namespace k)
+                                                                            (not= k (keyword n))))))
+                                                            ;; generate aliases just in time
+                                                            (when-let [atm *spec-aliases*]
+                                                              ;(prn "spec-aliases" atm)
+                                                              (let [kw (keyword kns
+                                                                                (name k))
+                                                                    _ (swap! atm assoc kw v)]
+                                                                kw)))]
+                                                      (if maybe-kw
+                                                        maybe-kw
+                                                        (unparse-spec (assoc v
+                                                                             :HMap-entry true))))))))
+                                         entries))
+                                 {req true req-un false}
+                                 (group-by (comp boolean namespace key) (::HMap-req m))
+                                 {opt true opt-un false}
+                                 (group-by (comp boolean namespace key) (::HMap-opt m))
+                                 ]
                              (list* (qualify-spec-symbol 'keys)
                                     (concat
-                                      (when-let [e (not-empty (::HMap-req m))]
-                                        [:req-un (specify-keys e)])
-                                      (when-let [e (not-empty (::HMap-opt m))]
-                                        [:opt-un (specify-keys e)]))))
+                                      (when (seq req)
+                                        [:req (specify-keys req)])
+                                      (when (seq opt)
+                                        [:opt (specify-keys opt)])
+                                      (when (seq req-un)
+                                        [:req-un (specify-keys req-un)])
+                                      (when (seq opt-un)
+                                        [:opt-un (specify-keys opt-un)]))))
             :else
             (let [{:keys [::HMap-req ::HMap-opt]} m
                   unp-map (fn [m]

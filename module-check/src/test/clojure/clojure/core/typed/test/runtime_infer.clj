@@ -984,6 +984,13 @@
            Any])]
   (anns-from-tenv {'config-in t}))
 
+; namespaced entry + spec
+(let [t (prs
+          ['{::op ':the-foo}
+           :->
+           Any])]
+  (specs-from-tenv {'config-in t}))
+
 ;; TODO recursive example of this test
 (let [t (prs
           [(U '{:op ':the-bar
