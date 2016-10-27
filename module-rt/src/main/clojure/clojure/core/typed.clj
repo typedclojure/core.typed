@@ -2457,12 +2457,23 @@ for checking namespaces, cf for checking individual forms."}
   Then call `runtime-infer` to populate the namespace's
   corresponding file with these generated annotations.
 
+  Optional keys:
+    :ns     The namespace to infer types for. (Symbol/Namespace)
+            Default: *ns*
+    :fuel   Number of iterations to perform in inference algorithm
+            (integer)
+            Default: nil (don't restrict iterations)
+    :debug  Perform print debugging. (boolean/nil)
+            Default: nil
+
   eg. (runtime-infer) ; infer for *ns*
 
       (runtime-infer :ns 'my-ns) ; infer for my-ns
 
       (runtime-infer :fuel 0) ; iterations in type inference algorithm
                               ; (higher = smaller types + more recursive)
+
+      (runtime-infer :debug true) ; enable debugging
   "
   ([& kws]
    (load-if-needed)
@@ -2495,9 +2506,23 @@ for checking namespaces, cf for checking individual forms."}
   Then call `spec-infer` to populate the namespace's
   corresponding file with these generated specs.
 
+  Optional keys:
+    :ns     The namespace to infer specs for. (Symbol/Namespace)
+            Default: *ns*
+    :fuel   Number of iterations to perform in inference algorithm
+            (integer)
+            Default: nil (don't restrict iterations)
+    :debug  Perform print debugging. (boolean/nil)
+            Default: nil
+
   eg. (spec-infer) ; infer for *ns*
 
       (spec-infer :ns 'my-ns) ; infer for my-ns
+
+      (spec-infer :fuel 0) ; iterations in spec inference algorithm
+                           ; (higher = smaller specs + more recursive)
+
+      (spec-infer :debug true) ; enable debugging
   "
   ([& kws]
    (load-if-needed)

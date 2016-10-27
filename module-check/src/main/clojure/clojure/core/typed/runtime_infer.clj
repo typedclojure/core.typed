@@ -53,6 +53,11 @@
    :post [(boolean? %)]}
   (= :Top (:op m)))
 
+(defn intersection-or-empty [[& args]]
+  (if args
+    (apply set/intersection args)
+    #{}))
+
 #_
 (defalias PathElem
   (U '{:op :var
@@ -678,15 +683,18 @@
                        nme (gensym (str (when-let [nstr (namespace tag)]
                                           (str nstr "-"))
                                         (name tag) "-multi-spec"))
-                       dmulti `(defmulti ~nme ~tag)
+                       dmulti `(defmulti ~(with-meta nme
+                                                    {::generated true})
+                                 ~tag)
                        dmethods (map (fn [t]
                                        {:pre [(HMap? t)]}
                                        (let [this-tag (get (::HMap-req t) tag)
-                                             _ (assert (kw-val? this-tag))]
+                                             _ (assert (kw-val? this-tag)
+                                                       (unparse-type this-tag))]
                                          `(defmethod ~nme ~(:val this-tag)
                                             [~'_]
                                             ~(unparse-type t))))
-                                     (map #(fully-resolve-alias @env %) (:types m)))
+                                     ts)
                        _ (when multispecs
                            (swap! multispecs conj (vec (cons dmulti dmethods))))]
                    (list (qualify-spec-symbol 'multi-spec)
@@ -978,8 +986,7 @@
   {:pre [(every? HMap? ms)]
    :post [(set? %)
           (every? keyword? %)]}
-  (apply
-    set/intersection
+  (intersection-or-empty
     (map HMap-req-keyset ms)))
 
 (defn HMap-likely-tag-key 
@@ -991,7 +998,7 @@
     :post [((some-fn nil? keyword?) %)]}
    (when (every? (fn [m]
                    {:pre [(HMap? m)]}
-                   (kw-vals? (get (::HMap-req m) k)))
+                   (kw-val? (get (::HMap-req m) k)))
                  hmaps)
      k)))
 
@@ -1773,8 +1780,7 @@
                                                                       (:types t))
                                                                  [(fully-resolve-alias @env-atom t)])]
                                                         (when (every? HMap? ts)
-                                                          (let [common-keys (apply
-                                                                              set/intersection
+                                                          (let [common-keys (intersection-or-empty
                                                                               (map (comp set keys ::HMap-req) ts))
                                                                 common-tag (first
                                                                              (filter
@@ -2864,6 +2870,20 @@
     (< 0 (:fuel env))
     true))
 
+(defn def-spec [k s]
+  (list (qualify-spec-symbol 'def)
+        k
+        ; handle recursive specs
+        ; s/and is late binding. This is dumb.
+        (if (or (symbol? s)
+                (and (seq? s)
+                     (or (= (first s) (qualify-spec-symbol 'and))
+                         (= (first s) (qualify-spec-symbol 'keys))
+                         (= (first s) (qualify-spec-symbol 'alt)))))
+          s
+          (list (qualify-spec-symbol 'and)
+                s))))
+
 (defmacro when-fuel [env & body]
   `(if (enough-fuel? ~env)
      (dec-fuel (do ~@body))
@@ -2950,11 +2970,11 @@
                                                              (unparse-spec s)))
                                             ;; side effects bindings
                                             s (unparse-spec v)
-                                            current-spec (list (qualify-spec-symbol 'def)
-                                                               (if (keyword? a)
-                                                                 a
-                                                                 (alias->spec-kw a))
-                                                               s)]
+                                            current-spec (def-spec
+                                                           (if (keyword? a)
+                                                             a
+                                                             (alias->spec-kw a))
+                                                           s)]
                                         (conj (vec
                                                 (concat
                                                   (apply concat @multispecs-needed)
@@ -2986,9 +3006,10 @@
                               (list* (qualify-spec-symbol 'fdef)
                                      sym
                                      (next s))
-                              (list (qualify-spec-symbol 'def)
-                                    sym
-                                    (unparse-spec v)))]
+                              (def-spec
+                                sym
+                                ;; handle recursive specs
+                                (unparse-spec v)))]
                         (conj (vec
                                 (concat
                                   (apply concat @multispecs-needed)
