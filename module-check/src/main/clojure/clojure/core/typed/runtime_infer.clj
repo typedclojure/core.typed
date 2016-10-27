@@ -634,6 +634,8 @@
   (list* (qualify-spec-symbol 'cat)
          args))
 
+(declare fully-resolve-alias)
+
 ; [Node :-> Any]
 (defn unparse-type' [{:as m}]
   (assert (type? m) m)
@@ -2879,6 +2881,7 @@
                 (and (seq? s)
                      (or (= (first s) (qualify-spec-symbol 'and))
                          (= (first s) (qualify-spec-symbol 'keys))
+                         (= (first s) (qualify-spec-symbol 'cat))
                          (= (first s) (qualify-spec-symbol 'alt)))))
           s
           (list (qualify-spec-symbol 'and)
