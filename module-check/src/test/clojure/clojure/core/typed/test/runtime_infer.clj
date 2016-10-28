@@ -760,7 +760,18 @@
 (defn *-from-tenv [f tenv config]
   (let [ns (create-ns (gensym))]
     (binding [*ann-for-ns* (constantly ns)
-              *ns* ns]
+              *ns* ns
+              *debug* (if-let [[debug] (find config :debug)]
+                        debug
+                        *debug*)]
+      ;; set up ns refers
+      (refer-clojure)
+      (require '[clojure.core.typed 
+                 :as t 
+                 :refer [defalias ann Str Any U Vec Map
+                         Sym HMap Nothing]])
+      (require '[clojure.spec :as s])
+
       (let [_ (prn "Current ns:" (current-ns))
             env (as-> (init-env) env
                   (update-type-env env merge tenv))
@@ -876,7 +887,8 @@
                 :entry3 Boolean})
            :->
            Any])]
-  (anns-from-tenv {'config-in t}))
+  (anns-from-tenv {'config-in t}
+                  {:debug true}))
 
 ;; upcast Kw + HMap to Any
 (let [t (prs
@@ -918,7 +930,8 @@
                 :bar Boolean})
            :->
            Any])]
-  (anns-from-tenv {'config-in t}))
+  (anns-from-tenv {'config-in t}
+                  {:debug true}))
 
 ;upcast union to Any
 (let [t (prs
@@ -982,7 +995,8 @@
                 :the-bar Sym})
            :->
            Any])]
-  (anns-from-tenv {'config-in t}))
+  (anns-from-tenv {'config-in t}
+                  {:debug true}))
 
 ; namespaced entry + spec
 (let [t (prs
@@ -1001,7 +1015,8 @@
                 :the-baz Sym})
            :->
            Any])]
-  (anns-from-tenv {'config-in t}))
+  (anns-from-tenv {'config-in t}
+                  {:debug true}))
 
 ; HMap alias naming test
 (let [t (prs
@@ -1037,9 +1052,11 @@
 )
            :->
            Any])]
-  ((juxt specs-from-tenv
+         
+  ((juxt #_specs-from-tenv ;; FIXME
          anns-from-tenv)
-    {'config-in t}))
+    {'config-in t}
+    {:debug true}))
 
 ;; FIXME prefer :op over :type?
 (let [t (prs

@@ -7,11 +7,20 @@
             [clojure.java.io :as io]
             [clojure.core.typed.ast-utils :as ast]
             [clojure.core.typed.current-impl :as impl]
-            [clojure.core.typed.debug :refer [dbg]]
+            [clojure.core.typed.debug :as d]
             [clojure.tools.reader.reader-types :as rdrt]
             [clojure.tools.namespace.parse :as nprs]
             [clojure.math.combinatorics :as comb]
             [clojure.core.typed.coerce-utils :as coerce]))
+
+(defmacro debug [msg body]
+  `(do
+     (when *debug*
+       (pr-str (str (apply str (repeat *debug-depth* "  ")) "DEBUG:"))
+       ~msg)
+     (binding [*debug-depth* (when *debug*
+                               (inc *debug-depth*))]
+       ~body)))
 
 #_
 (defalias Type
@@ -584,7 +593,7 @@
 
 (declare resolve-alias-or-nil)
 
-(def ^:dynamic *spec* nil)
+(def ^:dynamic *spec* false)
 
 (defn buggy-spec-resolve-alias [envs a]
   (let [a-res (resolve-alias-or-nil envs a)]
@@ -982,7 +991,15 @@
     (assert nil (str "No unparse-type case: " m))))
 
 (defn unp [t]
-  (unparse-type t))
+  (binding [*spec* false]
+    (unparse-type t)))
+
+(defn unp-str [t]
+  (let [^String s 
+        (with-out-str
+          (binding [pp/*print-right-margin* nil]
+            (pprint (unp t))))]
+    (.replaceAll s "\\n" "")))
 
 (def ^:dynamic unparse-type unparse-type')
 
@@ -1034,7 +1051,7 @@
   (let [ts (flatten-unions args)
         {hmaps true non-hmaps false} (group-by HMap? ts)
         hmaps (set hmaps)
-        ;_ (prn "hmaps" (mapv unp hmaps))
+        _ (println "hmaps" (mapv unp-str hmaps))
         common-keys (or (when (seq hmaps)
                           (HMap-common-req-keys hmaps))
                         #{})
@@ -1047,9 +1064,11 @@
                        ;(prn "hmap-by-keys" hmap-by-keys)
                        ;; if we don't have common keys, collapse everything.
                        (if hmap-by-keys
-                         (into #{}
-                               (map merge-HMaps)
-                               (vals hmap-by-keys))
+                         (debug 
+                           (println "make-Union: No common key, merging by keys")
+                           (into #{}
+                                 (map merge-HMaps)
+                                 (vals hmap-by-keys)))
                          hmaps))
         likely-tag-for-union (atom nil)
         ;_ (prn "merged" (mapv unp hmaps-merged))
@@ -1255,24 +1274,26 @@
                    common-reqs
                    new-opts)]
     ;(prn "join HMaps")
-    {:op :HMap
-     ::HMap-req (into {}
-                      (map (fn [k]
-                             {:pre [(keyword? k)]}
-                             (let [ts (keep k [t1-req t2-req])]
-                               ;(prn "req k" k)
-                               ;(prn "ts" ts)
-                               (assert (seq ts))
-                               [k (apply join* ts)])))
-                      new-reqs)
-     ::HMap-opt (into {}
-                      (map (fn [k]
-                             {:pre [(keyword? k)]}
-                             (let [ts (keep k [t1-req t2-req
-                                               t1-opt t2-opt])]
-                               (assert (seq ts))
-                               [k (apply join* ts)])))
-                      new-opts)}))
+    (debug
+      (println "Joining HMaps:")
+      {:op :HMap
+       ::HMap-req (into {}
+                        (map (fn [k]
+                               {:pre [(keyword? k)]}
+                               (let [ts (keep k [t1-req t2-req])]
+                                 ;(prn "req k" k)
+                                 ;(prn "ts" ts)
+                                 (assert (seq ts))
+                                 [k (apply join* ts)])))
+                        new-reqs)
+       ::HMap-opt (into {}
+                        (map (fn [k]
+                               {:pre [(keyword? k)]}
+                               (let [ts (keep k [t1-req t2-req
+                                                 t1-opt t2-opt])]
+                                 (assert (seq ts))
+                                 [k (apply join* ts)])))
+                        new-opts)})))
 
 ; join : Type Type -> Type
 (defn join [t1 t2]
@@ -2888,11 +2909,12 @@
 (declare envs-to-annotations
          envs-to-specs)
 
-(def ^:dynamic *enable-debugging* nil)
+(def ^:dynamic *debug* false)
+(def ^:dynamic *debug-depth* 0)
 
 (defn debug-output [msg env {:keys [spec?] :as config}]
-  (when *enable-debugging*
-    (prn msg)
+  (when *debug*
+    (println "ITERATION:" msg)
     (pprint ((if spec?
                envs-to-specs
                envs-to-annotations)
@@ -2929,7 +2951,7 @@
      ~env))
 
 (defn populate-envs [env {:keys [spec?] :as config}]
-  (prn "populating")
+  (println "populating")
   (let [;; create recursive types
         env (if-let [fuel (:fuel config)]
               (assoc env :fuel fuel)
@@ -2958,16 +2980,16 @@
         ;; one top-level HMap, not a union etc.)
         env (when-fuel env
               (squash-horizonally env config))
-        _ (prn "finished squash-horizonally")
+        _ (println "finished squash-horizonally")
          _ (debug-output "after squash-horizonally" env config)
          ;; Clean up redundant aliases and inline simple
          ;; type aliases.
-         _ (prn "Start follow-all")
+         _ (println "Start follow-all")
          env (when-fuel env
                (follow-all env (assoc config :simplify? false)))
-         _ (prn "end follow-all")
+         _ (println "end follow-all")
         ]
-    (prn "done populating")
+    (println "done populating")
     env))
 
 ;(defn order-defaliases [env as]
@@ -3429,17 +3451,24 @@
            (out config))))))
 
 (defn runtime-infer
-  ([{:keys [ns output fuel]}]
-   (replace-generated-annotations ns 
-                                  (merge
-                                    (assoc (init-config)
-                                           :output output)
-                                    (when fuel
-                                      {:fuel fuel})))))
+  ([{:keys [ns output fuel] :as args}]
+   (binding [*spec* false
+             *debug* (if-let [[debug] (find args :debug)]
+                       debug
+                       *debug*)]
+     (replace-generated-annotations ns 
+                                    (merge
+                                      (assoc (init-config)
+                                             :output output)
+                                      (when fuel
+                                        {:fuel fuel}))))))
 
 (defn spec-infer
-  ([{:keys [ns output fuel]}]
-   (binding [*spec* true]
+  ([{:keys [ns output fuel] :as args}]
+   (binding [*spec* true
+             *debug* (if-let [[debug] (find args :debug)]
+                       debug
+                       *debug*)]
      (replace-generated-annotations ns 
                                     (merge
                                       (assoc (init-config)
