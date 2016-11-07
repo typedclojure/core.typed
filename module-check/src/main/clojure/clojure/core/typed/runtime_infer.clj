@@ -7,20 +7,87 @@
             [clojure.java.io :as io]
             [clojure.core.typed.ast-utils :as ast]
             [clojure.core.typed.current-impl :as impl]
-            [clojure.core.typed.debug :as d]
+            [clojure.core.typed.debug :as d :refer [dbg]]
             [clojure.tools.reader.reader-types :as rdrt]
             [clojure.tools.namespace.parse :as nprs]
             [clojure.math.combinatorics :as comb]
             [clojure.core.typed.coerce-utils :as coerce]))
 
-(defmacro debug [msg body]
-  `(do
-     (when *debug*
-       (pr-str (str (apply str (repeat *debug-depth* "  ")) "DEBUG:"))
-       ~msg)
-     (binding [*debug-depth* (when *debug*
-                               (inc *debug-depth*))]
-       ~body)))
+;; https://github.com/r0man/inflections-clj/blob/master/src/inflections/core.cljc
+(defn str-name
+  "Same as `clojure.core/name`, but keeps the namespace for keywords
+  and symbols."
+  [x]
+  (cond
+    (nil? x)
+    x
+    (string? x)
+    x
+    (or (keyword? x)
+        (symbol? x))
+    (if-let [ns (namespace x)]
+      (str ns "/" (name x))
+      (name x))))
+(defn coerce
+  "Coerce the string `s` to the type of `obj`."
+  [obj s]
+  (cond
+    (keyword? obj)
+    (keyword s)
+    (symbol? obj)
+    (symbol s)
+    :else s))
+(defn camel-case
+  "Convert `word` to camel case. By default, camel-case converts to
+  UpperCamelCase. If the argument to camel-case is set to :lower then
+  camel-case produces lowerCamelCase. The camel-case fn will also
+  convert \"/\" to \"::\" which is useful for converting paths to
+  namespaces.
+  Examples:
+    (camel-case \"active_record\")
+    ;=> \"ActiveRecord\"
+    (camel-case \"active_record\" :lower)
+    ;=> \"activeRecord\"
+    (camel-case \"active_record/errors\")
+    ;=> \"ActiveRecord::Errors\"
+    (camel-case \"active_record/errors\" :lower)
+    ;=> \"activeRecord::Errors\""
+  [word & [mode]]
+  (when word
+    (->> (let [word (str-name word)]
+           (cond
+             (= mode :lower) (camel-case word str/lower-case)
+             (= mode :upper) (camel-case word str/upper-case)
+             (fn? mode) (str (mode (str (first word)))
+                             (apply str (rest (camel-case word nil))))
+             :else (-> (str/replace word #"/(.?)" #(str "::" (str/upper-case (nth % 1))))
+                       (str/replace #"(^|_|-)(.)"
+                                #(str (if (#{\_ \-} (nth % 1))
+                                        (nth % 1))
+                                      (str/upper-case (nth % 2)))))))
+         (coerce word))))
+
+
+(def ^:dynamic *debug* false)
+(def ^:dynamic *debug-depth* 0)
+
+(defmacro debug-flat
+  ([msg]
+   `(when *debug*
+      (print (str (apply str (repeat *debug-depth* "  ")) *debug-depth* ": "))
+      ~msg)))
+
+(defmacro with-debug [& body]
+  `(binding [*debug* true]
+     ~@body))
+
+(defmacro debug 
+  ([msg body]
+   `(do
+      (debug-flat ~msg)
+      (binding [*debug-depth* (when *debug*
+                                (inc *debug-depth*))]
+        ~body))))
 
 #_
 (defalias Type
@@ -56,6 +123,15 @@
      '{:op :Top}))
 
 (def -any {:op :Top})
+
+(def -nothing {:op :union :types #{}})
+
+(declare union?)
+
+(defn nothing? [t]
+  (boolean
+    (when (union? t)
+      (empty? (:types t)))))
 
 (defn Any? [m]
   {:pre [(map? m)]
@@ -194,6 +270,11 @@
                                (-> m :path-occ map?)
                                (-> m :equivs vector?)))))
 
+(declare pprint get-infer-results unparse-infer-result)
+
+(defn ppresults []
+  (pprint (mapv unparse-infer-result (get-infer-results results-atom))))
+
 (defn add-infer-result! [results-atom r]
   (swap! results-atom update :infer-results conj r))
 
@@ -229,6 +310,10 @@
 
 (defn -unknown []
   {:op :unknown})
+
+(defn unknown? [m]
+  (= :unknown
+     (:op m)))
 
 (defn fn-dom-path [arity pos]
   (assert (< pos arity)
@@ -299,7 +384,7 @@
   (mapv unparse-path-elem ps))
 
 (defn unparse-infer-result [p]
-  [(unparse-path (:path p) :- (unparse-type (:type p)))])
+  [(unparse-path (:path p)) :- (unparse-type (:type p))])
 
 (defn parse-path-elem [p]
   (case (first p)
@@ -336,7 +421,7 @@
 (defn union? [t]
   (= :union (:op t)))
 
-(declare parse-type)
+(declare parse-type ^:dynamic *new-aliases*)
 
 (defn parse-arity [a]
   (let [[doms [_->_ rng :as rng-arrow]] (split-with (complement #{:->}) a)
@@ -456,7 +541,7 @@
                  :arities [(parse-arity m)]}
 
     (symbol? m) (case m
-                  Nothing {:op :union :types #{}}
+                  Nothing -nothing
                   Sym (-class clojure.lang.Symbol [])
                   (cond
                     (contains? *type-var-scope* m)
@@ -649,13 +734,17 @@
 (def ^:dynamic *used-aliases* nil)
 (def ^:dynamic *multispecs-needed* nil)
 
+(defn should-gen-just-in-time-alias? [t]
+  (or (HMap? t)
+      (alias? t)))
+
 (defn spec-cat [args]
   (assert (even? (count args)))
   (list* (qualify-spec-symbol 'cat)
          args))
 
 (declare fully-resolve-alias HMap-likely-tag-key
-         kw-val?)
+         kw-val? register-just-in-time-alias)
 
 ; [Node :-> Any]
 (defn unparse-type' [{:as m}]
@@ -709,15 +798,15 @@
                        dmulti `(defmulti ~(with-meta nme
                                                     {::generated true})
                                  ~tag)
-                       dmethods (map (fn [t]
-                                       {:pre [(HMap? t)]}
-                                       (let [this-tag (get (::HMap-req t) tag)
-                                             _ (assert (kw-val? this-tag)
-                                                       (unparse-type this-tag))]
-                                         `(defmethod ~nme ~(:val this-tag)
-                                            [~'_]
-                                            ~(unparse-type t))))
-                                     ts)
+                       dmethods (mapv (fn [t]
+                                        {:pre [(HMap? t)]}
+                                        (let [this-tag (get (::HMap-req t) tag)
+                                              _ (assert (kw-val? this-tag)
+                                                        (unparse-type this-tag))]
+                                          `(defmethod ~nme ~(:val this-tag)
+                                             [~'_]
+                                             ~(unparse-type t))))
+                                      ts)
                        _ (when multispecs
                            (swap! multispecs conj (vec (cons dmulti dmethods))))]
                    (list (qualify-spec-symbol 'multi-spec)
@@ -727,7 +816,9 @@
              :else
              (if (empty? (:types m))
                (qualify-typed-symbol 'Nothing)
-               (list* (qualify-typed-symbol 'U) (set (map unparse-type (:types m))))))
+               (list* (qualify-typed-symbol 'U) (into #{} 
+                                                      (map unparse-type) 
+                                                      (:types m)))))
     :HVec (cond
             *unparse-spec* (list* (qualify-spec-symbol 'tuple)
                                   (mapv unparse-type (:vec m)))
@@ -762,7 +853,7 @@
                                                                                   (name k))
                                                                       _ (swap! spec-aliases assoc kw v)
                                                                       _ (swap! envs update-alias-env
-                                                                               kw v)]
+                                                                               assoc kw v)]
                                                                   kw))))]
                                                       (if maybe-kw
                                                         maybe-kw
@@ -800,121 +891,144 @@
                            [:mandatory req])
                          [:optional (unp-map HMap-opt)]))
                 :else `'~req)))
-    :IFn1 (let [{:keys [dom rng]} m]
+    :IFn1 (let [{:keys [dom rng fixed-name-lookup]} m
+                these-names (get fixed-name-lookup (count dom))
+                these-names (when (= (count dom) (count these-names))
+                              these-names)]
             (assert (every? identity [dom rng]))
-            (conj (mapv unparse-type dom)
+            (assert (or (nil? these-names)
+                        (and (vector? these-names)
+                             (every? symbol? these-names)
+                             (= (count dom) (count these-names)))))
+            (conj (mapv (fn [t nme]
+                          (if (and nme *new-aliases*
+                                   (should-gen-just-in-time-alias? t))
+                            (let [sym (register-just-in-time-alias (camel-case nme) t)]
+                              (unparse-type (-alias sym)))
+                            (unparse-type t)))
+                        dom
+                        (or these-names
+                            (repeat (count dom) nil)))
                   :->
                   (unparse-type rng)))
-    :IFn (cond
-           *unparse-spec* 
-           (let [{:keys [arities top-level-def]} m
-                 top-level-var (when (and (symbol? top-level-def)
-                                          (namespace top-level-def)) ;; testing purposes
-                                 (some-> top-level-def find-var))
-                 arglists (some-> top-level-var
-                                   meta
-                                   :arglists)
-                 macro? (some-> top-level-var
+    :IFn (let [{:keys [arities top-level-def]} m
+               top-level-var (when (and (symbol? top-level-def)
+                                        (namespace top-level-def)) ;; testing purposes
+                               (some-> top-level-def find-var))
+               ;_ (prn "top-level-var" top-level-var)
+               arglists (some-> top-level-var
                                 meta
-                                :macro)
-                 {fixed-arglists :fixed [rest-arglist] :rest}
-                 (group-by (fn [v]
-                             (if (and (<= 2 (count v))
-                                      (#{'&} (get v (dec (count v)))))
-                               :rest
-                               :fixed))
-                           arglists)
-                 fixed-name-lookup (into {}
-                                         (map (fn [v]
-                                                [(count v) (map (comp keyword str) v)]))
-                                         fixed-arglists)
-                 ;; if we have a macro, ignore the first two arguments
-                 ;; in each arity (&env and &form)
-                 arities (if macro?
-                           (map (fn [a]
-                                  (update a :dom (fn [dom]
-                                                   (if (<= 2 (count dom))
-                                                     (subvec dom 2)
-                                                     dom))))
-                                arities)
-                           arities)
-                 doms (cond
-                        macro?
-                        [(spec-cat
-                                (concat
-                                  ;; macros are very likely to having binding
-                                  ;; forms as the first argument if it's always
-                                  ;; a vector.
-                                  (when (every? (fn [{:keys [dom]}]
-                                                  ;; every first argument is a vector
-                                                  (let [[d] dom]
-                                                    (when d
-                                                      (and
-                                                        (#{:class} (:op d))
-                                                        (= clojure.lang.IPersistentVector
-                                                           (:class d))))))
-                                                arities)
-                                    [:bindings :clojure.core.specs/bindings])
-                                  ;; if there is more than one arity,
-                                  ;; default to a rest argument.
-                                    [:body
-                                     (if (<= 2 (count arities))
-                                       (list (qualify-spec-symbol '*)
-                                             (qualify-core-symbol 'any?))
-                                       (qualify-core-symbol 'any?))]))]
-                        :else
-                        (map
-                          (fn [{:keys [dom]}]
-                            {:pre [dom]}
-                            ;(prn "doms" (count dom) (get fixed-name-lookup (count dom)))
-                            (spec-cat
-                                   (mapcat (fn [n k d]
-                                             (let [spec 
-                                                   (cond
-                                                     (and (zero? n)
-                                                          macro?
-                                                          (#{:class} (:op d))
-                                                          (= clojure.lang.IPersistentVector
-                                                             (:class d)))
-                                                     :clojure.core.specs/bindings
+                                :arglists)
+               macro? (some-> top-level-var
+                              meta
+                              :macro)
+               {fixed-arglists :fixed [rest-arglist] :rest}
+               (group-by (fn [v]
+                           (if (and (<= 2 (count v))
+                                    (#{'&} (get v (dec (count v)))))
+                             :rest
+                             :fixed))
+                         arglists)
+               ;; map from arity length to vector of fixed arguments
+               fixed-name-lookup (into {}
+                                       (map (fn [v]
+                                              [(count v) v]))
+                                       fixed-arglists)]
+           ;(prn "fixed-name-lookup" fixed-name-lookup)
+           (cond
+             *unparse-spec* 
+             (let [;; if we have a macro, ignore the first two arguments
+                   ;; in each arity (&env and &form)
+                   arities (if macro?
+                             (map (fn [a]
+                                    (update a :dom (fn [dom]
+                                                     (if (<= 2 (count dom))
+                                                       (subvec dom 2)
+                                                       dom))))
+                                  arities)
+                             arities)
+                   doms (cond
+                          macro?
+                          [(spec-cat
+                             (concat
+                               ;; macros are very likely to having binding
+                               ;; forms as the first argument if it's always
+                               ;; a vector.
+                               (when (every? (fn [{:keys [dom]}]
+                                               ;; every first argument is a vector
+                                               (let [[d] dom]
+                                                 (when d
+                                                   (and
+                                                     (#{:class} (:op d))
+                                                     (= clojure.lang.IPersistentVector
+                                                        (:class d))))))
+                                             arities)
+                                 [:bindings :clojure.core.specs/bindings])
+                               ;; if there is more than one arity,
+                               ;; default to a rest argument.
+                               [:body
+                                (if (<= 2 (count arities))
+                                  (list (qualify-spec-symbol '*)
+                                        (qualify-core-symbol 'any?))
+                                  (qualify-core-symbol 'any?))]))]
+                          :else
+                          (map
+                            (fn [{:keys [dom]}]
+                              {:pre [dom]}
+                              ;(prn "doms" (count dom) (keyword (get fixed-name-lookup (count dom))))
+                              (spec-cat
+                                (mapcat (fn [n k d]
+                                          (let [spec 
+                                                (cond
+                                                  (and (zero? n)
+                                                       macro?
+                                                       (#{:class} (:op d))
+                                                       (= clojure.lang.IPersistentVector
+                                                          (:class d)))
+                                                  :clojure.core.specs/bindings
 
-                                                     :else
-                                                     (unparse-spec d))
-                                                   k (or (when (keyword? spec)
-                                                           (keyword (str (name spec) "-" n)))
-                                                         k)]
-                                               [k spec]))
-                                           (range)
-                                           (or
-                                             (get fixed-name-lookup (count dom))
-                                             ;; TODO use rest-arglist here
-                                             (repeatedly #(keyword (name (apply gensym
-                                                                                (when (symbol? top-level-def)
-                                                                                  [(str top-level-def "-")]))))))
-                                           dom)))
-                          arities))
-                 rngs (if macro?
-                        (qualify-core-symbol 'any?)
-                        (alt-spec (let [u (make-Union (map :rng arities))]
-                                    (if (union? u)
-                                      (:types u)
-                                      [u]))))
-                 dom-specs (if (= 1 (count doms))
-                             (first doms)
-                             (list* (qualify-spec-symbol 'alt)
-                                    (mapcat (fn [alt]
-                                              (let [kw (keyword (str (/ (dec (count alt)) 2)
-                                                                     "-args"))]
-                                                [kw alt]))
-                                            doms)))]
-             (list* (qualify-spec-symbol 'fspec)
-                    [:args dom-specs
-                     :ret rngs]))
-           :else
-           (let [as (map unparse-type (:arities m))]
-             (if (== 1 (count as))
-               (first as)
-               (list* (qualify-typed-symbol 'IFn) as))))
+                                                  :else
+                                                  (unparse-spec d))
+                                                k (or (when (keyword? spec)
+                                                        (keyword (str (name spec) "-" n)))
+                                                      k)]
+                                            [k spec]))
+                                        (range)
+                                        (or
+                                          (keyword (get fixed-name-lookup (count dom)))
+                                          ;; TODO use rest-arglist here
+                                          (repeatedly #(keyword (name (apply gensym
+                                                                             (when (symbol? top-level-def)
+                                                                               [(str top-level-def "-")]))))))
+                                        dom)))
+                            arities))
+                   rngs (if macro?
+                          (qualify-core-symbol 'any?)
+                          (alt-spec (let [u (make-Union (map :rng arities))]
+                                      (if (union? u)
+                                        (:types u)
+                                        [u]))))
+                   dom-specs (if (= 1 (count doms))
+                               (first doms)
+                               (list* (qualify-spec-symbol 'alt)
+                                      (doall
+                                        (mapcat (fn [alt]
+                                                  (let [kw (keyword (str (/ (dec (count alt)) 2)
+                                                                         "-args"))]
+                                                    [kw alt]))
+                                                doms))))]
+               (list* (qualify-spec-symbol 'fspec)
+                      [:args dom-specs
+                       :ret rngs]))
+             :else
+             (let [as (map (fn [a]
+                             (unparse-type
+                              (assoc a
+                                     :fixed-name-lookup fixed-name-lookup)))
+                           arities)]
+               (if (== 1 (count as)) ;; count forces seq
+                 (first as)
+                 (list* (qualify-typed-symbol 'IFn) as)))))
     :class (cond
              *unparse-spec* (let [^Class cls (:class m)]
                               (cond
@@ -960,12 +1074,13 @@
                                      clojure.lang.IAtom (qualify-typed-symbol 'Atom1)
                                      clojure.lang.ISeq (qualify-typed-symbol 'Seqable)
                                      clojure.lang.IPersistentList (qualify-typed-symbol 'Seqable)
+                                     Number (qualify-typed-symbol 'Num)
                                      clojure.lang.IFn 'AnyFunction
                                      java.lang.String (qualify-typed-symbol 'Str)
                                      (resolve-class c))
                                _ (assert (symbol? cls))]
                            (if (seq args)
-                             (list* cls (map unparse-type args))
+                             (list* cls (mapv unparse-type args))
                              cls))))]
                (unparse-class (:class m) (:args m))))
     :Top (cond 
@@ -994,6 +1109,8 @@
   (binding [*spec* false]
     (unparse-type t)))
 
+(declare pprint)
+
 (defn unp-str [t]
   (let [^String s 
         (with-out-str
@@ -1019,7 +1136,7 @@
         (mapcat flatten-union)
         ts))
 
-(declare join-HMaps join* pprint join kw-val? kw-vals?)
+(declare join-HMaps join* join kw-val? kw-vals?)
 
 (def val? (comp boolean #{:val} :op))
 
@@ -1047,19 +1164,47 @@
                  hmaps)
      k)))
 
+#_
+(defmacro let-debug [bnd & body]
+  (let [bnds (partition 2 bnd)
+        split (first
+                (first
+                  (filter
+                    #(= :debug (-> % second first))
+                    (map-indexed vector bnds))))
+        [before-debug
+         [the-debug & [:as after-debug]]] 
+        (if split
+          (split-at split bnds)
+          [bnds nil])
+        ]
+    `(let [~@(apply concat before-debug)]
+       ~(if (seq after-debug)
+          `(debug ~(second the-debug)
+             (let-debug [~@(apply concat after-debug)]
+               ~@body))
+          `(do ~@body)))))
+
 (defn make-Union [args]
+  (debug (println "make-Union")
   (let [ts (flatten-unions args)
         {hmaps true non-hmaps false} (group-by HMap? ts)
         hmaps (set hmaps)
-        _ (println "hmaps" (mapv unp-str hmaps))
+        _ (debug-flat (println "hmaps:" (mapv unp-str hmaps)))
         common-keys (or (when (seq hmaps)
                           (HMap-common-req-keys hmaps))
                         #{})
-        ;_ (prn "common-keys" common-keys)
+        _ (when (seq hmaps)
+            (debug-flat (println "common-keys:"
+                                 (pr-str common-keys))))
         likely-tag
         (some #(HMap-likely-tag-key hmaps %) common-keys)
         ;_ (prn "likely-tag" likely-tag)
-        hmaps-merged (let [hmap-by-keys (when-not likely-tag
+        _ (when (seq hmaps)
+            (debug-flat (println "likely-tag:"
+                                 (pr-str likely-tag))))
+        hmaps-merged (let [hmap-by-keys (when (and (seq hmaps)
+                                                   (not likely-tag))
                                           (group-by HMap-req-keyset hmaps))]
                        ;(prn "hmap-by-keys" hmap-by-keys)
                        ;; if we don't have common keys, collapse everything.
@@ -1082,7 +1227,9 @@
                          (cond
                            ;; no keys in common, upcast all maps
                            (empty? common-keys)
-                           #{(-class clojure.lang.IPersistentMap [-any -any])}
+                           (do
+                             (debug-flat (println "no common keys, upcasting to (Map Any Any)"))
+                             #{(-class clojure.lang.IPersistentMap [-any -any])})
 
                            ;; if one of the common keys is always mapped to a singleton keyword,
                            ;; merge by the value of this key
@@ -1093,6 +1240,9 @@
                                  new-maps (into #{}
                                                 (map merge-HMaps)
                                                 (vals by-tag))]
+                             (debug-flat
+                               (println "combined HMaps:"
+                                        (mapv unp-str new-maps)))
                              (reset! likely-tag-for-union likely-tag)
                              ;(prn "likely-tag" likely-tag)
                              ;(prn "by-tag" by-tag)
@@ -1100,27 +1250,41 @@
                              new-maps)
 
                            ;; merge common keys as required, rest are optional
+                           ;; FIXME this is too aggressive for maps that have
+                           ;; clashing dispatch keys.
                            :else
-                           hmaps-merged
-                           #_
-                           (do
-                             #{{:op :HMap
-                                ;; put all the common required keys as required
-                                ::HMap-req (apply merge-with join
-                                            (map (fn [m]
-                                                   {:pre [(HMap? m)]}
-                                                   (select-keys (::HMap-req m) common-keys))
-                                                 hmaps-merged))
-                                ;; all the rest are optional
-                                ::HMap-opt (apply merge-with join
-                                                  (map (fn [m]
-                                                         {:pre [(HMap? m)]}
-                                                         (merge-with join
-                                                                     (::HMap-opt m)
-                                                                     (apply dissoc (::HMap-req m)
-                                                                            common-keys)))
-                                                       hmaps-merged))
-                                }})))
+                           (let [has-unknown? (atom false)
+                                 res
+                                 #{{:op :HMap
+                                    ;; put all the common required keys as required
+                                    ::HMap-req (apply merge-with join
+                                                      (map (fn [m]
+                                                             {:pre [(HMap? m)]}
+                                                             (let [es (select-keys (::HMap-req m) 
+                                                                                   common-keys)]
+                                                               (doseq [[_ v] es]
+                                                                 (when (unknown? v)
+                                                                   (reset! has-unknown? true)))
+                                                               es))
+                                                           hmaps-merged))
+                                    ;; all the rest are optional
+                                    ::HMap-opt (apply merge-with join
+                                                      (map (fn [m]
+                                                             {:pre [(HMap? m)]}
+                                                             (let [es 
+                                                                   (merge-with join
+                                                                               (::HMap-opt m)
+                                                                               (apply dissoc (::HMap-req m)
+                                                                                      common-keys))]
+                                                               (doseq [[_ v] es]
+                                                                 (when (unknown? v)
+                                                                   (reset! has-unknown? true)))
+                                                               es))
+                                                           hmaps-merged))
+                                    }}]
+                             (if @has-unknown?
+                               hmaps-merged
+                               res))))
                        hmaps-merged)
         ;_ (prn "merged" hmaps-merged)
         ;_ (prn "hmaps-merged" (map unparse-type hmaps-merged))
@@ -1136,15 +1300,31 @@
                                      (vals classes))]
                     (into (set classes) non-classes))
 
-        ;; delete HMaps if there's already a Map in this union
+        ;; delete HMaps if there's already a Map in this union,
+        ;; unless it's a (Map Nothing Nothing)
         hmaps-merged (if (some (fn [m]
-                                 (when (-class? m)
-                                   (#{clojure.lang.IPersistentMap} (:class m))))
+                                 (and (-class? m)
+                                      (#{clojure.lang.IPersistentMap} (:class m))
+                                      (not-every? nothing? (:args m))))
                                non-hmaps)
                        #{}
                        hmaps-merged)
 
         ts (into hmaps-merged non-hmaps)
+        
+        ;; upcast true/false singletons to Boolean if Boolean is present
+        ts (if (contains? ts (-class Boolean []))
+             (disj ts (-val true) (-val false))
+             ts)
+
+        ;; upcast Long and Double combination to t/Num
+        ts (if (and (contains? ts (-class Long []))
+                    (contains? ts (-class Double [])))
+             (-> (disj ts 
+                       (-val Long)
+                       (-val Double))
+                 (conj (-class Number [])))
+             ts)
         
         ;; simplify multiple keywords to Kw if
         ;ts (let [{kws true non-kws false} (group-by kw-val? ts)]
@@ -1204,8 +1384,15 @@
                         ts)}
           #_
           (when-let [k @likely-tag-for-union]
-            {::union-likely-tag k}))))))
+            {::union-likely-tag k})))))))
 
+;; How to choose if we have kwargs.
+;;
+;; - after some fixed number of arguments, the # arguments
+;;   need to be multiples of 2
+;; - after the fixed arguments, for each pair [k v]
+;;   - k must be a keyword
+;;   - v can be anything
 (defn group-arities [t1 t2]
   {:pre [(#{:IFn} (:op t1))
          (#{:IFn} (:op t2))]}
@@ -1272,28 +1459,62 @@
         ;; required if not optional in either
         new-reqs (set/difference
                    common-reqs
-                   new-opts)]
-    ;(prn "join HMaps")
-    (debug
-      (println "Joining HMaps:")
-      {:op :HMap
-       ::HMap-req (into {}
-                        (map (fn [k]
-                               {:pre [(keyword? k)]}
-                               (let [ts (keep k [t1-req t2-req])]
-                                 ;(prn "req k" k)
-                                 ;(prn "ts" ts)
-                                 (assert (seq ts))
-                                 [k (apply join* ts)])))
-                        new-reqs)
-       ::HMap-opt (into {}
-                        (map (fn [k]
-                               {:pre [(keyword? k)]}
-                               (let [ts (keep k [t1-req t2-req
-                                                 t1-opt t2-opt])]
-                                 (assert (seq ts))
-                                 [k (apply join* ts)])))
-                        new-opts)})))
+                   new-opts)
+        res (debug
+              (println "Joining HMaps:")
+              {:op :HMap
+               ::HMap-req (into {}
+                                (map (fn [k]
+                                       {:pre [(keyword? k)]}
+                                       (let [ts (keep k [t1-req t2-req])]
+                                         ;(prn "req k" k)
+                                         ;(prn "ts" ts)
+                                         (assert (seq ts))
+                                         [k (apply join* ts)])))
+                                new-reqs)
+               ::HMap-opt (into {}
+                                (map (fn [k]
+                                       {:pre [(keyword? k)]}
+                                       (let [ts (keep k [t1-req t2-req
+                                                         t1-opt t2-opt])]
+                                         (assert (seq ts))
+                                         [k (apply join* ts)])))
+                                new-opts)})]
+    (debug-flat 
+      (println "joint HMaps:"
+               (unp-str res)))
+    res
+    ))
+
+(defn join-IFn [t1 t2]
+  {:pre [(#{:IFn} (:op t1))
+         (#{:IFn} (:op t2))]
+   :post [(type? %)]}
+  (let [;_ (apply prn "join IFn" (map unparse-type [t1 t2]))
+        grouped (group-arities t1 t2)
+        ;_ (prn "grouped" grouped)
+        arities
+        (mapv
+          ;; each `as` is a list of :IFn1 nodes
+          ;; with the same arity
+          (fn [as]
+            {:pre [(every? #{[:IFn1 (-> as first :dom count)]}
+                           (map (juxt :op (comp count :dom))
+                                as))]
+             :post [(#{:IFn1} (:op %))]}
+            {:op :IFn1
+             :dom (apply mapv
+                         (fn [& [dom & doms]]
+                           {:pre [dom]}
+                           ;(prn "join IFn IFn dom" (map :op (cons dom doms)))
+                           (apply join* dom doms))
+                         (map :dom as))
+             :rng (let [[rng & rngs] (map :rng as)]
+                    (assert rng)
+                    (apply join* rng rngs))})
+          grouped)]
+    {:op :IFn
+     :arities arities}))
 
 ; join : Type Type -> Type
 (defn join [t1 t2]
@@ -1365,31 +1586,7 @@
 
               (and (#{:IFn} (:op t1))
                    (#{:IFn} (:op t2)))
-              (let [;_ (apply prn "join IFn" (map unparse-type [t1 t2]))
-                    grouped (group-arities t1 t2)
-                    ;_ (prn "grouped" grouped)
-                    arities
-                    (mapv
-                      ;; each `as` is a list of :IFn1 nodes
-                      ;; with the same arity
-                      (fn [as]
-                        {:pre [(every? #{[:IFn1 (-> as first :dom count)]}
-                                       (map (juxt :op (comp count :dom))
-                                            as))]
-                         :post [(#{:IFn1} (:op %))]}
-                        {:op :IFn1
-                         :dom (apply mapv
-                                     (fn [& [dom & doms]]
-                                       {:pre [dom]}
-                                       ;(prn "join IFn IFn dom" (map :op (cons dom doms)))
-                                       (apply join* dom doms))
-                                     (map :dom as))
-                         :rng (let [[rng & rngs] (map :rng as)]
-                                (assert rng)
-                                (apply join* rng rngs))})
-                      grouped)]
-                {:op :IFn
-                 :arities arities})
+              (join-IFn t1 t2)
 
               :else 
               (let []
@@ -1525,9 +1722,8 @@
                          (update-type-env-in-ns env (or (:ns x) (current-ns))
                                                 assoc n t))
     :else 
-    (let [last-pos (dec (count path))
-          cur-pth (nth path last-pos)
-          nxt-pth (subvec path 0 last-pos)]
+    (let [cur-pth (peek path)
+          nxt-pth (pop path)]
       (assert (:op cur-pth) (str "What is this? " cur-pth
                                  " full path: " path))
       (case (:op cur-pth)
@@ -1537,7 +1733,7 @@
                       nxt-pth
                       {:op :HMap
                        ::HMap-req (assoc (zipmap keys (repeat {:op :unknown}))
-                                   key type)}))
+                                         key type)}))
         :set-entry (recur env config nxt-pth (-class clojure.lang.IPersistentSet [type]))
         :seq-entry (recur env config nxt-pth (-class clojure.lang.ISeq [type]))
         :transient-vector-entry (recur env config nxt-pth (-class clojure.lang.ITransientVector [type]))
@@ -1633,11 +1829,22 @@
   ;(prn "register" name)
   (update-alias-env env assoc name t))
 
+(defn register-just-in-time-alias [sym t]
+  (assert *new-aliases*)
+  (let [sym (if (or (contains? (alias-env @*envs*) sym)
+                    (contains? (alias-env @*new-aliases*) sym))
+              (gensym (str (name sym) "__"))
+              sym)
+        _ (swap! *new-aliases* register-alias (init-config) sym t)
+        ]
+    sym))
+
 (defn register-unique-alias [env config sym t]
+  (debug (println "register-unique-alias:" sym (unp-str t))
   (let [sym (if (contains? (alias-env env) sym)
               (gensym (str (name sym) "__"))
               sym)]
-    [sym (register-alias env config sym t)]))
+    [sym (register-alias env config sym t)])))
 
 (defn resolve-alias [env {:keys [name] :as a}]
   {:pre [(map? env)
@@ -1873,7 +2080,9 @@
       [(postwalk t
          (fn [t]
            (case (:op t)
-             :HMap (do-alias t)
+             :HMap (debug
+                     (println "alias-hmap-type:" (unp-str t))
+                     (do-alias t))
              :union (if (and (seq (:types t))
                              (not-every?
                                (fn [t]
@@ -1882,7 +2091,9 @@
                                    :class (empty? (:args t))
                                    false))
                                (:types t)))
-                      (do-alias t)
+                      (debug
+                        (println "alias-union-type:" (unp-str t))
+                        (do-alias t))
                       t)
              :IFn1 (if (:spec? config)
                      (-> t
@@ -2108,9 +2319,6 @@
                       (squash env config a))
                     env (map -alias fvs))]
     [t env]))
-
-(defn add-tmp-aliases [env as]
-  (update-alias-env env merge (zipmap as (repeat nil))))
 
 (declare generate-tenv)
 
@@ -2607,6 +2815,9 @@
 (defn generate-tenv
   "Reset and populate global type environment."
   [env config {:keys [infer-results equivs] :as is}]
+  (debug (println "generate-tenv:"
+                  (str (count infer-results)
+                       " infer-results"))
   (as-> (init-env) env 
     (reduce 
       (fn [env i] 
@@ -2618,7 +2829,7 @@
       (fn [env i]
         (update-equiv env config (:= i) (:type i)))
       env
-      equivs)))
+      equivs))))
 
 (defn gen-current1
   "Print the currently inferred type environment"
@@ -2748,7 +2959,7 @@
                                                     (pprint (unparse-type t)))))
                       :else (unmunge n))}))}})
 
-(defn relevant-aliases 
+(defn reachable-aliases 
   "Returns all referenced aliases from the type
   environment."
   [env]
@@ -2798,7 +3009,7 @@
       (combine-kw-vals deep-reqs)
       {})))
 
-(defn relevant-alias? [asym relevant-entries kw-reqs]
+(defn relevant-alias [asym relevant-entries kw-reqs]
   ; ALIAS: KwValsMap => (Map Kw (Set Kw))
   ; relevant-entries : KwValsMap
   {:pre [(symbol? asym)
@@ -2833,11 +3044,120 @@
                   all-other-kw-vals)
       asym)))
 
+(defn merge-aliases 
+  "Merge aliases based on their keysets.
+
+  Takes in a list of aliases `as` which all have
+  identical keysets `kset`. Then we combine all `as` that
+  are non-recursive and have similar tags.
+
+  Then we search for subsets of of `kset` in `ksets`, which
+  is a map from keysets to sets of aliases with that keyset.
+
+  Finally we merge all found aliases with related
+  keysets.
+  "
+  [env kset as ksets]
+  (letfn [(remove-differently-tagged-aliases
+            [env as]
+            {:post [(vector? %)
+                    (every? symbol? %)]}
+            ; kw-reqs : (Map AliasSym (Map Kw (Set Kw)))
+            (let [kw-reqs
+                  (into {}
+                        (map (fn [a]
+                               [a (possibly-tagged-entries-in-alias env a)]))
+                        as)]
+              (into []
+                    (keep (fn [[a relevant-entries]]
+                            (relevant-alias a relevant-entries kw-reqs)))
+                    kw-reqs)))
+          (remove-recursive-aliases [env as]
+            (remove #(recursive-alias? env %) as))
+          (join*-aliases [env as]
+            {:post [(type? %)]}
+            (let [ts (map #(resolve-alias env (-alias %)) as)]
+              ;(prn "before merge" (mapv unp ts))
+              (apply join* ts)))
+          ;; returns a pair
+          ;; [<name to rewrite to> <all other aliases]
+          (rewrite-to [as]
+            [(first as) (rest as)])
+          ; returns env
+          (point-old-aliases-to-new
+            [env anew aolds]
+            (reduce (fn [env aold]
+                      (update-alias-env env assoc aold (-alias anew)))
+                    env
+                    aolds))
+          ;; return all aliases that differ by one or
+          ;; two entries.
+          (find-similar-aliases
+            [kset ksets]
+            {:pre [(set? kset)
+                   (map? ksets)]
+             :post [(set? %)
+                    (every? symbol? %)]}
+            (let [;; max number of keys different allowable
+                  ;; to qualify for merging
+                  different-kset-thres
+                  (cond
+                    (< (count kset) 5) 1
+                    (< (count kset) 10) 4
+                    ;; too expensive? revisit.
+                    (< 15 (count kset)) 0
+                    :else 5)
+
+                  possible-ksets
+                  (reduce (fn [ksets n]
+                            {:pre [(pos? n)]
+                             :post [(set? %)
+                                    (every? set? %)]}
+                            (into
+                              ksets
+                              (map set (comb/combinations (vec kset) (- (count kset) n)))))
+                          #{}
+                          (range 1 (inc different-kset-thres)))]
+              (reduce (fn [res kset]
+                        (into res (get ksets kset)))
+                      #{}
+                      possible-ksets)))]
+    (let [as (into as (find-similar-aliases kset ksets))
+          as (->> as
+                  ;(remove-recursive-aliases env)
+                  (remove-differently-tagged-aliases env))]
+      ;; Are there any aliases left to merge?
+      (if-not (< 1 (count as))
+        env
+        (let [newtyp (join*-aliases env as)
+              [anew aolds] (rewrite-to as)
+              ;; update new alias
+              env (update-alias-env env assoc anew newtyp)
+              ;; point old aliases to the new alias
+              env (point-old-aliases-to-new env anew aolds)]
+          env)))))
+
+; Env (Coll Alias) -> (Map (Set Kw) (Set Alias))
+(defn group-HMap-aliases-by-req-keyset [env as]
+  (let [as (set as)]
+    (apply merge-with into
+           (->> (alias-env env)
+                (filter (fn [[k t]]
+                          (and (contains? as k)
+                               (HMap? t))))
+                (map (fn [[a t]]
+                       {:pre [(HMap? t)]}
+                       {(HMap-req-keyset t) #{a}}))))))
+
+; Env Config -> Env
 (defn squash-horizonally
   "Join aliases that refer to exactly
-  one HMap with the same keyset.
+  one HMap with overlapping req keys.
   If maps are recursively defined, don't
   merge them.
+
+  Don't merge 'tagged' maps with different
+  tags.
   
   eg. {a1 '{:a Int}
        a2 '{:a Bool}}
@@ -2852,65 +3172,17 @@
        a2 '{:a (U nil a1)}}
   "
   [env config]
-  (let [as (relevant-aliases env)
-        _ (assert (set? as))
-        ksets (apply merge-with into
-                     (->> (alias-env env)
-                          (filter (fn [[k t]]
-                                    (and (contains? as k)
-                                         (HMap? t))))
-                          (map (fn [[a t]]
-                                 {:pre [(HMap? t)]}
-                                 {(HMap-req-keyset t) #{a}}))))
-        env (reduce
-              (fn [env [kset as]]
-                (if (< 1 (count as))
-                  (let [;_ (prn "Merging" kset as)
-                        ;; join all non-recursive aliases
-                        as (remove #(recursive-alias? env %) as)
-                        ;_ (prn "Removed recursive aliases, merging:" as)
-                        ;; don't join aliases that have identical
-                        ;; dispatch entries.
-                        ; kw-reqs : (Map AliasSym (Map Kw (Set Kw)))
-                        kw-reqs (into {}
-                                      (map (fn [a]
-                                             [a (possibly-tagged-entries-in-alias env a)]))
-                                      as)
-                        ;_ (prn "kw-reqs" kw-reqs)
-                        ;_ (prn "as before" as)
-                        as (into []
-                                 (comp
-                                   (map (fn [[a relevant-entries]]
-                                          (relevant-alias? a relevant-entries kw-reqs)))
-                                   (filter symbol?))
-                                 kw-reqs)
-                        ;_ (prn "as after" as)
-                        _ (assert (every? symbol? as))]
-                    (if-not (< 1 (count as))
-                      env
-                      (let [atyp (let [ts (map #(resolve-alias env (-alias %)) as)]
-                                   ;(prn "before merge" (mapv unp ts))
-                                   (apply join* ts))
-                            ;_ (prn "atyp" (unp atyp))
-                            [anew arst] [(first as) (rest as)]
-                            ;; rewrite anew to joined type
-                            env (update-alias-env env assoc anew atyp)
-                            ;; arst all point to a
-                            env (reduce (fn [env aold]
-                                          (update-alias-env env assoc aold (-alias anew)))
-                                        env
-                                        arst)]
-                        env)))
-                  env))
-              env
-              ksets)]
+  (let [ksets (group-HMap-aliases-by-req-keyset
+                env 
+                (reachable-aliases env))
+        env (reduce (fn [env [kset as]]
+                      (merge-aliases
+                       env kset as ksets))
+                    env ksets)]
     env))
 
 (declare envs-to-annotations
          envs-to-specs)
-
-(def ^:dynamic *debug* false)
-(def ^:dynamic *debug-depth* 0)
 
 (defn debug-output [msg env {:keys [spec?] :as config}]
   (when *debug*
@@ -2951,7 +3223,7 @@
      ~env))
 
 (defn populate-envs [env {:keys [spec?] :as config}]
-  (println "populating")
+  (debug "populate-envs:"
   (let [;; create recursive types
         env (if-let [fuel (:fuel config)]
               (assoc env :fuel fuel)
@@ -2990,7 +3262,7 @@
          _ (println "end follow-all")
         ]
     (println "done populating")
-    env))
+    env)))
 
 ;(defn order-defaliases [env as]
 ;  (let [afvs (into {}
@@ -3087,6 +3359,8 @@
           ]
       top-level-types)))
 
+(def ^:dynamic *new-aliases* nil)
+
 (defn envs-to-annotations [env config]
   (let [;; don't annotate macros
         tenv (into {}
@@ -3107,28 +3381,44 @@
         as (into {}
                  (filter (comp tfvs key))
                  (alias-env env))]
-    (binding [*envs* (atom env)]
-      (into
-        (into [(list* (if (= (ns-resolve (current-ns) 'declare)
-                             #'clojure.core/declare)
-                        'declare
-                        'clojure.core/declare)
-                      (map (comp symbol name key) as))]
-              (map (fn [[k v]]
-                     (list (qualify-typed-symbol 'defalias)
-                           (symbol (name k))
-                           (unparse-type v)))
-                   as))
-        (map (fn [[k v]]
-               (list (qualify-typed-symbol 'ann)
-                     (if (= (namespace k)
-                            (str (ns-name (current-ns))))
-                       ;; defs
-                       (symbol (name k))
-                       ;; imports
-                       k)
-                     (unparse-type v))))
-        tenv))))
+    (binding [*envs* (atom env)
+              ;; disable for now
+              *new-aliases* nil #_(atom (init-env))]
+      (letfn [(unp-defalias-env [as]
+                (mapv (fn [[k v]]
+                        (list (qualify-typed-symbol 'defalias)
+                              (symbol (name k))
+                              (unparse-type v)))
+                      as))
+              (declares-for-aliases [as]
+                (list* (if (= (ns-resolve (current-ns) 'declare)
+                              #'clojure.core/declare)
+                         'declare
+                         'clojure.core/declare)
+                       (map (comp symbol name key) as)))
+              (unp-anns [tenv]
+                (mapv (fn [[k v]]
+                        (list (qualify-typed-symbol 'ann)
+                              (if (= (namespace k)
+                                     (str (ns-name (current-ns))))
+                                ;; defs
+                                (symbol (name k))
+                                ;; imports
+                                k)
+                              (unparse-type (assoc v :top-level-def k))))
+                      tenv))
+              ]
+        (let [declares (declares-for-aliases as)
+              defaliases (unp-defalias-env as)
+              anns (unp-anns tenv)
+              ;new-aliases-env (alias-env @*new-aliases*)
+              ;; these won't generate new aliases. They refer
+              ;; to the previous aliases.
+              ;extra-defaliases (binding [*new-aliases* nil]
+              ;                   (unp-defalias-env new-aliases-env))
+              ]
+          (into [declares] 
+                (concat defaliases #_extra-defaliases anns)))))))
 
 
 (defn gen-current3 
@@ -3154,6 +3444,7 @@
                                             :node->descriptor
                                             :label-with-keyset)}})))))
 
+; Env Type -> (Vec Sym)
 (defn fv
   "Returns the aliases referred in this type, in order of
   discovery. If recur? is true, also find aliases

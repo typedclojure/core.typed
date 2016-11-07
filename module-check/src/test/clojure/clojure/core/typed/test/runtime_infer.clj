@@ -7,6 +7,9 @@
             [clojure.core.typed :as t]
             [clojure.core.typed.runtime-infer :refer :all]))
 
+(defn add-tmp-aliases [env as]
+  (update-alias-env env merge (zipmap as (repeat nil))))
+
 (defmacro with-tmp-aliases [env as & body]
   `(binding [*envs* (atom (add-tmp-aliases ~env ~as))] 
      ~@body))
@@ -1006,6 +1009,7 @@
   (specs-from-tenv {'config-in t}))
 
 ;; TODO recursive example of this test
+(with-debug
 (let [t (prs
           [(U '{:op ':the-bar
                 :the-foo String
@@ -1017,6 +1021,7 @@
            Any])]
   (anns-from-tenv {'config-in t}
                   {:debug true}))
+)
 
 ; HMap alias naming test
 (let [t (prs
@@ -1031,6 +1036,7 @@
     {'config-in t}))
 
 ; recursive HMaps test
+(with-debug
 (let [t (prs
           [(U
            '{:op ':foo
@@ -1044,6 +1050,7 @@
                         :the-foo '{:op ':foo
                                    :the-bar '{:op ':term
                                               :val Sym}}}}
+           #_
              '{:op ':bar
                :the-foo '{:op ':foo
                           :the-bar '{:op ':bar
@@ -1057,6 +1064,7 @@
          anns-from-tenv)
     {'config-in t}
     {:debug true}))
+)
 
 ;; FIXME prefer :op over :type?
 (let [t (prs
@@ -1094,3 +1102,35 @@
    {'config-in t}
    {:fuel 0})
   )
+
+(with-debug
+(let [t (prs
+          [':a
+           Integer
+           ':b
+           Boolean
+           :->
+           Any])]
+         
+  ((juxt #_specs-from-tenv ;; FIXME
+         anns-from-tenv)
+    {'config-in t}
+    {:debug true}))
+)
+
+;; combine maps that look similar
+(let [t (prs
+          ['{:a Long
+             :b Long
+             :c Long
+             :d Long}
+           '{:a Long
+             :b Long
+             :c Long}
+           :->
+           Any])]
+         
+  ((juxt #_specs-from-tenv ;; FIXME
+         anns-from-tenv)
+    {'config-in t}
+    ))
