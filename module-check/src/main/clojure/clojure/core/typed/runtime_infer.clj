@@ -315,6 +315,7 @@
   (= :unknown
      (:op m)))
 
+;; for zero arity, use (fn-dom-path 0 -1)
 (defn fn-dom-path [arity pos]
   (assert (< pos arity)
           (str "Arity: " arity
@@ -1317,14 +1318,18 @@
              (disj ts (-val true) (-val false))
              ts)
 
+        _ (assert (set? ts))
         ;; upcast Long and Double combination to t/Num
-        ts (if (and (contains? ts (-class Long []))
-                    (contains? ts (-class Double [])))
+        ts (cond
+             (or (and (contains? ts (-class Long []))
+                      (contains? ts (-class Double [])))
+                 (contains? ts (-class Number [])))
              (-> (disj ts 
-                       (-val Long)
-                       (-val Double))
+                       (-class Long [])
+                       (-class Double []))
                  (conj (-class Number [])))
-             ts)
+
+             :else ts)
         
         ;; simplify multiple keywords to Kw if
         ;ts (let [{kws true non-kws false} (group-by kw-val? ts)]
@@ -1743,9 +1748,11 @@
                      (recur env config nxt-pth
                             {:op :IFn
                              :arities [{:op :IFn1
-                                        :dom (assoc (into [] 
-                                                          (repeat (:arity cur-pth) {:op :unknown}))
-                                                    position type)
+                                        :dom (let [dom (into [] 
+                                                             (repeat (:arity cur-pth) {:op :unknown}))]
+                                               (if (zero? arity)
+                                                 dom
+                                                 (assoc dom position type)))
                                         :rng {:op :unknown}}]}))
         :fn-range (let [{:keys [arity]} cur-pth]
                     (recur env config nxt-pth
@@ -2171,7 +2178,6 @@
       (let [t (nth worklist 0)
             _ (assert (alias? t) [t (class t)])
             ;_ (prn "squash" (unp t))
-            fvs (fv env (resolve-alias env t))
             ;; find all keysets for downstream (and upstream) aliases
             ;; and merge.
             env (if-not (done t)
@@ -2180,7 +2186,7 @@
                       (try-merge-aliases env config f t))
                     env
                     (concat
-                      fvs
+                      (fv env (resolve-alias env t))
                       ;; also try and merge with parents
                       (map :name (disj done t))))
                   env)]
@@ -2394,11 +2400,19 @@
        (or
          (> (count path) *max-track-depth*)
          (not *should-track*))
-       (let [;; record as unknown so this doesn't
-             ;; cut off actually recursive types.
-             ir (infer-result path {:op :unknown})
-             _ (add-infer-result! results-atom ir)]
-         v)
+       (debug
+         (println "Cut off inference at path "
+                  (unparse-path path)
+                  "(due to " (if *should-track*
+                               (str "track depth of" *max-track-depth*
+                                    "being exceeded")
+                               (str "disabled tracking of internal ops"))
+                  ")")
+         (let [;; record as unknown so this doesn't
+               ;; cut off actually recursive types.
+               ir (infer-result path {:op :unknown})
+               _ (add-infer-result! results-atom ir)]
+           v))
 
        ;; only accurate up to 20 arguments.
        ;; all arities 21 and over will collapse into one.
@@ -2409,6 +2423,9 @@
                    (fn [& args]
                      (let [limit 20
                            blen (impl/bounded-length args limit) ;; apply only realises 20 places
+                           _ (when (= 0 blen)
+                               (track results-atom -any
+                                      (conj path (fn-dom-path 0 -1))))
                            args (map-indexed
                                   (fn [n v]
                                     (if (< n blen)
@@ -2715,6 +2732,8 @@
   '#{clojure.core
      clojure.spec
      clojure.core.typed
+     clojure.core.typed.contract
+     clojure.core.typed.current-impl
      clojure.test
      clojure.string})
 
@@ -2729,11 +2748,12 @@
 ; wrap-var-deref : TAExpr Sym Namespace -> TAExpr
 (defn wrap-var-deref [expr vsym *ns*]
   (do
-    (println (str "Instrumenting " vsym " in " (ns-name *ns*) 
-                  #_":" 
-                  #_(-> expr :env :line)
-                  #_(when-let [col (-> expr :env :column)]
-                      ":" col)))
+    (println
+      (str "Instrumenting " vsym " in " (ns-name *ns*) 
+           #_":" 
+           #_(-> expr :env :line)
+           #_(when-let [col (-> expr :env :column)]
+               ":" col)))
     {:op :invoke 
      :children [:fn :args]
      :form `(track-var' (var ~vsym))
@@ -2752,16 +2772,16 @@
              :var (:var expr)}
             (dummy-sym (:env expr) *ns*)]}))
 
-; wrap-var-deref : TAExpr Sym Namespace -> TAExpr
+; wrap-def-init : TAExpr Sym Namespace -> TAExpr
 (defn wrap-def-init [expr vsym *ns*]
   ;(prn ((juxt identity class) (-> expr :env :ns)))
   (do
-    #_
-    (println (str "Instrumenting def init " vsym " in " (ns-name *ns*) 
-                  #_":" 
-                  #_(-> expr :env :line)
-                  #_(when-let [col (-> expr :env :column)]
-                      ":" col)))
+    (println
+      (str "Instrumenting def init " vsym " in " (ns-name *ns*) 
+           #_":" 
+           #_(-> expr :env :line)
+           #_(when-let [col (-> expr :env :column)]
+               ":" col)))
     {:op :invoke
      :children [:fn :args]
      :form `(track-def-init '~vsym ~(:form expr))
@@ -3049,7 +3069,7 @@
 
   Takes in a list of aliases `as` which all have
   identical keysets `kset`. Then we combine all `as` that
-  are non-recursive and have similar tags.
+  have similar tags.
 
   Then we search for subsets of of `kset` in `ksets`, which
   is a map from keysets to sets of aliases with that keyset.
@@ -3153,8 +3173,6 @@
 (defn squash-horizonally
   "Join aliases that refer to exactly
   one HMap with overlapping req keys.
-  If maps are recursively defined, don't
-  merge them.
 
   Don't merge 'tagged' maps with different
   tags.
@@ -3260,6 +3278,7 @@
          env (when-fuel env
                (follow-all env (assoc config :simplify? false)))
          _ (println "end follow-all")
+         _ (debug-output "after follow-all" env config)
         ]
     (println "done populating")
     env)))
