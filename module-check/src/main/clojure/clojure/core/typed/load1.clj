@@ -10,8 +10,6 @@
             [clojure.tools.reader :as reader]
             [clojure.java.io :as io]
             [clojure.core.typed.profiling :as p]
-            [clojure.core.typed.check-form-clj :as chk-frm-clj]
-            [clojure.core.typed.check-form-common :as chk-frm]
             [clojure.core.typed.lang :as lang]
             [clojure.tools.analyzer.jvm :as taj]
             [clojure.core.typed.util-vars :as vs])
@@ -50,14 +48,15 @@
                  opts (if (.endsWith ^String filename "cljc")
                         (assoc opts :read-cond :allow)
                         opts)
-                 config (assoc (chk-frm-clj/config-map)
+                 config (assoc ((impl/v 'clojure.core.typed.check-form-clj/config-map))
                                :env env)]
              (impl/with-full-impl (:impl config)
                (loop []
                  (let [form (p/p :typed-load/read (reader/read opts pbr))]
                    (when-not (identical? form eof)
                      (let [{:keys [ex]} (p/p :typed-load/check-form
-                                             (chk-frm/check-form-info config form))]
+                                             ((impl/v 'clojure.core.typed.check-form-common/check-form-info)
+                                              config form))]
                        (when ex
                          (throw ex)))
                      ;(ana-clj/analyze+eval form (assoc env :ns (ns-name *ns*)) opts)
