@@ -12,29 +12,21 @@
   The corresponding function will be used to load a file according its 
   :lang metadata entry in the `ns` form.
 
-  To add a new implementation, use
-    (swap! lang-dispatch assoc-in [:clojure.core.typed :load] my-load)
+  To add a new implementation, choose a namespace name you want to be a
+  :lang, and define any of the following vars inside that namespace:
+
+    - lang-load: a 2 argument that sustitutes for clojure.core/load
+    - lang-eval: a 1 argument that sustitutes for clojure.core/eval
 
   eg. A file with a `ns` form
         (ns fancy-ns-form
-          {:lang :clojure.core.typed})
-      will use `my-load` to load the file.
-
-     A :lang can also be specified as a vector
-     of options, with the :lang as the first entry.
-        (ns fancy-ns-form
-          {:lang [:clojure.core.typed :gradual]})
+          {:lang :my-new-lang})
+      will use `my-new-lang/lang-load` to load the file.
   "
   (:require [clojure.tools.namespace.file :as ns-file]
             [clojure.core.typed.errors :as err]
             [clojure.core.typed.internal :as internal]
             [clojure.java.io :as io]))
-
-; (Map Kw (HMap :optional {:eval [Any -> Any], 
-;                          :load [Str -> nil]}))
-(def lang-dispatch 
-  "A map from :lang entries to their corresponding `load` and `eval` alternatives."
-  (atom {}))
 
 ;; copied from clojure.core.typed.ns-deps-utils
 (defn ns-form-for-file
@@ -78,14 +70,29 @@
   [form]
   (. clojure.lang.Compiler (eval form)))
 
-;; copied from clojure.core.typed.ns-deps-utils
-(defn impl-from-lang [lang]
-  {:post [(or (keyword? %)
-              (nil? %))]}
-  (cond 
-    (keyword? lang) lang
-    (and (vector? lang)
-         (keyword? (nth lang 0))) (nth lang 0)))
+;; assumes lang has already been resolved and loaded
+(defn lang-load-for-lang [lang]
+  (when (keyword? lang)
+    (some-> (find-ns (symbol (name lang)))
+            (ns-resolve 'lang-load))))
+
+;; assumes lang has already been resolved and loaded
+(defn lang-eval-for-lang [lang]
+  (when (keyword? lang)
+    (some-> (find-ns (symbol (name lang)))
+            (ns-resolve 'lang-eval))))
+
+(def short-hand-langs {:core.typed :clojure.core.typed})
+
+(defn resolve-short-lang [l]
+  (get short-hand-langs l l))
+
+(defn lang-from-ns-meta [m]
+  {:pre [(or (nil? m)
+             (map? m))]}
+  (-> m
+      :lang
+      resolve-short-lang))
 
 ; [Str -> Any]
 (defn file-lang
@@ -94,20 +101,18 @@
   (some-> res 
           ns-form-for-file 
           ns-meta 
-          :lang))
+          lang-from-ns-meta))
 
 ; [Namespace -> Any]
 (defn ns-lang
   "Returns the :lang value in the give Namespace's metadata."
   [ns]
-  (-> (meta ns) :lang))
+  (-> (meta ns) lang-from-ns-meta))
 
 (defn retrieve-and-load-lang [mlang]
-  (let [lang (impl-from-lang mlang)]
+  (let [lang (resolve-short-lang mlang)]
     (when (keyword? lang)
-      (try
-        (require (symbol lang))
-        (catch Exception _))
+      (require (symbol (name lang)))
       lang)))
 
 ; [Str * -> nil]
@@ -131,7 +136,8 @@
                 lang (-> (or (file-lang (str base-resource-path ".clj"))
                              (file-lang (str base-resource-path ".cljc")))
                          retrieve-and-load-lang)
-                disp (get-in @lang-dispatch [lang :load] default-load1)]
+                disp (or (lang-load-for-lang lang)
+                         default-load1)]
             (disp base-resource-path)))))))
 
 (defn extensible-eval
@@ -139,9 +145,9 @@
   [form]
   (let [lang (-> (ns-lang *ns*)
                  retrieve-and-load-lang)
-        disp (get-in @lang-dispatch [lang :eval] default-eval)]
+        disp (or (lang-eval-for-lang lang)
+                 default-eval)]
     (disp form)))
-
 
 ; [-> nil]
 (def monkey-patch-extensible-load

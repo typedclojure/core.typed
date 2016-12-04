@@ -1,9 +1,6 @@
 (ns clojure.core.typed.test.gradual.export
-  {:lang [:clojure.core.typed 
-          :gradual]
-   ;; or use this instead of :lang
-   ;:core.typed {:gradual-exports true}
-   }
+  {:lang :clojure.core.typed
+   :core.typed {:gradual true}}
   (:require [clojure.core.typed :as t]))
 
 (t/ann my-plus [t/Num t/Num :-> t/Num])
@@ -14,8 +11,6 @@
 (defn ^::t/no-contract
   no-contract [x]
   x)
-
-
 
 (my-plus 1 2)
 ;(my-plus 1 nil)
@@ -30,7 +25,7 @@
   (my-plus x 1)
   `nil)
 
-(foo nil 1)
+(foo nil)
 
 
 

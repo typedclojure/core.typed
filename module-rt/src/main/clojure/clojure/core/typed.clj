@@ -109,8 +109,8 @@ for checking namespaces, cf for checking individual forms."}
    ((impl/v 'clojure.core.typed.lang/install) 
     features)))
 
-;; install the :clojure.core.typed language
-(typed-load/install)
+(def lang-load #'typed-load/typed-load1)
+(def lang-eval #'typed-load/typed-eval)
 
 ;=============================================================
 ; Special functions

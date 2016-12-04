@@ -1,6 +1,6 @@
 (ns clojure.core.typed.test.gradual.export-gradual-exports
   {:lang :core.typed
-   :core.typed {:gradual-exports true}
+   :core.typed {:gradual true}
    }
   (:require [clojure.core.typed :as t]))
 

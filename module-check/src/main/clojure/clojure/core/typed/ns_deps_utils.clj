@@ -8,7 +8,8 @@
             [clojure.core.typed.errors :as err]
             [clojure.core.typed.current-impl :as impl]
             [clojure.core.typed.internal :as internal]
-            [clojure.java.io :as io]))
+            [clojure.java.io :as io]
+            [clojure.core.typed.lang :as lang]))
 
 (alter-meta! *ns* assoc :skip-wiki true)
 
@@ -122,17 +123,8 @@
   {:post [(con/boolean? %)]}
   (boolean (-> (ns-meta rcode) :core.typed)))
 
-(defn impl-from-lang [lang]
-  {:post [(or (keyword? %)
-              (nil? %))]}
-  (cond 
-    (keyword? lang) lang
-    (and (vector? lang)
-         (keyword? (nth lang 0))) (nth lang 0)))
-
 (defn is-typed-lang? [lang]
-  (or (= :core.typed lang)
-      (= :clojure.core.typed lang)))
+  (= :clojure.core.typed lang))
 
 (defn legal-lang-form? [lang]
   ((some-fn keyword? vector?)
@@ -143,7 +135,7 @@
   [ns-form]
   {:post [(con/boolean? %)]}
   (let [m (ns-meta ns-form)
-        lang (impl-from-lang (:lang m))]
+        lang (lang/lang-from-ns-meta m)]
     (and (some-> lang is-typed-lang?)
          (not (-> m :core.typed :no-typed-load)))))
 

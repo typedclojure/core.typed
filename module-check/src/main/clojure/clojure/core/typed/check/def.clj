@@ -13,6 +13,9 @@
             [clojure.core.typed.util-vars :as vs]
             [clojure.core.typed.filter-ops :as fo]
             [clojure.core.typed.check-below :as below]
+            [clojure.core.typed.lang :as lang]
+            [clojure.core.typed.load1 :as load1]
+            [clojure.core.typed.debug :as dbg]
             [clojure.core.typed.type-ctors :as c])
   (:import (clojure.lang Var)))
 
@@ -25,19 +28,22 @@
 ;[Expr (Option TCResult) -> Expr]
 (defn check-normal-def
   "Checks a def that isn't a macro definition."
-  [check-fn {:keys [meta init env] :as expr} & [expected]]
-  {:post [(:init %)]}
+  [check-fn {meta-expr :meta :keys [init env] :as expr} & [expected]]
   (let [gradually-typed? (impl/impl-case
+                           ;; FIXME `expr-the-ns` doesn't work for CLJS 
                            :clojure
-                           (let [m (:lang (meta (cu/expr-the-ns expr)))] ;; FIXME `expr-the-ns` doesn't work for CLJS 
+                           (let [ns-meta (meta (cu/expr-the-ns expr))
+                                 m (lang/lang-from-ns-meta ns-meta)]
                              (and
                                ; don't generate contracts for definitions with 
                                ; {:clojure.core.typed/no-contract true}
                                ; metadata
                                (not (-> expr :name meta ::t/no-contract))
-                               (when (vector? m)
-                                 (some #{:gradual} (next m)))))
+                               (-> ns-meta
+                                   :core.typed
+                                   :gradual)))
                            :cljs nil)
+        ;_ (prn "gradually-typed?" gradually-typed?)
         init-provided (init-provided? expr)
         _ (assert init-provided)
         vsym (ast-u/def-var-name expr)
@@ -51,7 +57,7 @@
       gradually-typed?
       ;; define two var definitions: a contracted and uncontracted version
       (let [internal-var (-> (:var expr)
-                             meta
+                             meta-expr
                              :core.typed
                              :uncontracted-var)
             _ (assert ((some-fn var? nil?) internal-var)
@@ -157,10 +163,10 @@
                     (binding [vs/*current-env* (:env init)
                               vs/*current-expr* init]
                       (check-fn init (r/ret t))))
-            cmeta (when meta
-                    (binding [vs/*current-env* (:env meta)
-                              vs/*current-expr* meta]
-                      (check-fn meta)))
+            cmeta (when meta-expr
+                    (binding [vs/*current-env* (:env meta-expr)
+                              vs/*current-expr* meta-expr]
+                      (check-fn meta-expr)))
             _ (when cinit
                 ; now consider this var as checked
                 (var-env/add-checked-var-def vsym))]
@@ -198,14 +204,14 @@
       (let [_ (assert (not t))
             cinit (when init-provided
                     (check-fn init))
-            cmeta (when meta
-                    (binding [vs/*current-env* (:env meta)
-                              vs/*current-expr* meta
+            cmeta (when meta-expr
+                    (binding [vs/*current-env* (:env meta-expr)
+                              vs/*current-expr* meta-expr
                               ;; emit-form does not currently
                               ;; emit :meta nodes in a :def. Don't
                               ;; try and rewrite it, just type check.
                               vs/*can-rewrite* false]
-                      (check-fn meta)))
+                      (check-fn meta-expr)))
             inferred (r/ret-t (u/expr-type cinit))
             _ (assert (r/Type? inferred))
             _ (when cinit
