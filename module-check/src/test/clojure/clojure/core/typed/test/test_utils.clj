@@ -210,6 +210,5 @@
 
 (defmacro with-typed-load [& body]
   `(do
-     (load/install-typed-load)
      (with-redefs [load #'lang/extensible-load]
-     ~@body)))
+       ~@body)))

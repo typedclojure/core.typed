@@ -58,20 +58,6 @@
   (load-if-needed)
   ((impl/v 'clojure.core.typed.load1/monkey-patch-typed-eval)))
 
-(defn install-typed-load
-  "Extend the :lang dispatch table with the :core.typed language"
-  []
-  {:post [(nil? %)]}
-  (require 'clojure.core.typed.lang)
-  (swap! (impl/v 'clojure.core.typed.lang/lang-dispatch)
-         (fn [m]
-           (-> m 
-               (assoc-in [:core.typed :load] #'typed-load1)
-               (assoc-in [:clojure.core.typed :load] #'typed-load1)
-               (assoc-in [:core.typed :eval] #'typed-eval)
-               (assoc-in [:clojure.core.typed :eval] #'typed-eval))))
-  nil)
-
 (defn install 
   "Install the :core.typed :lang. Takes an optional set of features
   to install, defaults to #{:load :eval}.
