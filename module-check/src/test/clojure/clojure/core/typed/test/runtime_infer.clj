@@ -22,6 +22,15 @@
                      :alias-env ~a}})]
      ~@body))
 
+(deftest union-test
+  (is (= (make-Union [(prs Long)
+                      (prs Double)])
+         (prs Number)
+         (make-Union [(prs Long)
+                      (prs Double)
+                      (prs Number)])
+         )))
+
 (deftest join-test
   (is (= (join* (prs String))
          (make-Union [(prs String)])
