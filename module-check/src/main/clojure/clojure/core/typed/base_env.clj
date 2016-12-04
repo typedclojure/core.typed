@@ -1986,6 +1986,8 @@ clojure.lang.Numbers/gte [Number Number -> Boolean]
 clojure.lang.Numbers/isZero [Number -> Boolean
                              :filters {:then (is (Value 0) 0)
                                        :else (!  (Value 0) 0)}]
+clojure.lang.Numbers/isNeg [Number -> Boolean]
+clojure.lang.Numbers/isPos [Number -> Boolean]
 
 clojure.lang.Util/compare [Any Any -> Number]
 
