@@ -44,13 +44,6 @@
   ((impl/v 'clojure.core.typed.load1/typed-eval)
    form))
 
-(defn install-typed-load
-  "Extend the :lang dispatch table with the :core.typed language"
-  []
-  {:post [(nil? %)]}
-  (load-if-needed)
-  ((impl/v 'clojure.core.typed.load1/install-typed-load)))
-
 (defn monkey-patch-typed-load
   "Install the :core.typed :lang, and monkey patch `load`"
   []
@@ -70,8 +63,8 @@
   to install, defaults to #{:load :eval}.
 
   Features:
-    - :load    Installs typed `load` over `clojure.core/load`
-    - :eval    Installs typed `eval` over `clojure.core/eval`
+  - :load    Installs typed `load` over `clojure.core/load`
+  - :eval    Installs typed `eval` over `clojure.core/eval`
 
   eg. (install)            ; installs `load` and `eval`
   eg. (install #{:eval})   ; installs `eval`

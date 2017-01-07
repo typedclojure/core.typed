@@ -34,6 +34,11 @@
     </dependency>
     <dependency>
       <groupId>org.clojure</groupId>
+      <artifactId>tools.namespace</artifactId>
+      <version>0.2.11</version>
+    </dependency>
+    <dependency>
+      <groupId>org.clojure</groupId>
       <artifactId>core.async</artifactId>
       <version>0.2.371</version>
       <optional>true</optional>

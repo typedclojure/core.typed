@@ -18,6 +18,7 @@
          '[clojure.core.typed.check :as chk]
          '[clojure.core.typed.subtype :as sub])
 
+(t/install #{:load}) ;; monkey patch `load`
 
 (defn check-opt [opt]
   #_(assert (empty? (set/difference (set (keys opt))
@@ -209,6 +210,5 @@
 
 (defmacro with-typed-load [& body]
   `(do
-     (load/install-typed-load)
      (with-redefs [load #'lang/extensible-load]
-     ~@body)))
+       ~@body)))

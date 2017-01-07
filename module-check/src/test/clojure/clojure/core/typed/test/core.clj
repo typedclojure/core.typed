@@ -5322,6 +5322,22 @@
                [m :- (OptMap Integer)] :- (t/Option Integer)
                (:z m)))))
 
+(deftest gradual-exports
+  ;; test :core.typed/gradual :lang option
+  (is
+    (thrown? ExceptionInfo
+      (tc-e
+        (tc-ignore
+          (e/my-plus 1 nil))
+        :requires [[clojure.core.typed.test.gradual.export :as e]])))
+  ;; test :gradual-exports option
+  (is
+    (thrown? ExceptionInfo
+      (tc-e
+        (tc-ignore
+          (e/my-plus 1 nil))
+        :requires [[clojure.core.typed.test.gradual.export-gradual-exports :as e]]))))
+
 ;    (is-tc-e 
 ;      (let [f (fn [{:keys [a] :as m} :- '{:a (U nil Num)}] :- '{:a Num} 
 ;                {:pre [(number? a)]} 
