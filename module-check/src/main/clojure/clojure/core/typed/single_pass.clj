@@ -4,20 +4,19 @@
   Entry point `analyze`"
   (:import (java.io LineNumberReader InputStreamReader PushbackReader)
            (clojure.lang RT LineNumberingPushbackReader Var)
+           (clojure.core.typed.compiler C)
            (clojure.core.typed.lang 
                          Compiler$DefExpr Compiler$LocalBinding Compiler$BindingInit Compiler$LetExpr
                          Compiler$LetFnExpr Compiler$StaticMethodExpr Compiler$InstanceMethodExpr Compiler$StaticFieldExpr
                          Compiler$NewExpr Compiler$EmptyExpr Compiler$VectorExpr Compiler$MonitorEnterExpr
                          Compiler$MonitorExitExpr Compiler$ThrowExpr Compiler$InvokeExpr Compiler$TheVarExpr Compiler$VarExpr
-                         Compiler$UnresolvedVarExpr Compiler$ObjExpr Compiler$NewInstanceMethod Compiler$FnMethod Compiler$FnExpr
+                         Compiler$UnresolvedVarExpr Compiler$NewInstanceMethod Compiler$FnMethod Compiler$FnExpr
                          Compiler$NewInstanceExpr Compiler$MetaExpr Compiler$BodyExpr Compiler$ImportExpr Compiler$AssignExpr
-                         Compiler$TryExpr$CatchClause Compiler$TryExpr Compiler$C Compiler$LocalBindingExpr Compiler$RecurExpr
+                         Compiler$TryExpr$CatchClause Compiler$TryExpr Compiler$LocalBindingExpr Compiler$RecurExpr
                          Compiler$MapExpr Compiler$IfExpr Compiler$KeywordInvokeExpr Compiler$InstanceFieldExpr Compiler$InstanceOfExpr
-                         Compiler$CaseExpr Compiler$Expr Compiler$SetExpr Compiler$MethodParamExpr 
+                         Compiler$CaseExpr Compiler$SetExpr Compiler$MethodParamExpr 
                          Compiler$LiteralExpr Compiler$ConstantExpr Compiler$KeywordExpr 
-                         Compiler$ObjMethod Compiler$Expr Compiler$NumberExpr
-                         Compiler$NilExpr Compiler$StringExpr
-                         Compiler$BooleanExpr))
+                         Compiler$NumberExpr Compiler$NilExpr Compiler$StringExpr Compiler$BooleanExpr))
   (:require [clojure.reflect :as reflect]
             [clojure.java.io :as io]
             [clojure.pprint :as pp]
@@ -1179,18 +1178,6 @@
         (when (:java-obj opt)
           {:Expr-obj expr}))))
 
-  ;; ObjExprs
-  Compiler$ObjExpr
-  (analysis->map
-    [expr env opt]
-    (assert nil "ObjExprs")
-    (merge
-      {:op :obj-expr
-       :env env
-       :tag (.tag expr)}
-      (when (:java-obj opt)
-        {:Expr-obj expr})))
-
   ;; FnExpr (extends ObjExpr)
   ; {:op   :method
   ;  :doc  "Node for a method in a deftype* or reify* special-form expression"
@@ -1325,8 +1312,8 @@
   Compiler$FnExpr
   (analysis->map
     [expr env opt]
-    (let [once (field-accessor Compiler$ObjExpr 'onceOnly expr)
-          src (field-accessor Compiler$ObjExpr 'src expr)
+    (let [once (.onceOnly expr)
+          src (.src expr)
           ;_ (prn "FnExpr src" src)
           fn-method-forms
           (into {}
@@ -1828,12 +1815,12 @@
           {:Expr-obj expr})))))
 
 (defmulti keyword->Context identity)
-(defmethod keyword->Context :ctx/statement [_] Compiler$C/STATEMENT)
-(defmethod keyword->Context :ctx/expr      [_] #_Compiler$C/EXPRESSION
+(defmethod keyword->Context :ctx/statement [_] C/STATEMENT)
+(defmethod keyword->Context :ctx/expr      [_] #_C/EXPRESSION
   ;; EXPRESSION doesn't work too well, eg. (analyze-form '(let []))
-  Compiler$C/EVAL)
-(defmethod keyword->Context :ctx/return    [_] Compiler$C/RETURN)
-;; :eval Compiler$C/EVAL
+  C/EVAL)
+(defmethod keyword->Context :ctx/return    [_] C/RETURN)
+;; :eval C/EVAL
 
 ;; requires clojure 1.7
 (defn ^:private analyzer-bindings-one [env]
@@ -1858,7 +1845,7 @@
   "Must be called after binding the appropriate Compiler and RT dynamic Vars."
   ([env form] (analyze* env form {}))
   ([env form opts]
-   (let [context Compiler$C/EVAL #_ (keyword->Context (:context env))
+   (let [context C/EVAL #_ (keyword->Context (:context env))
          env (merge env
                     (when-let [file (and (not= *file* "NO_SOURCE_FILE")
                                          *file*)]
@@ -2057,7 +2044,7 @@
         child-expr))
     clojure.pprint/pprint)
 
-  (def in (Compiler/analyze Compiler$C/STATEMENT '(seq 1)))
+  (def in (Compiler/analyze C/STATEMENT '(seq 1)))
   (class in)
   (def method (doto (.getMethod (class in) "eval" (into-array Class []))
                 (.setAccessible true)))
