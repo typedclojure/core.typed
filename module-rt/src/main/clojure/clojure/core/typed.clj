@@ -1236,7 +1236,7 @@ for checking namespaces, cf for checking individual forms."}
   there is a circular dependency."
   [t]
   `(let [t# ~t
-         app-outer-context# (bound-fn* (fn [f# t#] (f# t#)))]
+         app-outer-context# (bound-fn [f# t#] (f# t#))]
      (delay
        (require '~'clojure.core.typed.parse-ast)
        (let [parse-clj# (impl/v '~'clojure.core.typed.parse-ast/parse-clj)]
@@ -1245,7 +1245,7 @@ for checking namespaces, cf for checking individual forms."}
 (defmacro ^:private delay-tc-parse 
   [t]
   `(let [t# ~t
-         app-outer-context# (bound-fn* (fn [f#] (f#)))]
+         app-outer-context# (bound-fn [f#] (f#))]
      (delay
        (require '~'clojure.core.typed.parse-unparse)
        (let [parse-clj# (impl/v '~'clojure.core.typed.parse-unparse/parse-clj)
@@ -1266,9 +1266,12 @@ for checking namespaces, cf for checking individual forms."}
 
 (defn ^:skip-wiki add-tc-type-name [form qsym t]
   (impl/with-impl impl/clojure
-    (let [t (delay
-              (let [t (with-current-location form
-                        @(delay-tc-parse t))
+    (let [;; preserve *ns*
+          bfn (bound-fn [f] (f))
+          t (delay
+              (let [t (bfn
+                        #(with-current-location form
+                           @(delay-tc-parse t)))
                     _ (require 'clojure.core.typed.subtype
                                'clojure.core.typed.declared-kind-env)
                     declared-kind-or-nil (impl/v 'clojure.core.typed.declared-kind-env/declared-kind-or-nil)
