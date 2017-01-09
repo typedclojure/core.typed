@@ -4,6 +4,46 @@
             [clojure.set :as set]
             [clojure.core.typed.env :as env]))
 
+(def current-var-annotations-kw ::current-var-annotations)
+(def current-nocheck-var?-kw ::current-nocheck-var?)
+(def current-used-vars-kw ::current-used-vars)
+(def current-checked-var-defs-kw ::current-checked-var-defs)
+(def cljs-jsvar-annotations-kw ::cljs-jsvar-annotations)
+(def untyped-var-annotations-kw ::untyped-var-annotations)
+(def current-name-env-kw ::current-name-env)
+
+(defn add-tc-var-type [sym type]
+  (env/swap-checker! assoc-in [current-var-annotations-kw sym] type)
+  nil)
+
+(defn add-tc-alias [sym type]
+  (env/swap-checker! assoc-in [current-var-annotations-kw sym] type)
+  nil)
+
+(defn add-nocheck-var [sym]
+  (env/swap-checker! update current-nocheck-var?-kw (fnil conj #{}) sym)
+  nil)
+
+(defn remove-nocheck-var [sym]
+  (env/swap-checker! update current-nocheck-var?-kw (fnil disj #{}) sym)
+  nil)
+
+(defn var-no-checks []
+  {:post [(set? %)]}
+  (get (env/deref-checker) current-nocheck-var?-kw #{}))
+
+(defn check-var? [sym]
+  (not (contains? (var-no-checks) sym)))
+
+(defn add-tc-type-name [sym ty]
+  (env/swap-checker! assoc-in
+                     [current-name-env-kw sym]
+                     ty
+                     #_(if (r/Type? ty)
+                       (vary-meta ty assoc :from-name sym)
+                       ty))
+  nil)
+
 (defmacro create-env
   "For name n, creates defs for {n}, {n}-kw, add-{n},
   and reset-{n}!"
@@ -27,6 +67,7 @@
            nil)
          nil)))
 
+;; runtime environments
 (create-env var-env)
 (create-env alias-env)
 (create-env protocol-env)
@@ -518,12 +559,3 @@ Multi
 (assert (even? (count init-aliases)))
 (assert (apply distinct? (map first (partition 2 init-aliases))))
 
-(def current-var-annotations-kw ::current-var-annotations)
-(def current-nocheck-var?-kw ::current-nocheck-var?)
-(def current-used-vars-kw ::current-used-vars)
-(def current-checked-var-defs-kw ::current-checked-var-defs)
-(def cljs-jsvar-annotations-kw ::cljs-jsvar-annotations)
-(def untyped-var-annotations-kw ::untyped-var-annotations)
-
-(defn add-tc-var-type [sym type]
-  (env/swap-checker! assoc-in [current-var-annotations-kw sym] type))

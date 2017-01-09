@@ -32,9 +32,7 @@
   {:post [(map? %)]}
   (get (env/deref-checker) impl/current-var-annotations-kw {}))
 
-(defn var-no-checks []
-  {:post [(set? %)]}
-  (get (env/deref-checker) impl/current-nocheck-var?-kw #{}))
+(def var-no-checks impl/var-no-checks)
 
 (defn used-vars []
   {:post [(set? %)]}
@@ -69,8 +67,7 @@
   (env/swap-checker! assoc-in [impl/untyped-var-annotations-kw nsym sym] t)
   nil)
 
-(defn check-var? [sym]
-  (not (contains? (var-no-checks) sym)))
+(def check-var? impl/check-var?)
 
 (defn checked-var-def? [sym]
   (contains? (checked-vars) sym))
@@ -78,13 +75,8 @@
 (defn used-var? [sym]
   (contains? (used-vars) sym))
 
-(defn add-nocheck-var [sym]
-  (env/swap-checker! update impl/current-nocheck-var?-kw (fnil conj #{}) sym)
-  nil)
-
-(defn remove-nocheck-var [sym]
-  (env/swap-checker! update impl/current-nocheck-var?-kw (fnil disj #{}) sym)
-  nil)
+(def add-nocheck-var impl/add-nocheck-var)
+(def remove-nocheck-var impl/remove-nocheck-var)
 
 (defn add-used-var [sym]
   (env/swap-checker! update impl/current-used-vars-kw (fnil conj #{}) sym)

@@ -1787,6 +1787,15 @@ for checking namespaces, cf for checking individual forms."}
                   "Cannot provide both :nocheck and :no-check metadata to ann")
         check? (not (or (:no-check opts)
                         (:nocheck opts)))
+        _ (impl/with-impl impl/clojure
+            (when (and (contains? (impl/var-env) qsym)
+                       (not (impl/check-var? qsym))
+                       check?)
+              (err/warn (str "Removing :no-check from var " qsym))
+              (impl/remove-nocheck-var qsym)))
+        _ (impl/with-impl impl/clojure
+            (when-not check?
+              (impl/add-nocheck-var qsym)))
         ast (with-current-location &form
               (delay-rt-parse typesyn))
         tc-type (with-current-location &form
