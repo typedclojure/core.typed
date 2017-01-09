@@ -317,6 +317,7 @@
     (param-nil/add-method-nilable-param msym mmap)
     nil))
 
+#_
 (add-invoke-special-collect-method 'clojure.core.typed/override-method*
   [{:keys [args env] :as expr}]
   (clt-u/assert-expr-args expr #{2})

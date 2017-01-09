@@ -10,29 +10,15 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Method Override Env
 
-(def method-override-env-kw ::method-override-env)
-
-(defonce METHOD-OVERRIDE-ENV 
-  (atom {}
-        :validator (con/hash-c? (every-pred namespace symbol?)
-                                (some-fn r/Poly? r/FnIntersection?))))
-
-(defn add-method-override [sym t]
-  {:pre [((every-pred symbol? namespace) sym)
-         ;; checked at `get-method-override`
-         #_
-         ((some-fn delay? r/Poly? r/FnIntersection?)
-          t)]}
-  (env/swap-checker! assoc-in [method-override-env-kw sym] t)
-  nil)
+(def add-method-override impl/add-method-override)
 
 (defn reset-method-override-env! [m]
-  (env/swap-checker! assoc method-override-env-kw m)
+  (env/swap-checker! assoc impl/method-override-env-kw m)
   nil)
 
 (defn method-override-env []
   {:post [(map? %)]}
-  (get (env/deref-checker) method-override-env-kw {}))
+  (get (env/deref-checker) impl/method-override-env-kw {}))
 
 (defn get-method-override [m]
   {:post [((some-fn r/Poly? r/FnIntersection? nil?) %)]}

@@ -1242,7 +1242,7 @@ for checking namespaces, cf for checking individual forms."}
        (let [parse-clj# (impl/v '~'clojure.core.typed.parse-ast/parse-clj)]
          (app-outer-context# parse-clj# t#)))))
 
-(defmacro ^:private delay-tc-parse 
+(defmacro ^:private delay-tc-parse
   [t]
   `(let [t# ~t
          app-outer-context# (bound-fn [f#] (f#))]
@@ -2187,6 +2187,12 @@ for checking namespaces, cf for checking individual forms."}
   This overrides the return type of method stringPropertyNames
   of class java.util.Properties to be (java.util.Set String)."
   [methodsym typesyn]
+  (assert ((every-pred symbol? namespace) methodsym) "Method symbol must be a qualified symbol")
+  (impl/with-clojure-impl
+    (impl/add-method-override 
+      methodsym
+      (with-current-location &form
+        (delay-tc-parse typesyn))))
   `(override-method* '~methodsym '~typesyn))
 
 (defn ^:skip-wiki

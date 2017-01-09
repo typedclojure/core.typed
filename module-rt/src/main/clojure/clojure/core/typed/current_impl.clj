@@ -14,6 +14,8 @@
 (def current-name-env-kw ::current-name-env)
 (def method-return-nonnilable-env-kw ::method-return-nonnilable-env)
 (def method-param-nilable-env-kw ::method-param-nilable-env)
+(def method-override-env-kw ::method-override-env)
+
 
 (defn add-tc-var-type [sym type]
   (env/swap-checker! assoc-in [current-var-annotations-kw sym] type)
@@ -82,6 +84,16 @@
           a)]}
   (env/swap-checker! assoc-in [method-param-nilable-env-kw sym] a)
   nil)
+
+(defn add-method-override [sym t]
+  {:pre [((every-pred symbol? namespace) sym)
+         ;; checked at `get-method-override`
+         #_
+         ((some-fn delay? r/Poly? r/FnIntersection?)
+          t)]}
+  (env/swap-checker! assoc-in [method-override-env-kw sym] t)
+  nil)
+
 
 (defmacro create-env
   "For name n, creates defs for {n}, {n}-kw, add-{n},
