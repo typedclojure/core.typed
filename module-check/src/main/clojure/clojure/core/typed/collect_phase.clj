@@ -31,6 +31,7 @@
             [clojure.core.typed.datatype-env :as dt-env]
             [clojure.core.typed.protocol-env :as ptl-env]
             [clojure.core.typed.var-env :as var-env]
+            [clojure.core.typed.ctor-override-env :as ctor-override]
             [clojure.core.typed.method-override-env :as override]
             [clojure.core.typed.method-return-nilables :as ret-nil]
             [clojure.core.typed.method-param-nilables :as param-nil]
@@ -338,7 +339,7 @@
         ty (binding [vs/*current-env* env
                      prs/*parse-type-in-ns* prs-ns]
              (prs/parse-type tsyn))]
-    (override/add-method-override msym ty)
+    (ctor-override/add-constructor-override msym ty)
     nil))
 
 
