@@ -13,6 +13,7 @@
 (def untyped-var-annotations-kw ::untyped-var-annotations)
 (def current-name-env-kw ::current-name-env)
 (def method-return-nonnilable-env-kw ::method-return-nonnilable-env)
+(def method-param-nilable-env-kw ::method-param-nilable-env)
 
 (defn add-tc-var-type [sym type]
   (env/swap-checker! assoc-in [current-var-annotations-kw sym] type)
@@ -72,6 +73,14 @@
                    (con/set-c? con/znat?))
           m)]}
   (env/swap-checker! assoc-in [method-return-nonnilable-env-kw sym] m)
+  nil)
+
+(defn add-method-nilable-param [sym a]
+  {:pre [((every-pred namespace symbol?) sym)
+         ((con/hash-c? (some-fn #{:all} con/znat?)
+                       (some-fn #{:all} (con/set-c? con/znat?)))
+          a)]}
+  (env/swap-checker! assoc-in [method-param-nilable-env-kw sym] a)
   nil)
 
 (defmacro create-env

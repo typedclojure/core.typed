@@ -309,6 +309,7 @@
     (ret-nil/add-nonnilable-method-return msym arities)
     nil))
 
+#_
 (add-invoke-special-collect-method 'clojure.core.typed/nilable-param*
   [{:keys [args env] :as expr}]
   (clt-u/assert-expr-args expr #{2})

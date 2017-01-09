@@ -1747,6 +1747,8 @@ for checking namespaces, cf for checking individual forms."}
   positions (integers). If the map contains the key :all then this overrides
   other entries. The key can also be :all, which declares all parameters nilable."
   [msym mmap]
+  (impl/with-clojure-impl
+    (impl/add-method-nilable-param msym mmap))
   `(nilable-param* '~msym '~mmap))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;

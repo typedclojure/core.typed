@@ -1,28 +1,21 @@
 (ns clojure.core.typed.method-param-nilables
   (:require [clojure.core.typed.contract-utils :as con]
             [clojure.core.typed.env :as env]
+            [clojure.core.typed.current-impl :as impl]
             [clojure.core.typed.type-rep :as r]))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Method Param nilables
 
-(def method-param-nilable-env-kw ::method-param-nilable-env)
-
 (defn reset-method-nilable-param-env! [m]
-  (env/swap-checker! assoc method-param-nilable-env-kw m)
+  (env/swap-checker! assoc impl/method-param-nilable-env-kw m)
   nil)
 
-(defn add-method-nilable-param [sym a]
-  {:pre [((every-pred namespace symbol?) sym)
-         ((con/hash-c? (some-fn #{:all} con/znat?)
-                       (some-fn #{:all} (con/set-c? con/znat?)))
-          a)]}
-  (env/swap-checker! assoc-in [method-param-nilable-env-kw sym] a)
-  nil)
+(def add-method-nilable-param impl/add-method-nilable-param)
 
 (defn nilable-param-env []
   {:post [(map? %)]}
-  (get (env/deref-checker) method-param-nilable-env-kw {}))
+  (get (env/deref-checker) impl/method-param-nilable-env-kw {}))
 
 (defn nilable-param? [sym arity param]
   (boolean 
