@@ -1272,7 +1272,7 @@ for checking namespaces, cf for checking individual forms."}
                     _ (require 'clojure.core.typed.subtype
                                'clojure.core.typed.declared-kind-env)
                     declared-kind-or-nil (impl/v 'clojure.core.typed.declared-kind-env/declared-kind-or-nil)
-                    unparse-type (impl/v 'clojure.core.typed.parse-unparse/unparse-clj)
+                    unparse-type (impl/v 'clojure.core.typed.parse-unparse/unparse-type)
                     subtype? (impl/v 'clojure.core.typed.subtype/subtype?)
                     _ (impl/with-impl impl/clojure
                         (when-let [tfn (declared-kind-or-nil qsym)]
