@@ -10,7 +10,7 @@
 (def add-nonnilable-method-return impl/add-nonnilable-method-return)
 
 (defn reset-nonnilable-method-return-env! [m]
-  (reset! METHOD-RETURN-NONNILABLE-ENV m)
+  (env/swap-checker! assoc impl/add-nonnilable-method-return m)
   nil)
 
 (defn nonnilable-method-return-env [sym m]
