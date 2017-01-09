@@ -9,7 +9,7 @@
 (def method-param-nilable-env-kw ::method-param-nilable-env)
 
 (defn reset-method-nilable-param-env! [m]
-  (reset! METHOD-PARAM-NILABLE-ENV m)
+  (env/swap-checker! assoc method-param-nilable-env-kw m)
   nil)
 
 (defn add-method-nilable-param [sym a]
