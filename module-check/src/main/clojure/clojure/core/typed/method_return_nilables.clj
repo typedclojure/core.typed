@@ -13,7 +13,7 @@
   (env/swap-checker! assoc impl/add-nonnilable-method-return m)
   nil)
 
-(defn nonnilable-method-return-env [sym m]
+(defn nonnilable-method-return-env []
   {:post [(map? %)]}
   (get (env/deref-checker) impl/method-return-nonnilable-env-kw {}))
 
