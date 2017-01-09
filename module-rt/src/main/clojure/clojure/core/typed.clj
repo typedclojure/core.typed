@@ -1776,7 +1776,8 @@ for checking namespaces, cf for checking individual forms."}
         qsym (var->symbol var)
         expected-type (with-current-location &form
                         (delay-tc-parse typesyn))
-        _ (impl/add-untyped-var prs-ns qsym expected-type)]
+        _ (impl/with-clojure-impl
+            (impl/add-untyped-var prs-ns qsym expected-type))]
     `(untyped-var* '~qsym '~typesyn)))
 
 (defn ^:skip-wiki
