@@ -15,7 +15,7 @@
 (def method-return-nonnilable-env-kw ::method-return-nonnilable-env)
 (def method-param-nilable-env-kw ::method-param-nilable-env)
 (def method-override-env-kw ::method-override-env)
-
+(def constructor-override-env-kw ::constructor-override-env)
 
 (defn add-tc-var-type [sym type]
   (env/swap-checker! assoc-in [current-var-annotations-kw sym] type)
@@ -94,6 +94,12 @@
   (env/swap-checker! assoc-in [method-override-env-kw sym] t)
   nil)
 
+(defn add-constructor-override [sym t]
+  {:pre [(symbol? sym)
+         ;; checked at `get-constructor-override`
+         #_((some-fn delay? r/Type?) t)]}
+  (env/swap-checker! assoc-in [constructor-override-env-kw sym] t)
+  nil)
 
 (defmacro create-env
   "For name n, creates defs for {n}, {n}-kw, add-{n},

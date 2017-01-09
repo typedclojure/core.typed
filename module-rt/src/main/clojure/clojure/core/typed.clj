@@ -2159,6 +2159,11 @@ for checking namespaces, cf for checking individual forms."}
 (defmacro override-constructor 
   "Override all constructors for Class ctorsym with type."
   [ctorsym typesyn]
+  (impl/with-clojure-impl
+    (impl/add-constructor-override 
+      ctorsym
+      (with-current-location &form
+        (delay-tc-parse typesyn))))
   `(override-constructor* '~ctorsym '~typesyn))
 
 (defn ^:skip-wiki

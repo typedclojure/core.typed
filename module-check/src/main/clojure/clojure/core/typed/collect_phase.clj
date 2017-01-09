@@ -331,6 +331,7 @@
     (override/add-method-override msym ty)
     nil))
 
+#_
 (add-invoke-special-collect-method 'clojure.core.typed/override-constructor*
   [{:keys [args env] :as expr}]
   (clt-u/assert-expr-args expr #{2})
