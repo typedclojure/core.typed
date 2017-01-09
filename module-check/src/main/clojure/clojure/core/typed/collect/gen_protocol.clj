@@ -77,10 +77,10 @@
         t (c/Protocol* (map :name fs) (map :variance parsed-binder) 
                        fs s on-class ms (map :bnd parsed-binder))]
     ;(prn "Adding protocol" s t)
-    (ptl-env/add-protocol s t)
+    (ptl-env/add-protocol s (delay t))
     ; annotate protocol var as Any
     (var-env/add-nocheck-var s)
-    (var-env/add-var-type s r/-any)
+    (var-env/add-var-type s (delay r/-any))
     (doseq [[kuq mt] ms]
       (assert (not (namespace kuq))
               "Protocol method names should be unqualified")
@@ -88,6 +88,6 @@
       (let [kq (symbol protocol-defined-in-nstr (name kuq))
             mt-ann (clt-u/protocol-method-var-ann mt (map :name fs) bnds)]
         (var-env/add-nocheck-var kq)
-        (var-env/add-var-type kq mt-ann)))
+        (var-env/add-var-type kq (delay mt-ann))))
     ;(prn "end gen-protocol" s)
     nil))

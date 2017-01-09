@@ -22,25 +22,25 @@
 (def current-protocol-env-kw ::current-protocol-env)
 
 (t/ann protocol-env? [t/Any -> t/Any])
-(def protocol-env? (con/hash-c? #(when (symbol? %)
-                                   (namespace %)) 
-                                (some-fn r/Protocol? r/TypeFn?)))
+(def protocol-env? (con/hash-c? (every-pred symbol? namespace)
+                                (some-fn delay? r/Protocol? r/TypeFn?)))
 
 (t/ann ^:no-check protocol-env [-> ProtocolEnv])
 (defn protocol-env []
-  {:post [(protocol-env? %)]}
+  {:post [(map? %)
+          #_(protocol-env? %)]}
   (get (env/deref-checker) current-protocol-env-kw {}))
 
 (t/ann ^:no-check reset-protocol-env! [ProtocolEnv -> nil])
 (defn reset-protocol-env! [e]
-  {:pre [(protocol-env? e)]}
+  {:pre [#_(protocol-env? e)]}
   (env/swap-checker! assoc current-protocol-env-kw e)
   nil)
 
 (t/ann ^:no-check add-protocol [t/Sym r/Type -> nil])
 (defn add-protocol [sym t]
   {:pre [(symbol? sym)
-         (r/Type? t)]}
+         ((some-fn delay? r/Type?) t)]}
   (env/swap-checker! assoc-in [current-protocol-env-kw sym] t)
   nil)
 
@@ -51,7 +51,7 @@
   [sym]
   {:pre [(symbol? sym)]
    :post [((some-fn nil? r/Type?) %)]}
-  (get (protocol-env) sym))
+  (force (get (protocol-env) sym)))
 
 (t/ann resolve-protocol [t/Sym -> r/Type])
 (defn resolve-protocol [sym]
