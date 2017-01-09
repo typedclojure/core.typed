@@ -1240,7 +1240,7 @@ for checking namespaces, cf for checking individual forms."}
 (defmacro ^:private delay-tc-parse 
   [t]
   `(let [t# ~t
-         app-outer-context# (bound-fn* (fn [f# nsym# t#] (f# nsym# t#)))]
+         app-outer-context# (bound-fn* (fn [f# t#] (f# t#)))]
      (delay
        (require '~'clojure.core.typed.parse-unparse)
        (let [parse-clj# (impl/v '~'clojure.core.typed.parse-unparse/parse-clj)
