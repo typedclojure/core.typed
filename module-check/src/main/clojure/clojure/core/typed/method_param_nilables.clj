@@ -6,8 +6,6 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Method Param nilables
 
-(def method-param-nilable-env-kw ::method-param-nilable-env)
-
 (defn reset-method-nilable-param-env! [m]
   (reset! METHOD-PARAM-NILABLE-ENV m)
   nil)
@@ -20,11 +18,14 @@
   (env/swap-checker! assoc-in [method-param-nilable-env-kw sym] a)
   nil)
 
+(defn nilable-param-env []
+  {:post [(map? %)]}
+  (get (env/deref-checker) method-param-nilable-env-kw {}))
+
 (defn nilable-param? [sym arity param]
   (boolean 
-    (when-let [nilables (@METHOD-PARAM-NILABLE-ENV sym)]
+    (when-let [nilables (get (nilable-param-env) sym)]
       (when-let [params (or (nilables :all)
                             (nilables arity))]
         (or (#{:all} params)
             (params param))))))
-
