@@ -2,7 +2,8 @@
 (ns clojure.core.typed.current-impl
   (:require [clojure.core.typed.profiling :as p]
             [clojure.set :as set]
-            [clojure.core.typed.env :as env]))
+            [clojure.core.typed.env :as env]
+            [clojure.core.typed.contract-utils :as con]))
 
 (def current-var-annotations-kw ::current-var-annotations)
 (def current-nocheck-var?-kw ::current-nocheck-var?)
@@ -11,6 +12,7 @@
 (def cljs-jsvar-annotations-kw ::cljs-jsvar-annotations)
 (def untyped-var-annotations-kw ::untyped-var-annotations)
 (def current-name-env-kw ::current-name-env)
+(def method-return-nonnilable-env-kw ::method-return-nonnilable-env)
 
 (defn add-tc-var-type [sym type]
   (env/swap-checker! assoc-in [current-var-annotations-kw sym] type)
@@ -62,6 +64,14 @@
                (delay? t))]
    :post [(nil? %)]}
   (env/swap-checker! assoc-in [untyped-var-annotations-kw nsym sym] t)
+  nil)
+
+(defn add-nonnilable-method-return [sym m]
+  {:pre [((every-pred namespace symbol?) sym)
+         ((some-fn #(= :all %)
+                   (con/set-c? con/znat?))
+          m)]}
+  (env/swap-checker! assoc-in [method-return-nonnilable-env-kw sym] m)
   nil)
 
 (defmacro create-env

@@ -301,6 +301,7 @@
                             " does not match actual kind " (prs/unparse-type alias-type)))))
     nil))
 
+#_
 (add-invoke-special-collect-method 'clojure.core.typed/non-nil-return*
   [{:keys [args env] :as expr}]
   (clt-u/assert-expr-args expr #{2})

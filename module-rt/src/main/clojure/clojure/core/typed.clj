@@ -1728,6 +1728,8 @@ for checking namespaces, cf for checking individual forms."}
   eg. ; must use full class name
       (non-nil-return java.lang.Class/getDeclaredMethod :all)"
   [msym arities]
+  (impl/with-clojure-impl
+    (impl/add-nonnilable-method-return msym arities))
   `(non-nil-return* '~msym '~arities))
 
 (defn ^:skip-wiki
