@@ -1,18 +1,27 @@
 (ns clojure.core.typed.ctor-override-env
   (:require [clojure.core.typed.contract-utils :as con]
+            [clojure.core.typed.env :as env]
             [clojure.core.typed.type-rep :as r]))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Constructor Override Env
 
-(defonce CONSTRUCTOR-OVERRIDE-ENV 
-  (atom {}
-        :validator (con/hash-c? symbol? r/Type?)))
+(def constructor-override-env-kw ::constructor-override-env)
 
 (defn add-constructor-override [sym t]
-  (swap! CONSTRUCTOR-OVERRIDE-ENV assoc sym t)
+  {:pre [(symbol? sym)
+         ((some-fn delay? r/Type?) t)]}
+  (env/swap-checker! assoc-in [constructor-override-env-kw sym] t)
   nil)
 
 (defn reset-constructor-override-env! [m]
-  (reset! CONSTRUCTOR-OVERRIDE-ENV m)
+  (env/swap-checker! assoc constructor-override-env-kw m)
   nil)
+
+(defn constructor-override-env []
+  {:post [(map? %)]}
+  (get (env/deref-checker) constructor-override-env-kw {}))
+
+(defn get-constructor-override [sym]
+  {:post [((some-fn delay? r/Type?) %)]}
+  (force (get (constructor-override-env) sym)))

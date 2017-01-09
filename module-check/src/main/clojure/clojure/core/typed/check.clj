@@ -1793,7 +1793,7 @@
                           (let [clssym (-> expr
                                            ast-u/new-op-class 
                                            coerce/Class->symbol)]
-                            (or (@ctor-override/CONSTRUCTOR-OVERRIDE-ENV clssym)
+                            (or (ctor-override/get-constructor-override clssym)
                                 (and (dt-env/get-datatype clssym)
                                      (cu/DataType-ctor-type clssym))
                                 (when-let [ctor (cu/NewExpr->Ctor expr)]
