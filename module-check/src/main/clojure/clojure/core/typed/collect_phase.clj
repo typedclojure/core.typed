@@ -229,6 +229,7 @@
 ;    (decl/declare-alias-kind* qsym ty)
 ;    nil))
 
+#_
 (add-invoke-special-collect-method 'clojure.core.typed/declare-names*
   [{:keys [args] :as expr}]
   (clt-u/assert-expr-args expr #{1})

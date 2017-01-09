@@ -1206,6 +1206,11 @@ for checking namespaces, cf for checking individual forms."}
 (defmacro declare-names 
   "Declare names, similar to declare but on the type level."
   [& syms]
+  (assert (every? (every-pred symbol? (complement namespace)) syms)
+          "declare-names only accepts unqualified symbols")
+  (let [nsym (ns-name *ns*)]
+    (doseq [sym syms]
+      (impl/declare-name* (symbol (str nsym) (str sym)))))
   `(declare-names* '~syms))
 
 (defn ^:skip-wiki

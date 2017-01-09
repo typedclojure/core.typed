@@ -44,6 +44,14 @@
                        ty))
   nil)
 
+(def declared-name-type ::declared-name)
+
+(defn declare-name* [sym]
+  {:pre [(symbol? sym)
+         (namespace sym)]}
+  (add-tc-type-name sym declared-name-type)
+  nil)
+
 (defmacro create-env
   "For name n, creates defs for {n}, {n}-kw, add-{n},
   and reset-{n}!"
