@@ -1251,12 +1251,32 @@ for checking namespaces, cf for checking individual forms."}
                (ns-name *ns*)
                #(parse-clj# t#))))))))
 
-(defn ^:skip-wiki add-to-alias-env [form qsym t]
+(defn ^:skip-wiki add-to-rt-alias-env [form qsym t]
   (impl/with-impl impl/clojure
     (impl/add-alias-env
       qsym
       (with-current-location form
         (delay-rt-parse t))))
+  nil)
+
+(defn ^:skip-wiki add-tc-type-name [form qsym t]
+  (impl/with-impl impl/clojure
+    (let [t (delay
+              (let [t (with-current-location form
+                        @(delay-tc-parse t))
+                    _ (require 'clojure.core.typed.subtype
+                               'clojure.core.typed.declared-kind-env)
+                    declared-kind-or-nil (impl/v 'clojure.core.typed.declared-kind-env/declared-kind-or-nil)
+                    unparse-type (impl/v 'clojure.core.typed.parse-unparse/unparse-clj)
+                    subtype? (impl/v 'clojure.core.typed.subtype/subtype?)
+                    _ (impl/with-impl impl/clojure
+                        (when-let [tfn (declared-kind-or-nil qsym)]
+                          (when-not (subtype? t tfn)
+                            (err/int-error (str "Declared kind " (unparse-type tfn)
+                                                " does not match actual kind " (unparse-type t))))))
+                    ]
+                t))]
+      (impl/add-tc-type-name qsym t)))
   nil)
 
 (defmacro
@@ -1317,16 +1337,7 @@ for checking namespaces, cf for checking individual forms."}
      &form
      'def-alias
      'defalias)
-   (let [qsym (if (namespace sym)
-                sym
-                (symbol (-> *ns* ns-name str) (str sym)))
-         m (-> (meta sym)
-             (update-in [:doc] #(str #_"Type Alias\n\n" % "\n\n" (with-out-str (pprint/pprint t)))))]
-     `(do
-        (tc-ignore (add-to-alias-env '~&form '~qsym '~t))
-        (let [v# (intern '~(symbol (namespace qsym)) '~(symbol (name qsym)))]
-          (tc-ignore (alter-meta! v# merge '~m)))
-        (def-alias* '~qsym '~t)))))
+   `(defalias ~sym ~t)))
 
 (defmacro defalias 
   "Define a recursive type alias. Takes an optional doc-string as a second
@@ -1352,9 +1363,10 @@ for checking namespaces, cf for checking individual forms."}
                       update-in [:doc] #(str #_"Type Alias\n\n" % "\n\n" (with-out-str (pprint/pprint t))))
          qsym (-> (symbol (-> *ns* ns-name str) (str sym))
                   (with-meta (meta m)))]
+     (add-to-rt-alias-env &form qsym t)
+     (add-tc-type-name &form qsym t)
      `(do
         (declare ~sym)
-        (tc-ignore (add-to-alias-env '~&form '~qsym '~t))
         (def-alias* '~qsym '~t)))))
 
 #_(defmacro tag

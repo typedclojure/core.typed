@@ -13,10 +13,6 @@
             [clojure.core.typed :as t]
             [clojure.core.typed.env :as env]))
 
-(t/tc-ignore
-(alter-meta! *ns* assoc :skip-wiki true)
-  )
-
 (t/defalias NameEnv
   "Environment mapping names to types. Keyword values are special."
   (t/Map t/Sym (t/U t/Kw r/Type)))
@@ -47,21 +43,19 @@
                                         symbol?)
                             (some-fn r/Type? #(isa? % temp-binding))))
 
-(def current-name-env-kw ::current-name-env)
-
 (t/ann ^:no-check name-env [-> NameEnv])
 (defn name-env []
-  (get (env/deref-checker) current-name-env-kw {}))
+  (get (env/deref-checker) impl/current-name-env-kw {}))
 
 (t/ann ^:no-check update-name-env! [NameEnv -> nil])
 (defn update-name-env! [nme-env]
-  (env/swap-checker! update current-name-env-kw
+  (env/swap-checker! update impl/current-name-env-kw
                      (fnil merge {}) nme-env)
   nil)
 
 (t/ann ^:no-check reset-name-env! [NameEnv -> nil])
 (defn reset-name-env! [nme-env]
-  (env/swap-checker! assoc current-name-env-kw nme-env)
+  (env/swap-checker! assoc impl/current-name-env-kw nme-env)
   nil)
 
 (t/ann get-type-name [t/Any -> (t/U nil t/Kw r/Type)])
@@ -69,16 +63,13 @@
   "Return the name with var symbol sym.
   Returns nil if not found."
   [sym]
-  (get (name-env) sym))
+  {:post [(or (nil? %)
+              (keyword? %)
+              (r/Type? %))]}
+  (force (get (name-env) sym)))
 
 (t/ann ^:no-check add-type-name [t/Sym (t/U t/Kw r/Type) -> nil])
-(defn add-type-name [sym ty]
-  (env/swap-checker! assoc-in
-                     [current-name-env-kw sym]
-                     (if (r/Type? ty)
-                       (vary-meta ty assoc :from-name sym)
-                       ty))
-  nil)
+(def add-type-name impl/add-tc-type-name)
 
 (t/ann declare-name* [t/Sym -> nil])
 (defn declare-name* [sym]
