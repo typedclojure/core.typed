@@ -1765,9 +1765,18 @@ for checking namespaces, cf for checking individual forms."}
 (defmacro untyped-var
   "Check a given var has the specified type at runtime."
   [varsym typesyn]
-  (let [qsym (if (namespace varsym)
+  (let [prs-ns (-> *ns* ns-name)
+        qsym (if (namespace varsym)
                varsym
-               (symbol (-> *ns* ns-name str) (str varsym)))]
+               (symbol (str prs-ns) (str varsym)))
+        _ (require 'clojure.core.typed.coerce-utils)
+        var->symbol (impl/v 'clojure.core.typed.coerce-utils/var->symbol)
+        var (resolve varsym)
+        _ (assert (var? var) (str varsym " must resolve to a var."))
+        qsym (var->symbol var)
+        expected-type (with-current-location &form
+                        (delay-tc-parse typesyn))
+        _ (impl/add-untyped-var prs-ns qsym expected-type)]
     `(untyped-var* '~qsym '~typesyn)))
 
 (defn ^:skip-wiki

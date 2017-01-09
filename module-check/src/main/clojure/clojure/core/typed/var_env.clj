@@ -59,13 +59,7 @@
   (env/swap-checker! assoc-in [impl/current-var-annotations-kw sym] type)
   nil)
 
-(defn add-untyped-var [nsym sym t]
-  {:pre [(symbol? nsym)
-         (symbol? sym)
-         (r/Type? t)]
-   :post [(nil? %)]}
-  (env/swap-checker! assoc-in [impl/untyped-var-annotations-kw nsym sym] t)
-  nil)
+(def add-untyped-var impl/add-untyped-var)
 
 (def check-var? impl/check-var?)
 
@@ -164,4 +158,5 @@
               (r/Type? %))]}
   (some-> (untyped-var-annotations)
           (get nsym)
-          (get sym)))
+          (get sym)
+          force))

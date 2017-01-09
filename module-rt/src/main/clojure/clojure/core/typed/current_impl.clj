@@ -52,6 +52,18 @@
   (add-tc-type-name sym declared-name-type)
   nil)
 
+(defn add-untyped-var [nsym sym t]
+  {:pre [(symbol? nsym)
+         (symbol? sym)
+         ; enforced in var-env/get-untyped-var,
+         ; not worth loading/importing r/Type? for this
+         ; assertion.
+         #_(or (r/Type? t)
+               (delay? t))]
+   :post [(nil? %)]}
+  (env/swap-checker! assoc-in [untyped-var-annotations-kw nsym sym] t)
+  nil)
+
 (defmacro create-env
   "For name n, creates defs for {n}, {n}-kw, add-{n},
   and reset-{n}!"
