@@ -18,5 +18,5 @@
   (get (env/deref-checker) impl/constructor-override-env-kw {}))
 
 (defn get-constructor-override [sym]
-  {:post [((some-fn delay? r/Type?) %)]}
+  {:post [((some-fn nil? r/Type?) %)]}
   (force (get (constructor-override-env) sym)))
