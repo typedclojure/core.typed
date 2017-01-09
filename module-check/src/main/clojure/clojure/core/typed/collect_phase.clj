@@ -251,6 +251,8 @@
     (var-env/add-untyped-var prs-ns qsym expected-type)
     nil))
 
+;; done at runtime
+#_
 (add-invoke-special-collect-method 'clojure.core.typed/ann*
   [{:keys [args env] :as expr}]
   (clt-u/assert-expr-args expr #{3})

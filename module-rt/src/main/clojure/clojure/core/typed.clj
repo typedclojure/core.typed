@@ -1225,7 +1225,7 @@ for checking namespaces, cf for checking individual forms."}
                                              @Compiler/COLUMN)}]
        ~@body)))
 
-(defmacro ^:private delay-parse 
+(defmacro ^:private delay-rt-parse
   "We can type check c.c.t/parse-ast if we replace all instances
   of parse-ast in clojure.core.typed with delay-parse. Otherwise
   there is a circular dependency."
@@ -1237,12 +1237,26 @@ for checking namespaces, cf for checking individual forms."}
        (let [parse-clj# (impl/v '~'clojure.core.typed.parse-ast/parse-clj)]
          (app-outer-context# parse-clj# t#)))))
 
+(defmacro ^:private delay-tc-parse 
+  [t]
+  `(let [t# ~t
+         app-outer-context# (bound-fn* (fn [f# nsym# t#] (f# nsym# t#)))]
+     (delay
+       (require '~'clojure.core.typed.parse-unparse)
+       (let [parse-clj# (impl/v '~'clojure.core.typed.parse-unparse/parse-clj)
+             with-parse-ns*# (impl/v '~'clojure.core.typed.parse-unparse/with-parse-ns*)]
+         (with-parse-ns*#
+           (ns-name *ns*)
+           #(app-outer-context#
+              parse-clj# 
+              t#))))))
+
 (defn ^:skip-wiki add-to-alias-env [form qsym t]
   (impl/with-impl impl/clojure
     (impl/add-alias-env
       qsym
       (with-current-location form
-        (delay-parse t))))
+        (delay-rt-parse t))))
   nil)
 
 (defmacro
@@ -1774,9 +1788,13 @@ for checking namespaces, cf for checking individual forms."}
         check? (not (or (:no-check opts)
                         (:nocheck opts)))
         ast (with-current-location &form
-              (delay-parse typesyn))]
+              (delay-rt-parse typesyn))
+        tc-type (with-current-location &form
+                  (delay-tc-parse typesyn))]
     (impl/with-impl impl/clojure
       (impl/add-var-env qsym ast))
+    (impl/with-impl impl/clojure
+      (impl/add-tc-var-type qsym tc-type))
     `(ann* '~qsym '~typesyn '~check?)))
 
 (defmacro ann-many

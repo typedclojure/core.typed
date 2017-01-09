@@ -517,3 +517,13 @@ Multi
 
 (assert (even? (count init-aliases)))
 (assert (apply distinct? (map first (partition 2 init-aliases))))
+
+(def current-var-annotations-kw ::current-var-annotations)
+(def current-nocheck-var?-kw ::current-nocheck-var?)
+(def current-used-vars-kw ::current-used-vars)
+(def current-checked-var-defs-kw ::current-checked-var-defs)
+(def cljs-jsvar-annotations-kw ::cljs-jsvar-annotations)
+(def untyped-var-annotations-kw ::untyped-var-annotations)
+
+(defn add-tc-var-type [sym type]
+  (env/swap-checker! assoc-in [current-var-annotations-kw sym] type))
