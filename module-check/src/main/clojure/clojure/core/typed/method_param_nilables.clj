@@ -6,6 +6,8 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Method Param nilables
 
+(def method-param-nilable-env-kw ::method-param-nilable-env)
+
 (defn reset-method-nilable-param-env! [m]
   (reset! METHOD-PARAM-NILABLE-ENV m)
   nil)
