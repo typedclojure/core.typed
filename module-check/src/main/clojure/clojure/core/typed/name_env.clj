@@ -24,7 +24,6 @@
             protocol-name-type 
             datatype-name-type)
 
-(def protocol-name-type ::protocol-name)
 (def datatype-name-type ::datatype-name)
 
 (t/ann temp-binding t/Kw)
@@ -77,11 +76,7 @@
   (= impl/declared-name-type (get-type-name sym)))
 
 (t/ann declare-protocol* [t/Sym -> nil])
-(defn declare-protocol* [sym]
-  {:pre [(symbol? sym)
-         (namespace sym)]}
-  (add-type-name sym protocol-name-type)
-  nil)
+(def declare-protocol* impl/declare-protocol*)
 
 (t/ann declared-protocol? [t/Any -> t/Any])
 (defn declared-protocol? [sym]

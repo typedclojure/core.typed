@@ -16,6 +16,7 @@
 (def method-param-nilable-env-kw ::method-param-nilable-env)
 (def method-override-env-kw ::method-override-env)
 (def constructor-override-env-kw ::constructor-override-env)
+(def protocol-name-type ::protocol-name)
 
 (defn add-tc-var-type [sym type]
   (env/swap-checker! assoc-in [current-var-annotations-kw sym] type)
@@ -55,6 +56,12 @@
   {:pre [(symbol? sym)
          (namespace sym)]}
   (add-tc-type-name sym declared-name-type)
+  nil)
+
+(defn declare-protocol* [sym]
+  {:pre [(symbol? sym)
+         (namespace sym)]}
+  (add-tc-type-name sym protocol-name-type)
   nil)
 
 (defn add-untyped-var [nsym sym t]

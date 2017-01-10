@@ -4,7 +4,6 @@
             [clojure.core.typed.name-env :as nme-env]
             [clojure.core.typed.parse-unparse :as prs]
             [clojure.core.typed.type-rep :as r]
-            [clojure.math.combinatorics :as comb]
             [clojure.core.typed.free-ops :as free-ops]
             [clojure.core.typed.util-vars :as vs]
             [clojure.core.typed.protocol-env :as ptl-env]
@@ -33,18 +32,19 @@
         ; add a Name so the methods can be parsed
         _ (nme-env/declare-protocol* s)
         parsed-binder (when binder 
-                        (binding [prs/*parse-type-in-ns* current-ns]
-                          (prs/parse-free-binder-with-variance binder)))
+                        (delay
+                          (binding [prs/*parse-type-in-ns* current-ns]
+                            (prs/parse-free-binder-with-variance binder))))
         fs (when parsed-binder
-             (map (comp r/make-F :fname) parsed-binder))
+             (delay (map (comp r/make-F :fname) (force parsed-binder))))
         bnds (when parsed-binder
-               (map :bnd parsed-binder))
+               (delay (map :bnd (force parsed-binder))))
         ms (into {} (for [[knq v] mths]
                       (let [_ (when (namespace knq)
                                 (err/int-error "Protocol method should be unqualified"))
                             mtype 
                             (delay
-                              (let [mtype (free-ops/with-bounded-frees (zipmap fs bnds)
+                              (let [mtype (free-ops/with-bounded-frees (zipmap (force fs) (force bnds))
                                             (binding [vs/*current-env*       current-env
                                                       prs/*parse-type-in-ns* current-ns]
                                               ;(prn "parsing" v current-ns *ns*)
@@ -72,10 +72,10 @@
                          [knq mtype])))
         ;_ (prn "collect protocol methods" (into {} ms))
         t (delay
-            (c/Protocol* (map :name fs) (map :variance parsed-binder) 
-                         fs s (c/Protocol-var->on-class s) 
-                         (into {} (map (fn [k v] [k (force v)])) ms) 
-                         (map :bnd parsed-binder)))]
+            (c/Protocol* (map :name (force fs)) (map :variance (force parsed-binder) )
+                         (force fs) s (c/Protocol-var->on-class s) 
+                         (into {} (map (fn [[k v]] [k (force v)])) ms) 
+                         (map :bnd (force parsed-binder))))]
     ;(prn "Adding protocol" s t)
     (ptl-env/add-protocol s t)
     ; annotate protocol var as Any
@@ -86,7 +86,7 @@
               "Protocol method names should be unqualified")
       ;qualify method names when adding methods as vars
       (let [kq (symbol protocol-defined-in-nstr (name kuq))
-            mt-ann (delay (clt-u/protocol-method-var-ann (force mt) (map :name fs) bnds))]
+            mt-ann (delay (clt-u/protocol-method-var-ann (force mt) (map :name (force fs)) (force bnds)))]
         (var-env/add-nocheck-var kq)
         (var-env/add-var-type kq mt-ann)))
     ;(prn "end gen-protocol" s)
