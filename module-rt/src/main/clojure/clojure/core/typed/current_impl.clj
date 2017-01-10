@@ -672,7 +672,7 @@ Multi
                  (map (comp make-F :fname) (force parsed-binder)))))
         bnds (when parsed-binder
                (delay (map :bnd (force parsed-binder))))
-        ms (into {} (for [[knq v] mths]
+        ms (into {} (for [[knq v*] mths]
                       (let [_ (when (namespace knq)
                                 (int-error "Protocol method should be unqualified"))
                             mtype 
@@ -687,7 +687,7 @@ Multi
                                             #(binding [vs/*current-env* current-env]
                                                (with-parse-ns* current-ns
                                                  (fn []
-                                                   (parse-type v)))))
+                                                   (parse-type v*)))))
                                     _ (let [_ (require 'clojure.core.typed.type-ctors
                                                        'clojure.core.typed.type-rep)
                                             fully-resolve-type (v 'clojure.core.typed.type-ctors/fully-resolve-type)
