@@ -1919,6 +1919,9 @@ for checking namespaces, cf for checking individual forms."}
            :name qname
            :fields fields
            :bnd vbnd})))
+    (with-current-location &form
+      (impl/with-clojure-impl
+        (impl/gen-datatype* vs/*current-env* (ns-name *ns*) dname fields vbnd opts false)))
     `(ann-datatype* '~vbnd '~dname '~fields '~opts)))
 
 (defn ^:skip-wiki
@@ -2004,6 +2007,9 @@ for checking namespaces, cf for checking individual forms."}
            :name qname
            :fields fields
            :bnd vbnd})))
+    (with-current-location &form
+      (impl/with-clojure-impl
+        (impl/gen-datatype* vs/*current-env* (ns-name *ns*) dname fields vbnd opt true)))
     `(ann-record* '~vbnd '~dname '~fields '~opt)))
 
 
