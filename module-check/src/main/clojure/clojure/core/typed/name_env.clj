@@ -30,7 +30,7 @@
 (def temp-binding ::temp-binding)
 
 (t/tc-ignore
-(doseq [k [impl/declared-name-type protocol-name-type datatype-name-type]]
+(doseq [k [impl/declared-name-type impl/protocol-name-type datatype-name-type]]
   (derive k temp-binding))
   )
 
