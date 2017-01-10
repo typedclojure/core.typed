@@ -85,13 +85,17 @@
   [bfrees & body]
   `(with-bounded-frees* ~bfrees (fn [] (do ~@body))))
 
+(defn with-frees* [frees bfn]
+  (with-free-mappings (into {} (for [f frees]
+                                 [(:name f) {:F f :bnds r/no-bounds}]))
+    (bfn)))
+
 (defmacro with-frees
   "Scopes frees, which are instances of F, inside body, with
   default bounds."
   [frees & body]
-  `(with-free-mappings (into {} (for [f# ~frees]
-                                  [(:name f#) {:F f# :bnds r/no-bounds}]))
-     ~@body))
+  `(with-frees* ~frees
+     (fn [] (do ~@body))))
 
 (defmacro with-free-symbols
   "Scopes sfrees, a sequence of symbols, inside body as free variables, with default bounds."

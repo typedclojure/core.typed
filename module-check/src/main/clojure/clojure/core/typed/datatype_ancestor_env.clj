@@ -24,8 +24,8 @@
   "Environment mapping datatype names to sets of ancestor types."
   (t/Map t/Sym (t/Set r/ScopedType)))
 
-(def tset? (con/set-c? (some-fn r/Scope? r/Type?)))
-(def dt-ancestor-env? (con/hash-c? symbol? tset?))
+(def tmap? (con/hash-c? any? (some-fn delay? r/Scope? r/Type?)))
+(def dt-ancestor-env? (con/hash-c? symbol? tmap?))
 
 (def current-dt-ancestors-kw ::current-dt-ancestors)
 
@@ -33,10 +33,12 @@
 (defn inst-ancestors
   "Given a datatype, return its instantiated ancestors"
   [{poly :poly? :as dt} anctrs]
-  {:pre [(r/DataType? dt)]
+  {:pre [(r/DataType? dt)
+         ((some-fn nil? map?) anctrs)]
    :post [((con/set-c? r/Type?) %)]}
   (into #{}
-        (map #(c/inst-and-subst % poly))
+        (map (fn [[_ t]]
+               (c/inst-and-subst (force t) poly)))
         anctrs))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -51,16 +53,18 @@
   "Returns the set of overriden ancestors of the given DataType."
   [{:keys [poly? the-class] :as dt}]
   {:pre [(r/DataType? dt)]}
-  (inst-ancestors dt (get (all-dt-ancestors) the-class)))
+  (let [as (get (all-dt-ancestors) the-class)]
+    (inst-ancestors dt as)))
 
-(t/ann ^:no-check add-datatype-ancestors [t/Sym (t/Set r/Type) -> nil])
-(defn add-datatype-ancestors 
-  "Add a set of ancestor overrides for the datatype named sym."
-  [sym tset]
+(t/ann ^:no-check add-datatype-ancestors [t/Sym (t/Map t/Any (t/U (t/Delay r/Type) r/Type)) -> nil])
+(defn add-datatype-ancestors
+  "Add a mapping of ancestor overrides (from the type syntax of the override
+  to the actual parsed type) for the datatype named sym."
+  [sym tmap]
   {:pre [(symbol? sym)
-         (tset? tset)]
+         (tmap? tmap)]
    :post [(nil? %)]}
-  (env/swap-checker! update-in [current-dt-ancestors-kw sym] nilsafe/set-union tset)
+  (env/swap-checker! update-in [current-dt-ancestors-kw sym] merge tmap)
   nil)
 
 (t/ann ^:no-check reset-datatype-ancestors! [DTAncestorEnv -> nil])

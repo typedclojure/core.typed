@@ -19,6 +19,8 @@
 (def constructor-override-env-kw ::constructor-override-env)
 (def protocol-name-type ::protocol-name)
 (def current-protocol-env-kw ::current-protocol-env)
+(def current-datatype-env-kw ::current-datatype-env)
+
 
 (defn add-tc-var-type [sym type]
   (env/swap-checker! assoc-in [current-var-annotations-kw sym] type)
@@ -118,6 +120,16 @@
   (env/swap-checker! assoc-in [current-protocol-env-kw sym] t)
   nil)
 
+(defn add-datatype [sym t]
+  {:pre [((every-pred symbol?
+                      (fn [k] (some #{\.} (str k))))
+          sym)
+         ;; checked in get-datatype
+         #_
+         ((some-fn delay? r/Type?) t)]
+   :post [(nil? %)]}
+  (env/swap-checker! assoc-in [current-datatype-env-kw sym] t)
+  nil)
 
 (defmacro create-env
   "For name n, creates defs for {n}, {n}-kw, add-{n},
