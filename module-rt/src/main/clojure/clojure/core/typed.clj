@@ -2227,6 +2227,8 @@ for checking namespaces, cf for checking individual forms."}
   eg. (typed-deps clojure.core.typed.holes
                   myns.types)"
   [& args]
+  (impl/with-clojure-impl
+    (impl/add-ns-deps (ns-name *ns*) (set args)))
   `(typed-deps* '~args))
 
 ;(defn unchecked-ns*

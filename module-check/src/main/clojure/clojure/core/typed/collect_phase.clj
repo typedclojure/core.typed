@@ -195,6 +195,7 @@
     (ns-opts/register-warn-on-unannotated-vars prs-ns)
     nil))
 
+#_
 (add-invoke-special-collect-method 'clojure.core.typed/typed-deps*
   [{:keys [args] :as expr}]
   (typed-deps/collect-typed-deps collect-ns expr))

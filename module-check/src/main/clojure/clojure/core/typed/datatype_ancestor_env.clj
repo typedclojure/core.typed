@@ -11,10 +11,6 @@
             [clojure.set :as set])
   (:import (clojure.core.typed.type_rep DataType)))
 
-(t/tc-ignore
-(alter-meta! *ns* assoc :skip-wiki true)
-  )
-
 (t/typed-deps clojure.core.typed.type-ctors
               clojure.core.typed.subst)
 

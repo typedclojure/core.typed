@@ -21,7 +21,7 @@
 (def current-protocol-env-kw ::current-protocol-env)
 (def current-datatype-env-kw ::current-datatype-env)
 (def current-dt-ancestors-kw ::current-dt-ancestors)
-
+(def current-deps-kw ::current-deps)
 
 (defn add-tc-var-type [sym type]
   (env/swap-checker! assoc-in [current-var-annotations-kw sym] type)
@@ -130,6 +130,13 @@
          ((some-fn delay? r/Type?) t)]
    :post [(nil? %)]}
   (env/swap-checker! assoc-in [current-datatype-env-kw sym] t)
+  nil)
+
+(defn add-ns-deps [nsym deps]
+  {:pre [(symbol? nsym)
+         ((con/set-c? symbol?) deps)]
+   :post [(nil? %)]}
+  (env/swap-checker! update-in [current-deps-kw nsym] (fnil set/union #{}) deps)
   nil)
 
 (defmacro create-env
