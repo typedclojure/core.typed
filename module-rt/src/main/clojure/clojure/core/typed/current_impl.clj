@@ -3,7 +3,8 @@
   (:require [clojure.core.typed.profiling :as p]
             [clojure.set :as set]
             [clojure.core.typed.env :as env]
-            [clojure.core.typed.contract-utils :as con]))
+            [clojure.core.typed.contract-utils :as con]
+            [clojure.core.typed.util-vars :as vs]))
 
 (def current-var-annotations-kw ::current-var-annotations)
 (def current-nocheck-var?-kw ::current-nocheck-var?)
@@ -116,6 +117,7 @@
          ((some-fn delay? r/Type?) t)]}
   (env/swap-checker! assoc-in [current-protocol-env-kw sym] t)
   nil)
+
 
 (defmacro create-env
   "For name n, creates defs for {n}, {n}-kw, add-{n},
@@ -632,3 +634,118 @@ Multi
 (assert (even? (count init-aliases)))
 (assert (apply distinct? (map first (partition 2 init-aliases))))
 
+(defn gen-protocol* [current-env current-ns vsym binder mths]
+  {:pre [(symbol? current-ns)
+         ((some-fn nil? map?) mths)]}
+  (let [_ (require 'clojure.core.typed.errors)
+        int-error (v 'clojure.core.typed.errors/int-error)
+        _ (when-not (symbol? vsym)
+            (int-error
+              (str "First argument to ann-protocol must be a symbol: " vsym)))
+        s (if (namespace vsym)
+            (symbol vsym)
+            (symbol (str current-ns) (name vsym)))
+        protocol-defined-in-nstr (namespace s)
+        _ (when-let [[m] (seq (remove symbol? (keys mths)))]
+            (int-error (str "Method names to ann-protocol must be symbols, found: " (pr-str m))))
+        _ (doseq [n1 (keys mths)
+                  n2 (keys mths)]
+            (when (and (not= n1 n2)
+                       (= (munge n1) (munge n2)))
+              (int-error 
+                (str "Protocol methods for " vsym " must have distinct representations: "
+                     "both " n1 " and " n2 " compile to " (munge n1)))))
+        ; add a Name so the methods can be parsed
+        _ (declare-protocol* s)
+        parsed-binder (when binder 
+                        (delay
+                          (let [_ (require 'clojure.core.typed.parse-unparse)
+                                parse-free-binder-with-variance 
+                                (v 'clojure.core.typed.parse-unparse/parse-free-binder-with-variance)
+                                with-parse-ns* (v 'clojure.core.typed.parse-unparse/with-parse-ns*)]
+                            (with-parse-ns* current-ns
+                              #(parse-free-binder-with-variance binder)))))
+        fs (when parsed-binder
+             (delay 
+               (let [_ (require 'clojure.core.typed.type-rep)
+                     make-F (v 'clojure.core.typed.type-rep/make-F)]
+                 (map (comp make-F :fname) (force parsed-binder)))))
+        bnds (when parsed-binder
+               (delay (map :bnd (force parsed-binder))))
+        ms (into {} (for [[knq v] mths]
+                      (let [_ (when (namespace knq)
+                                (int-error "Protocol method should be unqualified"))
+                            mtype 
+                            (delay
+                              (let [_ (require 'clojure.core.typed.free-ops
+                                               'clojure.core.typed.parse-unparse)
+                                    with-bounded-frees* (v 'clojure.core.typed.free-ops/with-bounded-frees*)
+                                    with-parse-ns* (v 'clojure.core.typed.parse-unparse/with-parse-ns*)
+                                    unparse-type (v 'clojure.core.typed.parse-unparse/unparse-type)
+                                    parse-type (v 'clojure.core.typed.parse-unparse/parse-type)
+                                    mtype (with-bounded-frees* (zipmap (force fs) (force bnds))
+                                            #(binding [vs/*current-env* current-env]
+                                               (with-parse-ns* current-ns
+                                                 (fn []
+                                                   (parse-type v)))))
+                                    _ (let [_ (require 'clojure.core.typed.type-ctors
+                                                       'clojure.core.typed.type-rep)
+                                            fully-resolve-type (v 'clojure.core.typed.type-ctors/fully-resolve-type)
+                                            Poly? (v 'clojure.core.typed.type-rep/Poly?)
+                                            Poly-fresh-symbols* (v 'clojure.core.typed.type-ctors/Poly-fresh-symbols*)
+                                            Poly-body* (v 'clojure.core.typed.type-ctors/Poly-body*)
+                                            PolyDots? (v 'clojure.core.typed.type-rep/PolyDots?)
+                                            PolyDots-fresh-symbols* (v 'clojure.core.typed.type-ctors/PolyDots-fresh-symbols*)
+                                            PolyDots-body* (v 'clojure.core.typed.type-ctors/PolyDots-body*)
+                                            FnIntersection? (v 'clojure.core.typed.type-rep/FnIntersection?)
+                                            rt (fully-resolve-type mtype)
+                                            fin? (fn [f]
+                                                   (let [f (fully-resolve-type f)]
+                                                     (boolean
+                                                       (when (FnIntersection? f)
+                                                         (every? seq (map :dom (:types f)))))))]
+                                        (when-not 
+                                          (or
+                                            (fin? rt)
+                                            (when (Poly? rt) 
+                                              (let [names (Poly-fresh-symbols* rt)]
+                                                (fin? (Poly-body* names rt))))
+                                            (when (PolyDots? rt) 
+                                              (let [names (PolyDots-fresh-symbols* rt)]
+                                                (fin? (PolyDots-body* names rt)))))
+                                          ;(prn "throwing method type")
+                                          (int-error (str "Protocol method " knq " should be a possibly-polymorphic function intersection"
+                                                              " taking at least one fixed argument: "
+                                                              (unparse-type mtype)))))]
+                                mtype))]
+                         [knq mtype])))
+        ;_ (prn "collect protocol methods" (into {} ms))
+        t (delay
+            (let [_ (require 'clojure.core.typed.type-ctors)
+                  Protocol* (v 'clojure.core.typed.type-ctors/Protocol*)
+                  Protocol-var->on-class (v 'clojure.core.typed.type-ctors/Protocol-var->on-class)]
+              (Protocol* (map :name (force fs)) (map :variance (force parsed-binder) )
+                         (force fs) s (Protocol-var->on-class s) 
+                         (into {} (map (fn [[k v]] [k (force v)])) ms) 
+                         (map :bnd (force parsed-binder)))))]
+    ;(prn "Adding protocol" s t)
+    (add-protocol s t)
+    ; annotate protocol var as Any
+    (add-nocheck-var s)
+    (add-tc-var-type s (delay 
+                              (let [_ (require 'clojure.core.typed.type-rep)
+                                    -any (v 'clojure.core.typed.type-rep/-any)]
+                                -any)))
+    (doseq [[kuq mt] ms]
+      (assert (not (namespace kuq))
+              "Protocol method names should be unqualified")
+      ;qualify method names when adding methods as vars
+      (let [kq (symbol protocol-defined-in-nstr (name kuq))
+            mt-ann (delay 
+                     (let [_ (require 'clojure.core.typed.collect-utils)
+                           protocol-method-var-ann (v 'clojure.core.typed.collect-utils/protocol-method-var-ann)]
+                       (protocol-method-var-ann (force mt) (map :name (force fs)) (force bnds))))]
+        (add-nocheck-var kq)
+        (add-tc-var-type kq mt-ann)))
+    ;(prn "end gen-protocol" s)
+    nil))

@@ -21,7 +21,6 @@
 ;; Type Name Env
 
 (t/ann-many t/Kw 
-            protocol-name-type 
             datatype-name-type)
 
 (def datatype-name-type ::datatype-name)
@@ -80,7 +79,7 @@
 
 (t/ann declared-protocol? [t/Any -> t/Any])
 (defn declared-protocol? [sym]
-  (= protocol-name-type (get-type-name sym)))
+  (= impl/protocol-name-type (get-type-name sym)))
 
 (t/ann declare-datatype* [t/Sym -> nil])
 (defn declare-datatype* [sym]
@@ -111,7 +110,7 @@
     (if tfn
       tfn
       (cond
-        (= protocol-name-type t) (prenv/resolve-protocol sym)
+        (= impl/protocol-name-type t) (prenv/resolve-protocol sym)
         (= datatype-name-type t) (dtenv/resolve-datatype sym)
         (= impl/declared-name-type t) (throw (IllegalArgumentException. (str "Reference to declared but undefined name " sym)))
         (r/Type? t) (vary-meta t assoc :source-Name sym)
