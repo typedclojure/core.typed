@@ -137,6 +137,7 @@
 
 (add-collect-method :do [expr] (visit-do expr collect))
 
+#_
 (add-collect-method :def
   [{:keys [var env] :as expr}]
   (let [prs-ns (chk-u/expr-ns expr)]
