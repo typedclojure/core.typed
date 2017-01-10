@@ -2,8 +2,11 @@
   (:require [clojure.core.typed.current-impl :as impl]
             [clojure.repl :as repl]
             [clojure.core.typed.util-vars :as vs]
+            [clojure.core.typed.parse-unparse :as prs]
             [clojure.core.typed.datatype-ancestor-env :as ancest]))
 
+(defn parse-field [[n _ t]] 
+  [n (prs/parse-type t)])
 
 (defn gen-datatype* [current-env current-ns provided-name fields vbnd opt record?]
   {:pre [(symbol? current-ns)]}
