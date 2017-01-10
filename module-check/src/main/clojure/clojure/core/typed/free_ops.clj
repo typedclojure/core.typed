@@ -8,9 +8,6 @@
             [clojure.core.typed.tvar-bnds :as bnds])
   (:import (clojure.core.typed.type_rep F Bounds)))
 
-(alter-meta! *ns* assoc :skip-wiki true
-             :core.typed {:collect-only true})
-
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Parse Type syntax
 
@@ -77,15 +74,16 @@
 
 (def bounded-frees? (con/hash-c? r/F? r/Bounds?))
 
+(defn with-bounded-frees* [bfrees bfn]
+  (let [_ (assert (bounded-frees? bfrees) bfrees)]
+    (with-free-mappings (into {} (for [[f bnds] bfrees]
+                                   [(:name f) {:F f :bnds bnds}]))
+      (bfn))))
+
 (defmacro with-bounded-frees
   "Scopes bfrees, a map of instances of F to their bounds, inside body."
   [bfrees & body]
-  `(let [bfrees# ~bfrees
-         _# (assert (bounded-frees? bfrees#)
-                    bfrees#)]
-     (with-free-mappings (into {} (for [[f# bnds#] bfrees#]
-                                    [(:name f#) {:F f# :bnds bnds#}]))
-       ~@body)))
+  `(with-bounded-frees* ~bfrees (fn [] (do ~@body))))
 
 (defmacro with-frees
   "Scopes frees, which are instances of F, inside body, with

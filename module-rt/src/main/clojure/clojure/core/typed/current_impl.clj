@@ -17,6 +17,7 @@
 (def method-override-env-kw ::method-override-env)
 (def constructor-override-env-kw ::constructor-override-env)
 (def protocol-name-type ::protocol-name)
+(def current-protocol-env-kw ::current-protocol-env)
 
 (defn add-tc-var-type [sym type]
   (env/swap-checker! assoc-in [current-var-annotations-kw sym] type)
@@ -106,6 +107,14 @@
          ;; checked at `get-constructor-override`
          #_((some-fn delay? r/Type?) t)]}
   (env/swap-checker! assoc-in [constructor-override-env-kw sym] t)
+  nil)
+
+(defn add-protocol [sym t]
+  {:pre [(symbol? sym)
+         ;; checked in get-protocol
+         #_
+         ((some-fn delay? r/Type?) t)]}
+  (env/swap-checker! assoc-in [current-protocol-env-kw sym] t)
   nil)
 
 (defmacro create-env
