@@ -378,6 +378,7 @@
       (prs/parse-free-binder-with-variance binder))))
 
 
+#_
 (add-invoke-special-collect-method 'clojure.core.typed/ann-protocol*
   [{:keys [args env] :as expr}]
   (clt-u/assert-expr-args expr #{3})
@@ -385,6 +386,7 @@
     ;(prn "collected ann-protocol" varsym)
     (gen-protocol/gen-protocol* env (chk-u/expr-ns expr) varsym binder mth)))
 
+#_
 (add-invoke-special-collect-method 'clojure.core.typed/ann-pprotocol*
   [{:keys [args env] :as expr}]
   (clt-u/assert-expr-args expr #{3})

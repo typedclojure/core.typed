@@ -2079,6 +2079,14 @@ for checking namespaces, cf for checking individual forms."}
         {:name qualsym
          :methods mth
          :bnds vbnd}))
+    (impl/with-clojure-impl
+      (with-current-location &form
+        (impl/gen-protocol*
+          vs/*current-env*
+          (ns-name *ns*)
+          varsym
+          vbnd
+          mth)))
     `(ann-protocol* '~vbnd '~varsym '~mth)))
 
 (defn ^:skip-wiki
