@@ -1171,6 +1171,13 @@ for checking namespaces, cf for checking individual forms."}
 (defmacro declare-datatypes 
   "Declare datatypes, similar to declare but on the type level."
   [& syms]
+  (impl/with-clojure-impl
+    (doseq [sym syms]
+      (assert (not (or (some #(= \. %) (str sym))
+                       (namespace sym)))
+              (str "Cannot declare qualified datatype: " sym))
+      (let [qsym (symbol (str (munge (name (ns-name *ns*))) \. (name sym)))]
+        (impl/declare-datatype* qsym))))
   `(declare-datatypes* '~syms))
 
 (defn ^:skip-wiki

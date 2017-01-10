@@ -20,16 +20,11 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Type Name Env
 
-(t/ann-many t/Kw 
-            datatype-name-type)
-
-(def datatype-name-type ::datatype-name)
-
 (t/ann temp-binding t/Kw)
 (def temp-binding ::temp-binding)
 
 (t/tc-ignore
-(doseq [k [impl/declared-name-type impl/protocol-name-type datatype-name-type]]
+(doseq [k [impl/declared-name-type impl/protocol-name-type impl/datatype-name-type]]
   (derive k temp-binding))
   )
 
@@ -82,13 +77,11 @@
   (= impl/protocol-name-type (get-type-name sym)))
 
 (t/ann declare-datatype* [t/Sym -> nil])
-(defn declare-datatype* [sym]
-  (add-type-name sym datatype-name-type)
-  nil)
+(def declare-datatype* impl/declare-datatype*)
 
 (t/ann declared-datatype? [t/Any -> t/Any])
 (defn declared-datatype? [sym]
-  (= datatype-name-type (get-type-name sym)))
+  (= impl/datatype-name-type (get-type-name sym)))
 
 (t/ann ^:no-check resolve-name* [t/Sym -> r/Type])
 (defn resolve-name* [sym]
@@ -111,7 +104,7 @@
       tfn
       (cond
         (= impl/protocol-name-type t) (prenv/resolve-protocol sym)
-        (= datatype-name-type t) (dtenv/resolve-datatype sym)
+        (= impl/datatype-name-type t) (dtenv/resolve-datatype sym)
         (= impl/declared-name-type t) (throw (IllegalArgumentException. (str "Reference to declared but undefined name " sym)))
         (r/Type? t) (vary-meta t assoc :source-Name sym)
         :else (err/int-error (str "Cannot resolve name " (pr-str sym)

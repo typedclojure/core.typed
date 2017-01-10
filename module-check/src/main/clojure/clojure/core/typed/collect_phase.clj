@@ -200,6 +200,7 @@
   [{:keys [args] :as expr}]
   (typed-deps/collect-typed-deps collect-ns expr))
 
+#_
 (add-invoke-special-collect-method 'clojure.core.typed/declare-datatypes*
   [{:keys [args] :as expr}]
   (clt-u/assert-expr-args expr #{1})

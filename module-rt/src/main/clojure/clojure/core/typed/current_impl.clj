@@ -22,6 +22,7 @@
 (def current-datatype-env-kw ::current-datatype-env)
 (def current-dt-ancestors-kw ::current-dt-ancestors)
 (def current-deps-kw ::current-deps)
+(def datatype-name-type ::datatype-name)
 
 (defn add-tc-var-type [sym type]
   (env/swap-checker! assoc-in [current-var-annotations-kw sym] type)
@@ -67,6 +68,10 @@
   {:pre [(symbol? sym)
          (namespace sym)]}
   (add-tc-type-name sym protocol-name-type)
+  nil)
+
+(defn declare-datatype* [sym]
+  (add-tc-type-name sym datatype-name-type)
   nil)
 
 (defn add-untyped-var [nsym sym t]
