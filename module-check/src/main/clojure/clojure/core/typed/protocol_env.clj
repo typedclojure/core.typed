@@ -50,7 +50,7 @@
   Returns nil if not found."
   [sym]
   {:pre [(symbol? sym)]
-   :post [((some-fn nil? r/Type?) %)]}
+   :post [((some-fn nil? r/Protocol? r/TypeFn?) %)]}
   (force (get (protocol-env) sym)))
 
 (t/ann resolve-protocol [t/Sym -> r/Type])
