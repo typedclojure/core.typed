@@ -159,12 +159,14 @@
   nil)
 
 
+#_
 (add-invoke-special-collect-method 'clojure.core.typed/ann-precord*
   [{:keys [args env] :as expr}]
   (clt-u/assert-expr-args expr #{4})
   (let [[dname vbnd fields opt] (ast-u/constant-exprs args)]
     (gen-datatype/gen-datatype* env (chk-u/expr-ns expr) dname fields vbnd opt true)))
 
+#_
 (add-invoke-special-collect-method 'clojure.core.typed/ann-pdatatype*
   [{:keys [args env] :as expr}]
   (clt-u/assert-expr-args expr #{4})
@@ -172,12 +174,14 @@
     (assert nil "REMOVED OPERATION: ann-pdatatype, use ann-datatype with binder as first argument, ie. before datatype name")
     #_(gen-datatype/gen-datatype* env (chk-u/expr-ns expr) dname fields vbnd opt false)))
 
+#_
 (add-invoke-special-collect-method 'clojure.core.typed/ann-datatype*
   [{:keys [args env] :as expr}]
   (clt-u/assert-expr-args expr #{4})
   (let [[binder dname fields opt] (ast-u/constant-exprs args)]
     (gen-datatype/gen-datatype* env (chk-u/expr-ns expr) dname fields binder opt false)))
 
+#_
 (add-invoke-special-collect-method 'clojure.core.typed/ann-record*
   [{:keys [args env] :as expr}]
   (clt-u/assert-expr-args expr #{4})

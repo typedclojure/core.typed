@@ -27,8 +27,6 @@
 (def tmap? (con/hash-c? any? (some-fn delay? r/Scope? r/Type?)))
 (def dt-ancestor-env? (con/hash-c? symbol? tmap?))
 
-(def current-dt-ancestors-kw ::current-dt-ancestors)
-
 (t/ann ^:no-check inst-ancestors [DataType (t/U nil (t/Seqable r/Type)) -> (t/Set r/Type)])
 (defn inst-ancestors
   "Given a datatype, return its instantiated ancestors"
@@ -46,7 +44,7 @@
 
 (defn all-dt-ancestors []
   {:post [(map? %)]}
-  (get (env/deref-checker) current-dt-ancestors-kw {}))
+  (get (env/deref-checker) impl/current-dt-ancestors-kw {}))
 
 (t/ann ^:no-check get-datatype-ancestors [DataType -> (t/Set r/Type)])
 (defn get-datatype-ancestors 
@@ -57,20 +55,12 @@
     (inst-ancestors dt as)))
 
 (t/ann ^:no-check add-datatype-ancestors [t/Sym (t/Map t/Any (t/U (t/Delay r/Type) r/Type)) -> nil])
-(defn add-datatype-ancestors
-  "Add a mapping of ancestor overrides (from the type syntax of the override
-  to the actual parsed type) for the datatype named sym."
-  [sym tmap]
-  {:pre [(symbol? sym)
-         (tmap? tmap)]
-   :post [(nil? %)]}
-  (env/swap-checker! update-in [current-dt-ancestors-kw sym] merge tmap)
-  nil)
+(def add-datatype-ancestors impl/add-datatype-ancestors)
 
 (t/ann ^:no-check reset-datatype-ancestors! [DTAncestorEnv -> nil])
 (defn reset-datatype-ancestors! 
   "Reset the current ancestor map."
   [aenv]
   {:pre [(dt-ancestor-env? aenv)]}
-  (env/swap-checker! assoc current-dt-ancestors-kw aenv)
+  (env/swap-checker! assoc impl/current-dt-ancestors-kw aenv)
   nil)
