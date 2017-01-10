@@ -93,6 +93,7 @@
   (doseq [expr (concat statements [ret])]
     (f expr)))
 
+#_
 (defmethod internal-collect-expr ::core/ns
   [{[_ _ third-arg :as statements] :statements fexpr :ret :as expr}]
   ;(prn "collecting ns form")

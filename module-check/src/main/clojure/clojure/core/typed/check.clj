@@ -100,9 +100,6 @@
             [clojure.repl :as repl])
   (:import (clojure.lang IPersistentMap Var Seqable)))
 
-(alter-meta! *ns* assoc :skip-wiki true
-             :core.typed {:collect-only true})
-
 (t/ann ^:no-check clojure.core.typed.parse-unparse/*unparse-type-in-ns* (t/U nil t/Sym))
 (t/ann ^:no-check clojure.core.typed.util-vars/*already-checked* (t/U nil (t/Atom1 (t/Vec t/Sym))))
 
