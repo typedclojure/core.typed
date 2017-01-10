@@ -2234,15 +2234,16 @@ for checking namespaces, cf for checking individual forms."}
   eg. (typed-deps clojure.core.typed.holes
                   myns.types)"
   [& args]
-  (impl/with-clojure-impl
-    (let [_ (require 'clojure.core.typed.coerce-utils)
-          ns->URL (impl/v 'clojure.core.typed.coerce-utils/ns->URL)]
-      (doseq [dep args]
-        (when-not (ns->URL dep)
-          (err/int-error (str "Cannot find dependency declared with typed-deps: " dep))))))
-  (impl/with-clojure-impl
-    (impl/add-ns-deps (ns-name *ns*) (set args)))
-  `(typed-deps* '~args))
+  (with-current-location &form
+    (impl/with-clojure-impl
+      (let [_ (require 'clojure.core.typed.coerce-utils)
+            ns->URL (impl/v 'clojure.core.typed.coerce-utils/ns->URL)]
+        (doseq [dep args]
+          (when-not (ns->URL dep)
+            (err/int-error (str "Cannot find dependency declared with typed-deps: " dep))))))
+    (impl/with-clojure-impl
+      (impl/add-ns-deps (ns-name *ns*) (set args)))
+    `(typed-deps* '~args)))
 
 ;(defn unchecked-ns*
 ;  "Internal use only. Use unchecked-ns."
