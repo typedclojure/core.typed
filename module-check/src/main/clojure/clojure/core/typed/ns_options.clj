@@ -1,5 +1,6 @@
 (ns ^:skip-wiki clojure.core.typed.ns-options
   (:require [clojure.core.typed :as t]
+            [clojure.core.typed.current-impl :as impl]
             [clojure.core.typed.env :as env]))
 
 (t/defalias NsOptions
@@ -10,17 +11,13 @@
 (t/defalias OptMap
   (t/Map t/Sym NsOptions))
 
-(def ns-opts-kw ::ns-options)
-
 (t/ann reset-ns-opts! [-> nil])
 (defn reset-ns-opts! []
-  (env/swap-checker! assoc ns-opts-kw {})
+  (env/swap-checker! assoc impl/ns-opts-kw {})
   nil)
 
 (t/ann ^:no-check register-warn-on-unannotated-vars [t/Sym -> nil])
-(defn register-warn-on-unannotated-vars [nsym]
-  (env/swap-checker! ns-opts assoc-in [nsym :warn-on-unannotated-vars] true)
-  nil)
+(def register-warn-on-unannotated-vars impl/register-warn-on-unannotated-vars)
 
 (defn get-ns-opts [nsym]
   {:post [(map? %)]}

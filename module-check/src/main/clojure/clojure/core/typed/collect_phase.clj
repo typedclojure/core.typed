@@ -188,6 +188,7 @@
   (let [[binder dname fields opt] (ast-u/constant-exprs args)]
     (gen-datatype/gen-datatype* env (chk-u/expr-ns expr) dname fields binder opt true)))
 
+#_
 (add-invoke-special-collect-method 'clojure.core.typed/warn-on-unannotated-vars*
   [{:as expr}]
   (clt-u/assert-expr-args expr #{0})

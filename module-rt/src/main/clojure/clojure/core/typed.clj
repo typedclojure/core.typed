@@ -2289,6 +2289,7 @@ for checking namespaces, cf for checking individual forms."}
   
   eg. (warn-on-unannotated-vars)"
   []
+  (impl/register-warn-on-unannotated-vars (ns-name *ns*))
   `(warn-on-unannotated-vars*))
 
 (defn check-form-info 

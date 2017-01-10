@@ -23,6 +23,7 @@
 (def current-dt-ancestors-kw ::current-dt-ancestors)
 (def current-deps-kw ::current-deps)
 (def datatype-name-type ::datatype-name)
+(def ns-opts-kw ::ns-options)
 
 (defn add-tc-var-type [sym type]
   (env/swap-checker! assoc-in [current-var-annotations-kw sym] type)
@@ -142,6 +143,10 @@
          ((con/set-c? symbol?) deps)]
    :post [(nil? %)]}
   (env/swap-checker! update-in [current-deps-kw nsym] (fnil set/union #{}) deps)
+  nil)
+
+(defn register-warn-on-unannotated-vars [nsym]
+  (env/swap-checker! assoc-in [ns-opts-kw nsym :warn-on-unannotated-vars] true)
   nil)
 
 (defmacro create-env
