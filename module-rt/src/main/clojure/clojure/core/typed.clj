@@ -1382,7 +1382,7 @@ for checking namespaces, cf for checking individual forms."}
                       update-in [:doc] #(str #_"Type Alias\n\n" % "\n\n" (with-out-str (pprint/pprint t))))
          qsym (-> (symbol (-> *ns* ns-name str) (str sym))
                   (with-meta (meta m)))]
-     `(do
+     `(tc-ignore
         (declare ~sym)
         (def-alias* '~qsym '~t '~&form)))))
 
@@ -1848,7 +1848,7 @@ for checking namespaces, cf for checking individual forms."}
                   "Cannot provide both :nocheck and :no-check metadata to ann")
         check? (not (or (:no-check opts)
                         (:nocheck opts)))]
-    `(ann* '~qsym '~typesyn '~check? '~&form)))
+    `(tc-ignore (ann* '~qsym '~typesyn '~check? '~&form))))
 
 (defmacro ann-many
   "Annotate several vars with type t.
