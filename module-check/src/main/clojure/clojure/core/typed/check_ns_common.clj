@@ -65,18 +65,17 @@
                 ;-------------------------
                 ; Collect phase
                 ;-------------------------
-                (let [collect-ns (impl/impl-case
-                                   :clojure collect-clj/collect-ns
-                                   :cljs    (impl/v 'clojure.core.typed.collect-cljs/collect-ns))]
-                  (doseq [nsym nsym-coll]
-                    (collect-ns nsym)))
-                (let [ms (/ (double (- (. System (nanoTime)) start)) 1000000.0)
-                      collected (if-let [c vs/*already-collected*]
-                                  @c
-                                  (err/int-error "*already-collected* unbound"))]
-                  (println "Collected" (count collected) "namespaces in" ms "msecs")
-                  (flush))
-
+                (impl/impl-case
+                  :clojure nil
+                  :cljs (let [collect-ns (impl/v 'clojure.core.typed.collect-cljs/collect-ns)
+                              _ (doseq [nsym nsym-coll]
+                                  (collect-ns nsym))
+                              ms (/ (double (- (. System (nanoTime)) start)) 1000000.0)
+                              collected (if-let [c vs/*already-collected*]
+                                          @c
+                                          (err/int-error "*already-collected* unbound"))]
+                          (println "Collected" (count collected) "namespaces in" ms "msecs")
+                          (flush)))
                 ;-------------------------
                 ; Check phase
                 ;-------------------------
