@@ -21,7 +21,7 @@
 
 (defn get-ns-opts [nsym]
   {:post [(map? %)]}
-  (get (env/deref-checker) nsym {}))
+  (get-in (env/deref-checker) [impl/ns-opts-kw nsym] {}))
 
 (t/ann ^:no-check warn-on-unannotated-vars? [t/Sym -> Boolean])
 (defn warn-on-unannotated-vars? [nsym]
