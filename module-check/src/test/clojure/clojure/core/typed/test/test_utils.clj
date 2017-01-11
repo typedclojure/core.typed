@@ -38,13 +38,10 @@
        (binding [*ns* *ns*
                  *file* *file*]
          (t/check-form-info 
-           '(do ~ns-form 
-                ~(if provided?
-                   `(t/ann-form ~frm ~syn)
-                   frm))
+           '(do ~ns-form ~frm)
            :expected-ret expected-ret#
-           ;:expected '~syn
-           ;:type-provided? ~provided?
+           :expected '~syn
+           :type-provided? ~provided?
            )))))
 
 (defmacro tc-e 
