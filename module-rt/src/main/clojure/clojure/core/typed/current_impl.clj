@@ -931,4 +931,5 @@ Multi
           (add-nocheck-var pos-ctor-name)
           (when record?
             (add-method-override (symbol (str s) "create") map-ctor)
-            (add-tc-var-type map-ctor-name map-ctor)))))))
+            (add-tc-var-type map-ctor-name map-ctor)
+            (add-nocheck-var map-ctor-name)))))))
