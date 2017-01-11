@@ -1900,7 +1900,7 @@ clojure.lang.Delay (All [x]
 
 (defn refresh-core-clojure-envs! []
   (impl/with-clojure-impl
-    (refresh-core-alias-envs!)
+    (refresh-core-alias-env!)
     ((v 'clojure.core.typed.protocol-env/merge-protocol-env!) 
      (init-protocol-env))
     ((v 'clojure.core.typed.var-env/refresh-var-type-env!)
