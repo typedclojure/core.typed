@@ -1220,6 +1220,8 @@ for checking namespaces, cf for checking individual forms."}
       (impl/declare-name* (symbol (str nsym) (str sym)))))
   `(declare-names* '~syms))
 
+(declare add-to-rt-alias-env add-tc-type-name)
+
 (defn ^:skip-wiki
   def-alias* 
   "Internal use only. Use def-alias."
