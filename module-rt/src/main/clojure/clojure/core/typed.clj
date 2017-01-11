@@ -1165,20 +1165,20 @@ for checking namespaces, cf for checking individual forms."}
 (defn ^:skip-wiki
   declare-datatypes* 
   "Internal use only. Use declare-datatypes."
-  [nms]
-  nil)
-
-(defmacro declare-datatypes 
-  "Declare datatypes, similar to declare but on the type level."
-  [& syms]
+  [syms nsym]
   (impl/with-clojure-impl
     (doseq [sym syms]
       (assert (not (or (some #(= \. %) (str sym))
                        (namespace sym)))
               (str "Cannot declare qualified datatype: " sym))
-      (let [qsym (symbol (str (munge (name (ns-name *ns*))) \. (name sym)))]
+      (let [qsym (symbol (str (munge (name nsym)) \. (name sym)))]
         (impl/declare-datatype* qsym))))
-  `(declare-datatypes* '~syms))
+  nil)
+
+(defmacro declare-datatypes 
+  "Declare datatypes, similar to declare but on the type level."
+  [& syms]
+  `(tc-ignore (declare-datatypes* '~syms '~(ns-name *ns*))))
 
 (defn ^:skip-wiki
   declare-protocols* 
@@ -1189,7 +1189,7 @@ for checking namespaces, cf for checking individual forms."}
 (defmacro declare-protocols 
   "Declare protocols, similar to declare but on the type level."
   [& syms]
-  `(declare-protocols* '~syms))
+  `(tc-ignore (declare-protocols* '~syms)))
 
 (defn ^:skip-wiki
   declare-alias-kind* 
@@ -1200,7 +1200,7 @@ for checking namespaces, cf for checking individual forms."}
 (defmacro declare-alias-kind
   "Declare a kind for an alias, similar to declare but on the kind level."
   [sym ty]
-  `(do
+  `(tc-ignore
      (declare ~sym)
      (declare-alias-kind* '~sym '~ty)))
 
@@ -1208,6 +1208,9 @@ for checking namespaces, cf for checking individual forms."}
   declare-names* 
   "Internal use only. Use declare-names."
   [syms]
+  (let [nsym (ns-name *ns*)]
+    (doseq [sym syms]
+      (impl/declare-name* (symbol (str nsym) (str sym)))))
   nil)
 
 (defmacro declare-names 
@@ -1215,10 +1218,7 @@ for checking namespaces, cf for checking individual forms."}
   [& syms]
   (assert (every? (every-pred symbol? (complement namespace)) syms)
           "declare-names only accepts unqualified symbols")
-  (let [nsym (ns-name *ns*)]
-    (doseq [sym syms]
-      (impl/declare-name* (symbol (str nsym) (str sym)))))
-  `(declare-names* '~syms))
+  `(tc-ignore (declare-names* '~syms)))
 
 (declare add-to-rt-alias-env add-tc-type-name)
 
@@ -1385,19 +1385,6 @@ for checking namespaces, cf for checking individual forms."}
      `(tc-ignore
         (declare ~sym)
         (def-alias* '~qsym '~t '~&form)))))
-
-#_(defmacro tag
-  "Statically assert tag information on a form. Can be
-  used to check unboxed operations.
-  
-  eg. (tag 1 long)
-      (tag (+ (tag a long) (tag b long))
-           long)"
-  [form tag]
-  `(do ~spec/special-form
-       ::tag
-       {:tag '~tag}
-       ~form))
 
 (def ^{:doc "Any is the top type that contains all types."
        :forms '[Any]
@@ -1739,7 +1726,7 @@ for checking namespaces, cf for checking individual forms."}
   eg. ; must use full class name
       (non-nil-return java.lang.Class/getDeclaredMethod :all)"
   [msym arities]
-  `(non-nil-return* '~msym '~arities))
+  `(tc-ignore (non-nil-return* '~msym '~arities)))
 
 (defn ^:skip-wiki
   nilable-param* 
@@ -1758,7 +1745,7 @@ for checking namespaces, cf for checking individual forms."}
   positions (integers). If the map contains the key :all then this overrides
   other entries. The key can also be :all, which declares all parameters nilable."
   [msym mmap]
-  `(nilable-param* '~msym '~mmap))
+  `(tc-ignore (nilable-param* '~msym '~mmap)))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Annotations
@@ -1792,7 +1779,7 @@ for checking namespaces, cf for checking individual forms."}
         qsym (if (namespace varsym)
                varsym
                (symbol (str prs-ns) (str varsym)))]
-    `(untyped-var* '~qsym '~typesyn '~prs-ns '~&form)))
+    `(tc-ignore (untyped-var* '~qsym '~typesyn '~prs-ns '~&form))))
 
 (defn ^:skip-wiki
   ann* 
@@ -1932,7 +1919,7 @@ for checking namespaces, cf for checking individual forms."}
     (assert (not rplc) "Replace NYI")
     (assert (symbol? dname)
             (str "Must provide name symbol: " dname))
-    `(ann-datatype* '~vbnd '~dname '~fields '~opts '~&form)))
+    `(tc-ignore (ann-datatype* '~vbnd '~dname '~fields '~opts '~&form))))
 
 (defn ^:skip-wiki
   ann-record* 
@@ -2005,7 +1992,7 @@ for checking namespaces, cf for checking individual forms."}
         (if bnd-provided?
           (next args)
           args)]
-    `(ann-record* '~vbnd '~dname '~fields '~opt '~&form)))
+    `(tc-ignore (ann-record* '~vbnd '~dname '~fields '~opt '~&form))))
 
 
 (defn ^:skip-wiki
@@ -2020,7 +2007,7 @@ for checking namespaces, cf for checking individual forms."}
   [dname vbnd fields & {ancests :unchecked-ancestors rplc :replace :as opt}]
   (println "WARNING: ann-precord is deprecated, use ann-record")
   (flush)
-  `(ann-precord* '~dname '~vbnd '~fields '~opt))
+  `(tc-ignore (ann-precord* '~dname '~vbnd '~fields '~opt)))
 
 (defn ^:skip-wiki
   ann-protocol* 
@@ -2088,7 +2075,7 @@ for checking namespaces, cf for checking individual forms."}
         ; duplicates are checked above.
         ; duplicate munged methods are checked in collect-phase
         {:as mth} mth]
-    `(ann-protocol* '~vbnd '~varsym '~mth '~&form)))
+    `(tc-ignore (ann-protocol* '~vbnd '~varsym '~mth '~&form))))
 
 (defn ^:skip-wiki
   ann-interface* 
@@ -2144,7 +2131,7 @@ for checking namespaces, cf for checking individual forms."}
         qualsym (if (namespace clsym)
                   clsym
                   (symbol (munge (str (ns-name *ns*))) (name clsym)))]
-    `(ann-interface* '~vbnd '~clsym '~mth)))
+    `(tc-ignore (ann-interface* '~vbnd '~clsym '~mth))))
 
 (defn ^:skip-wiki
   ann-pprotocol* 
@@ -2157,7 +2144,7 @@ for checking namespaces, cf for checking individual forms."}
   as first argument, ie. before protocol name"
   [varsym vbnd & {:as mth}]
   (prn "UNSUPPPORTED OPERATION: ann-pprotocol, use ann-protocol with binder as first argument, ie. before protocol name")
-  `(ann-pprotocol* '~varsym '~vbnd '~mth))
+  `(tc-ignore (ann-pprotocol* '~varsym '~vbnd '~mth)))
 
 (defn ^:skip-wiki
   override-constructor* 
@@ -2173,7 +2160,7 @@ for checking namespaces, cf for checking individual forms."}
 (defmacro override-constructor 
   "Override all constructors for Class ctorsym with type."
   [ctorsym typesyn]
-  `(override-constructor* '~ctorsym '~typesyn '~&form))
+  `(tc-ignore (override-constructor* '~ctorsym '~typesyn '~&form)))
 
 (defn ^:skip-wiki
   override-method* 
@@ -2207,7 +2194,7 @@ for checking namespaces, cf for checking individual forms."}
   of class java.util.Properties to be (java.util.Set String)."
   [methodsym typesyn]
   (assert ((every-pred symbol? namespace) methodsym) "Method symbol must be a qualified symbol")
-  `(override-method* '~methodsym '~typesyn '~&form))
+  `(tc-ignore (override-method* '~methodsym '~typesyn '~&form)))
 
 (defn ^:skip-wiki
   typed-deps* 
@@ -2231,7 +2218,7 @@ for checking namespaces, cf for checking individual forms."}
   eg. (typed-deps clojure.core.typed.holes
                   myns.types)"
   [& args]
-  `(typed-deps* '~args '~&form))
+  `(tc-ignore (typed-deps* '~args '~&form)))
 
 ;(defn unchecked-ns*
 ;  "Internal use only. Use unchecked-ns."
@@ -2279,7 +2266,7 @@ for checking namespaces, cf for checking individual forms."}
   
   eg. (warn-on-unannotated-vars)"
   []
-  `(warn-on-unannotated-vars* '~(ns-name *ns*)))
+  `(tc-ignore (warn-on-unannotated-vars* '~(ns-name *ns*))))
 
 (defn check-form-info 
   "Type checks a (quoted) form and returns a map of results from type checking the
