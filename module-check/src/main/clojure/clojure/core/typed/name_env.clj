@@ -49,6 +49,11 @@
   (env/swap-checker! assoc impl/current-name-env-kw nme-env)
   nil)
 
+(defn merge-name-env! [nme-env]
+  {:pre [(map? nme-env)]}
+  (env/swap-checker! update impl/current-name-env-kw merge nme-env)
+  nil)
+
 (t/ann get-type-name [t/Any -> (t/U nil t/Kw r/Type)])
 (defn get-type-name 
   "Return the name with var symbol sym.

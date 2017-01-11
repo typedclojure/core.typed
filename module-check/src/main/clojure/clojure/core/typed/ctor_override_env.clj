@@ -13,6 +13,11 @@
   (env/swap-checker! assoc impl/constructor-override-env-kw m)
   nil)
 
+(defn merge-constructor-override-env! [m]
+  {:pre [(map? m)]}
+  (env/swap-checker! update impl/constructor-override-env-kw merge m)
+  nil)
+
 (defn constructor-override-env []
   {:post [(map? %)]}
   (get (env/deref-checker) impl/constructor-override-env-kw {}))

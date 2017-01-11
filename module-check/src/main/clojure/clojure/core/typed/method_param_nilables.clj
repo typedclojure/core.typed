@@ -11,6 +11,11 @@
   (env/swap-checker! assoc impl/method-param-nilable-env-kw m)
   nil)
 
+(defn merge-method-nilable-param-env! [m]
+  {:pre [(map? m)]}
+  (env/swap-checker! update impl/method-param-nilable-env-kw merge m)
+  nil)
+
 (def add-method-nilable-param impl/add-method-nilable-param)
 
 (defn nilable-param-env []

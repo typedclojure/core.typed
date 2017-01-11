@@ -89,8 +89,17 @@
   (env/swap-checker! assoc impl/current-var-annotations-kw m)
   nil)
 
+(defn merge-current-var-annotations! [m]
+  {:pre [(map? m)]}
+  (env/swap-checker! update impl/current-var-annotations-kw merge m)
+  nil)
+
 (defn reset-current-nocheck-var?! [nocheck]
   (env/swap-checker! assoc impl/current-nocheck-var?-kw nocheck)
+  nil)
+
+(defn merge-current-nocheck-var?! [nocheck]
+  (env/swap-checker! update impl/current-nocheck-var?-kw (fnil into #{}) nocheck)
   nil)
 
 (defn reset-current-used-vars! [s]
@@ -104,6 +113,13 @@
 (defn reset-var-type-env! [m nocheck]
   (reset-current-var-annotations! m)
   (reset-current-nocheck-var?! nocheck)
+  (reset-current-used-vars! #{})
+  (reset-current-checked-var-defs! #{})
+  nil)
+
+(defn refresh-var-type-env! [m nocheck]
+  (merge-current-var-annotations! m)
+  (merge-current-nocheck-var?! nocheck)
   (reset-current-used-vars! #{})
   (reset-current-checked-var-defs! #{})
   nil)

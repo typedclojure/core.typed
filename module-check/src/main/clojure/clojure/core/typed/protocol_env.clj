@@ -32,6 +32,11 @@
   (env/swap-checker! assoc impl/current-protocol-env-kw e)
   nil)
 
+(defn merge-protocol-env! [e]
+  {:pre [(map? e)]}
+  (env/swap-checker! update impl/current-protocol-env-kw merge e)
+  nil)
+
 (t/ann ^:no-check add-protocol [t/Sym r/Type -> nil])
 (def add-protocol impl/add-protocol)
 

@@ -58,7 +58,7 @@
                     ;; nested check-ns inside check-form switches off check-form
                     vs/*in-check-form* false]
             (let [terminal-error (atom nil)]
-              (reset-env/reset-envs!)
+              ;(reset-env/reset-envs!)
               ;(reset-caches)
               ;; handle terminal type error
               (try

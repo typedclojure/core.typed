@@ -13,6 +13,11 @@
   (env/swap-checker! assoc impl/method-return-nonnilable-env-kw m)
   nil)
 
+(defn merge-nonnilable-method-return-env! [m]
+  {:pre [(map? m)]}
+  (env/swap-checker! update impl/method-return-nonnilable-env-kw merge m)
+  nil)
+
 (defn nonnilable-method-return-env []
   {:post [(map? %)]}
   (get (env/deref-checker) impl/method-return-nonnilable-env-kw {}))

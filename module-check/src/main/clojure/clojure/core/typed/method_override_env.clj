@@ -16,6 +16,11 @@
   (env/swap-checker! assoc impl/method-override-env-kw m)
   nil)
 
+(defn merge-method-override-env! [m]
+  {:pre [(map? m)]}
+  (env/swap-checker! update impl/method-override-env-kw merge m)
+  nil)
+
 (defn method-override-env []
   {:post [(map? %)]}
   (get (env/deref-checker) impl/method-override-env-kw {}))
