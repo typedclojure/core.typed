@@ -5214,7 +5214,7 @@
            '(ns foo
               {:core.typed {:collect-only true}}))
          (should-check-or-collect-file
-           'clojure.core.typed.test.dont-check-me))))
+           'clojure.spec))))
   (testing ":collect-only should collect but not check"
     (is-clj
       (= #{:collect}
