@@ -37,12 +37,12 @@
     `(let [expected-ret# ~expected-ret]
        (binding [*ns* *ns*
                  *file* *file*]
+         (t/check-form-info '~ns-form)
          (t/check-form-info 
-           '(do ~ns-form ~frm)
+           '~frm
            :expected-ret expected-ret#
            :expected '~syn
-           :type-provided? ~provided?
-           )))))
+           :type-provided? ~provided?)))))
 
 (defmacro tc-e 
   "Type check an an expression in namespace that :refer's
