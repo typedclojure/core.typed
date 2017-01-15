@@ -1,6 +1,7 @@
 (ns ^:skip-wiki clojure.core.typed.analyze-cljs
   (:refer-clojure :exclude [extenders])
-  (:require [clojure.core.typed.current-impl :as impl]))
+  (:require [clojure.core.typed.current-impl :as impl]
+            [cljs.jvm.tools.analyzer]))
 
 (defn ast-for-form-in-ns
   "Returns an AST node for the form 
@@ -9,7 +10,7 @@
   (require 'cljs.jvm.tools.analyzer)
   (require 'cljs.jvm.tools.analyzer.hygienic)
   (-> ((impl/v 'cljs.jvm.tools.analyzer/analyze-form-in-ns) nsym form)
-      ((impl/v 'cljs.jvm.tools.analyzer.hygienic/ast-hy)
+      #_((impl/v 'cljs.jvm.tools.analyzer.hygienic/ast-hy)
                  )))
 
 (defn ast-for-form
@@ -20,7 +21,7 @@
   (require 'cljs.jvm.tools.analyzer)
   (require 'cljs.jvm.tools.analyzer.hygienic)
   (let [ast (-> ((impl/v 'cljs.jvm.tools.analyzer/analyze-form) form)
-                ((impl/v 'cljs.jvm.tools.analyzer.hygienic/ast-hy)
+                #_((impl/v 'cljs.jvm.tools.analyzer.hygienic/ast-hy)
                  ))]
     (if eval-fn
       (eval-fn opt ast)
@@ -33,7 +34,7 @@
   {:pre [(symbol? nsym)]}
   (require 'cljs.jvm.tools.analyzer)
   (require 'cljs.jvm.tools.analyzer.hygienic)
-  (map (impl/v 'cljs.jvm.tools.analyzer.hygienic/ast-hy)
+  (mapv identity #_(impl/v 'cljs.jvm.tools.analyzer.hygienic/ast-hy)
        ((impl/v 'cljs.jvm.tools.analyzer/analyze-ns) nsym)))
 
 (defn extenders

@@ -782,7 +782,7 @@
 
 (defn- parse-in-ns []
   {:post [(symbol? %)]}
-  (or (some-> *parse-type-in-ns* ns-name)
+  (or *parse-type-in-ns*
       (impl/impl-case
         :clojure (ns-name *ns*)
         :cljs (do

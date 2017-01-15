@@ -46,6 +46,10 @@
 (deftest subtype-prims-cljs-test
   (is-cljs (sub/subtype? (r/-val 1) (prs/parse-cljs 'number))))
 
+(deftest throw-test
+  (is-tc-e (throw (JSError. "foo"))
+           Nothing))
+
 (deftest ann-test
   (is-tc-e (t/ann foo number)))
 

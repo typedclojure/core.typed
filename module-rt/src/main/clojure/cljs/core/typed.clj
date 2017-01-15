@@ -18,7 +18,7 @@
 (defn load-if-needed 
   "Load and initialize all of core.typed if not already"
   []
-  (load/load-if-needed))
+  (load/load-if-needed true))
 
 (defn reset-caches
   "Reset internal type caches."

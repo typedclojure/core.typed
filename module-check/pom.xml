@@ -132,6 +132,11 @@
     </dependency>
     <dependency>
       <groupId>org.clojure</groupId>
+      <artifactId>jvm.tools.analyzer</artifactId>
+      <version>0.6.2</version>
+    </dependency>
+    <dependency>
+      <groupId>org.clojure</groupId>
       <artifactId>tools.reader</artifactId>
       <version>1.0.0-beta3</version>
     </dependency>
