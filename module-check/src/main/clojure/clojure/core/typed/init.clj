@@ -119,7 +119,7 @@
       (when cljs?
         (impl/with-cljs-impl
           ;; FIXME should be load-core-envs!
-          ((impl/v 'clojure.core.typed.reset-env/reset-envs!))))
+          ((impl/v 'clojure.core.typed.reset-env/reset-envs!) cljs?)))
       (println "Finished building base environments")
       (flush)
       nil))))
