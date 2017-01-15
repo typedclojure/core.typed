@@ -993,22 +993,19 @@
                                         :objects (mapv (comp r/ret-o u/expr-type) cargs)))
                         expected)))))
 
-;make hash-map
-(add-invoke-special-method 'clojure.core/hash-map
-  [{fexpr :fn :keys [args] :as expr} & [expected]]
-  {:post [(-> % u/expr-type r/TCResult?)
-          (vector? (:args %))]}
-  (let [cargs (mapv check args)]
-    (cond
-      (every? r/Value? (keys (apply hash-map (mapv (comp r/ret-t u/expr-type) cargs))))
-      (-> expr
-        (update-in [:fn] check)
-        (assoc :args cargs
-               u/expr-type (below/maybe-check-below
-                             (r/ret (c/-complete-hmap
-                                      (apply hash-map (mapv (comp r/ret-t u/expr-type) cargs))))
-                             expected)))
-      :else (invoke/normal-invoke check expr fexpr args expected :cargs cargs))))
+;(add-invoke-special-method 'clojure.core/hash-map
+;  [{fexpr :fn :keys [args] :as expr} & [expected]]
+;  {:post [(-> % u/expr-type r/TCResult?)
+;          (vector? (:args %))]}
+;  (let [cargs (mapv check args)]
+;    (cond
+;      (every? r/Value? (keys (apply hash-map (mapv (comp r/ret-t u/expr-type) cargs))))
+;      (-> expr
+;        (update-in [:fn] check)
+;        (assoc :args cargs
+;               u/expr-type (r/ret (c/-complete-hmap
+;                                (apply hash-map (mapv (comp r/ret-t u/expr-type) cargs))))))
+;      :else (invoke/normal-invoke check expr fexpr args expected :cargs cargs))))
 
 ;(apply concat hmap)
 (add-invoke-apply-method 'clojure.core/concat
@@ -1034,7 +1031,7 @@
         :else cu/not-special))))
 
 ;apply hash-map
-(add-invoke-apply-method 'clojure.core/hash-map
+#_(add-invoke-apply-method 'clojure.core/hash-map
   [{[fn-expr & args] :args :as expr} & [expected]]
   {:post [(or 
             (and (-> % u/expr-type r/TCResult?)
@@ -1373,11 +1370,13 @@
 
             :else (invoke/normal-invoke check expr fexpr args expected :cfexpr cfexpr)))))))
 
-(defn check-rest-fn [remain-dom rest drest kws]
+(defn check-rest-fn [remain-dom & {:keys [rest drest kws prest pdot]}]
   {:pre [(or (r/Type? rest)
+             (r/Type? prest)
              (r/DottedPretype? drest)
+             (r/Type? pdot)
              (r/KwArgs? kws))
-         (#{1} (count (filter identity [rest drest kws])))
+         (#{1} (count (filter identity [rest drest kws prest pdot])))
          (every? r/Type? remain-dom)]
    :post [(r/Type? %)]}
   (cond
@@ -1390,6 +1389,9 @@
                          :rest rest
                          :drest drest)
                 (r/make-CountRange 1)))
+
+    prest (c/Un r/-nil prest)
+    pdot (c/Un r/-nil pdot)
 
     :else (c/KwArgs->Type kws)))
 
