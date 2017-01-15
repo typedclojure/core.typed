@@ -3,5 +3,5 @@ jdk:
   - oraclejdk8
 sudo: false
 install: 
-  - mkdir deps && cd deps && git clone https://github.com/frenchy64/clojurescript.git --branch origin/tools.analyzer-ast && cd clojurescript && lein install && cd ../..
+  - mkdir deps && cd deps && git clone https://github.com/frenchy64/clojurescript.git --branch tools.analyzer-ast && cd clojurescript && lein install && cd ../..
   - mvn install -DskipTests=true -Dgpg.skip
