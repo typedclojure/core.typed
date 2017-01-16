@@ -884,8 +884,6 @@ clojure.inspector/inspect-table [(U nil (Seqable Any)) -> javax.swing.JFrame]
 clojure.pprint/cl-format [(U java.io.Writer nil Boolean) String Any * -> (U nil String)]
 clojure.pprint/fresh-line [-> Any]
 clojure.pprint/get-pretty-writer [java.io.Writer -> java.io.Writer]
-clojure.pprint/pprint (IFn [Any -> nil]
-                           [Any java.io.Writer -> nil])
 
 clojure.main/demunge [String -> String]
 clojure.main/repl-prompt [-> Any]
