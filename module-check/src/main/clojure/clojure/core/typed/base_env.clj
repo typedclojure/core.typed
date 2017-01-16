@@ -829,8 +829,7 @@ clojure.test/run-tests [Symbol * -> (Map Any Any)]
 clojure.test/run-all-tests (IFn [-> (Map Any Any)]
                                 [java.util.regex.Pattern * -> (Map Any Any)])
 clojure.test/successful? [(U nil (Map Any Any)) -> Boolean]
-clojure.test/compose-fixtures (All [x]
-                                [[[-> x] -> x] [[-> x] -> x] -> [[-> x] -> x]])
+clojure.test/compose-fixtures [[[-> Any] -> Any] [[-> Any] -> Any] -> [[-> Any] -> Any]]
 clojure.test/testing-vars-str [(Map Any Any) -> String]
 clojure.test/testing-contexts-str [-> String]
 clojure.test/test-ns [(U Namespace Symbol) -> (Map Any Any)]
