@@ -818,19 +818,22 @@ clojure.set/select (All [x y]
                              [[x -> Any :filters {:then (! y 0)}] (Set x) -> (Set (I x (Not y)))]
                              [[x -> Any] (Set x) -> (Set x)]))
  
-clojure.string/escape [String (Map Any Any) -> String]
+; FIXME should be [String [Any -> Any] -> String]
+clojure.string/escape [String (U (Map Any Any) [Any -> Any]) -> String]
 clojure.string/split-lines [String -> (Vec String)]
 
 clojure.test/function? [Any -> Boolean]
 clojure.test/assert-any [Any Any -> Any]
 clojure.test/do-report [Any -> Any]
 clojure.test/run-tests [Symbol * -> (Map Any Any)]
-clojure.test/run-all-tests [java.util.regex.Pattern * -> (Map Any Any)]
-clojure.test/successful? [Any -> Boolean]
-clojure.test/compose-fixtures [Any Any -> Any]
-clojure.test/testing-vars-str [Any -> String]
+clojure.test/run-all-tests (IFn [-> (Map Any Any)]
+                                [java.util.regex.Pattern * -> (Map Any Any)])
+clojure.test/successful? [(U nil (Map Any Any)) -> Boolean]
+clojure.test/compose-fixtures (All [x]
+                                [[[-> x] -> x] [[-> x] -> x] -> [[-> x] -> x]])
+clojure.test/testing-vars-str [(Map Any Any) -> String]
 clojure.test/testing-contexts-str [-> String]
-clojure.test/test-ns [Symbol -> (Map Any Any)]
+clojure.test/test-ns [(U Namespace Symbol) -> (Map Any Any)]
 
 clojure.test.tap/print-tap-plan [Any -> Any]
 clojure.test.tap/print-tap-diagnostic [String -> Any]
@@ -841,83 +844,112 @@ clojure.java.javadoc/add-local-javadoc [Any -> (List Any)]
 clojure.java.javadoc/add-remote-javadoc [String Any -> (Map Any Any)]
 clojure.java.javadoc/javadoc [Any -> Any]
 
-clojure.edn/read-string[(U String nil) -> (U nil Symbol Long)] 
+clojure.edn/read-string [(U String nil) -> Any]
 
-clojure.java.shell/sh [ String * -> (Map Any Any)]
+clojure.java.shell/sh [Any *
+                       ;would be nice (combine * and kw args)
+                       ; String *
+                       ;& :optional {:in Any  ;; any valid input to clojure.java.io/copy
+                       ;             :inc-enc String :out-env (U ':bytes String)
+                       ;             :env (U (Array String) (Map Any Any))
+                       ;             :dir (U String java.io.File)}
+                       -> '{:exit String
+                            :out (U (Array byte) String)
+                            :err String}]
 
-clojure.java.browse/browse-url [Any -> Boolean]
+clojure.java.browse/browse-url [Any -> Any]
 
-clojure.java.io/delete-file [String -> Boolean]
+clojure.java.io/delete-file (IFn [Any
+                                  ;; FIXME any arg that c.j.io/file accepts
+                                  #_String 
+                                  -> Any]
+                                 [Any Any -> Any])
 
-clojure.stacktrace/e [-> (U nil Any)]
+clojure.stacktrace/e [-> Any]
 clojure.stacktrace/print-cause-trace [Throwable -> Any]
 clojure.stacktrace/print-stack-trace [Throwable -> Any]
 clojure.stacktrace/print-throwable [Throwable -> Any]
-clojure.stacktrace/root-cause [Throwable -> Exception]
+clojure.stacktrace/root-cause [Throwable -> Throwable]
 
-clojure.reflect/reflect [Any -> (Map Any Any)]
+;; FIXME keyword arguments
+clojure.reflect/reflect [Any Any * -> (Map Any Any)]
 
 clojure.inspector/atom? [Any -> Boolean]
 clojure.inspector/collection-tag [Any -> Keyword]
 clojure.inspector/tree-model [Any -> Any]
-clojure.inspector/old-table-model [(Vec Any) -> Any]
+clojure.inspector/old-table-model [(U nil (Seqable Any)) -> Any]
 clojure.inspector/inspect [Any -> javax.swing.JFrame]
 clojure.inspector/inspect-tree [Any -> javax.swing.JFrame]
-clojure.inspector/inspect-table [(Vec Any) -> javax.swing.JFrame]
+clojure.inspector/inspect-table [(U nil (Seqable Any)) -> javax.swing.JFrame]
 
-clojure.pprint/cl-format [ (U Boolean nil) String -> Any]
+clojure.pprint/cl-format [(U java.io.Writer nil Boolean) String Any * -> (U nil String)]
 clojure.pprint/fresh-line [-> Any]
-clojure.pprint/get-pretty-writer [Any -> Any]
-clojure.pprint/pprint [Any -> Any]
+clojure.pprint/get-pretty-writer [java.io.Writer -> java.io.Writer]
+clojure.pprint/pprint (IFn [Any -> nil]
+                           [Any java.io.Writer -> nil])
 
 clojure.main/demunge [String -> String]
 clojure.main/repl-prompt [-> Any]
+clojure.main/repl-read [Any Any -> Any]
 clojure.main/repl-caught [Throwable -> Any]
 clojure.main/repl-exception [Throwable -> Any]
 clojure.main/root-cause [Throwable -> Exception]
-clojure.main/repl [-> Any]
-clojure.main/main [-> nil]
-clojure.main/load-script[String -> Any]
+clojure.main/repl [& :optional {:init [-> Any]
+                                :need-prompt [-> Any]
+                                :prompt [-> Any]
+                                :flush [-> Any]
+                                :read [Any Any -> Any]
+                                :eval [Any -> Any]
+                                :print [Any -> Any]
+                                :caught [Throwable -> Any]}
+                   -> Any]
+clojure.main/main [Any * -> Any]
+clojure.main/load-script [String -> Any]
 
 clojure.walk/keywordize-keys [Any -> Any]
 clojure.walk/macroexpand-all [Any -> Any]
-clojure.walk/postwalk [Any Any -> Any]
+clojure.walk/postwalk [[Any -> Any] Any -> Any]
 clojure.walk/postwalk-demo [Any -> Any]
-clojure.walk/postwalk-replace [(U (Vec Any) (Map Any Any)) Any -> Any]
-clojure.walk/prewalk [Any Any -> Any]
+clojure.walk/postwalk-replace [(Map Any Any) Any -> Any]
+clojure.walk/prewalk [[Any -> Any] Any -> Any]
 clojure.walk/prewalk-demo [Any -> Any]
-clojure.walk/prewalk-replace [(U (Vec Any) (Map Any Any)) Any -> Any]
+clojure.walk/prewalk-replace [(Map Any Any) Any -> Any]
 clojure.walk/stringify-keys [Any -> Any]
-clojure.walk/walk [Any Any (Vec Any) -> (List Any)]
+clojure.walk/walk [[Any -> Any] [Any -> Any] Any -> Any]
 
-clojure.zip/zipper [ Any Any Any Any -> (Vec Any)]
+clojure.zip/zipper [[Any -> Any] [(U nil (Seqable Any)) -> (U nil (Seq Any))] 
+                    [Any (U nil (Seq Any)) -> Any]
+                    Any 
+                    -> (Vec Any)]
 clojure.zip/seq-zip [Any -> (Vec Any)]
 clojure.zip/vector-zip [Any -> (Vec Any)]
 clojure.zip/xml-zip [Any -> (Vec Any)]
 clojure.zip/node [(Vec Any) -> Any]
-clojure.zip/branch? [Any -> Boolean]
-clojure.zip/children [Any -> Any]
-clojure.zip/root[(Vec Any) -> Any]
+clojure.zip/branch? [(Vec Any) -> Boolean]
+clojure.zip/children [(Vec Any) -> (U nil (Seq Any))]
+clojure.zip/root [(Vec Any) -> Any]
 clojure.zip/rightmost [(Vec Any) -> (Vec Any)]
-clojure.zip/right[(Vec Any) -> (U nil Any)]
-clojure.zip/up [Any -> (U nil (Vec Any))]
-clojure.zip/rights[(Vec Any) -> (U nil Any)]
-clojure.zip/replace[(Vec Any) Any -> (Vec Any)]
+clojure.zip/right [(Vec Any) -> Any]
 clojure.zip/up [(Vec Any) -> (U nil (Vec Any))]
-clojure.zip/down[(Vec Any) -> (U (Vec Any) nil)]
-clojure.zip/left[(Vec Any) -> (U (Vec Any) nil)]
-clojure.zip/lefts[(Vec Any) -> (U (Vec Any) nil)]
-clojure.zip/leftmost[(Vec Any) -> (U (Vec Any) nil)]
+clojure.zip/rights [(Vec Any) -> Any]
+clojure.zip/replace [(Vec Any) Any -> (Vec Any)]
+clojure.zip/down [(Vec Any) -> (U (Vec Any) nil)]
+clojure.zip/left [(Vec Any) -> (U (Vec Any) nil)]
+clojure.zip/lefts [(Vec Any) -> (U (Vec Any) nil)]
+clojure.zip/leftmost [(Vec Any) -> (U (Vec Any) nil)]
 clojure.zip/append-child [(Vec Any) Any -> (Vec Any)]
-clojure.zip/branch?[(Vec Any) -> Boolean]
-clojure.zip/end?[(Vec Any) -> Boolean]
+clojure.zip/branch? [(Vec Any) -> Boolean]
+clojure.zip/end? [(Vec Any) -> Boolean]
 clojure.zip/insert-child [(Vec Any) Any -> (Vec Any)]
-clojure.zip/insert-left [(U (Vec Any) nil) Any -> (Vec Any)]
-clojure.zip/insert-right [(U (Vec Any) nil) Any -> (Vec Any)]
-clojure.zip/next[(Vec Any) -> (Vec Any)]
-clojure.zip/prev[(Vec Any) -> (U (Vec Any) nil)]
-clojure.zip/path[(Vec Any) -> (U (Vec Any) nil)]
-clojure.zip/remove[(U (Vec Any) nil) -> (Vec Any)]
+clojure.zip/insert-left [(Vec Any) Any -> (Vec Any)]
+clojure.zip/insert-right [(Vec Any) Any -> (Vec Any)]
+clojure.zip/next [(Vec Any) -> (Vec Any)]
+clojure.zip/prev [(Vec Any) -> (U (Vec Any) nil)]
+
+;; more to say here
+clojure.zip/path [(Vec Any) -> Any]
+
+clojure.zip/remove [(Vec Any) -> (Vec Any)]
 
 clojure.core/interpose (All [x] (IFn [x (Option (Seqable x)) -> (ASeq x)]))
 clojure.core/interleave (All [x] [(Option (Seqable x)) (Option (Seqable x)) (Option (Seqable x)) * -> (ASeq x)])

@@ -5,11 +5,9 @@
              [clojure.core.typed.test.destructure]))
 
 (deftest delete-file-test
-  (is-tc-e   #(delete-file "abc" ) [-> Boolean]
-             :requires [[clojure.java.io :refer [delete-file]]])
-  (is-tc-err   (delete-file "abc" ) String
-             :requires [[clojure.java.io :refer [delete-file]]])
-  (is-tc-err   (delete-file 1 ) Boolean
+  (is-tc-e #(delete-file "abc") [-> Any]
+           :requires [[clojure.java.io :refer [delete-file]]])
+  (is-tc-e #(delete-file "abc" true) [-> Any]
+           :requires [[clojure.java.io :refer [delete-file]]])
+  (is-tc-err #(delete-file "abc") String
              :requires [[clojure.java.io :refer [delete-file]]]))
-
-  
