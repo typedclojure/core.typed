@@ -3,8 +3,6 @@
             [clojure.java.io :as io]
             [clojure.core.typed.util-vars :as vs]))
 
-(alter-meta! *ns* assoc :skip-wiki true)
-
 (defn load-if-needed 
   "Load and initialize all of core.typed if not already"
   ([] (load-if-needed false))
@@ -18,7 +16,8 @@
       (let [init-ns (find-ns 'clojure.core.typed.init)]
         (assert init-ns)
         (when (or (not (@(ns-resolve init-ns 'loaded?)))
-                  cljs?)
+                  (and cljs?
+                       (not (@(ns-resolve init-ns 'has-cljs-loaded?)))))
           (println "Initializing core.typed ...")
           (flush)
           (time (@(ns-resolve init-ns 'load-impl) cljs?))
