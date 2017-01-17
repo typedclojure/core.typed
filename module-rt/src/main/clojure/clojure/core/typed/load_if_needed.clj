@@ -17,7 +17,8 @@
         (require 'clojure.core.typed.init))
       (let [init-ns (find-ns 'clojure.core.typed.init)]
         (assert init-ns)
-        (when-not (@(ns-resolve init-ns 'loaded?))
+        (when (or (not (@(ns-resolve init-ns 'loaded?)))
+                  cljs?)
           (println "Initializing core.typed ...")
           (flush)
           (time (@(ns-resolve init-ns 'load-impl) cljs?))

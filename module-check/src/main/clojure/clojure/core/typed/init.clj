@@ -21,7 +21,8 @@
              (str "There was previously an unrecoverable internal error while loading core.typed." 
                   " Please restart your process.")))
 
-    (and @successfully-loaded? @attempted-loading?)
+    (and @successfully-loaded? @attempted-loading?
+         (not cljs?))
     nil
 
     :else
