@@ -5461,6 +5461,23 @@
              (when (some? x)
                (inc x)))))
 
+(deftest get-ann-test
+  (is-tc-e (get '{:a 1} :a) '1)
+  (is-tc-err (get '{:a 1} :a) Bool)
+  ;; hsets
+  (is-tc-e (get #{:a} :a) ':a)
+  (is-tc-e (get #{:a} :a) Kw)
+  (is-tc-e (get #{:a} :b) nil)
+  (is-tc-e (get #{:a} (ann-form :a Any)) (U ':a nil))
+  (is-tc-err (get #{:a} (ann-form :a Any)) nil)
+  ;strings
+  (is-tc-e (get "a" :a))
+  ;vectors
+  ;TODO need to allow invoke-get to call find-val-type
+  ; on non-keyword keys
+  ;(is-tc-e (get [1] 0) '1)
+)
+
 ;    (is-tc-e 
 ;      (let [f (fn [{:keys [a] :as m} :- '{:a (U nil Num)}] :- '{:a Num} 
 ;                {:pre [(number? a)]} 

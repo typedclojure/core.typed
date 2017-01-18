@@ -1698,10 +1698,6 @@ complete.core/completions
 ;            :b 2)
 ;       :c 3)
 ;
-;  (assoc my-map :a 1 :b 2 :c 3)
-;  (assoc (assoc my-map :a 1) :b 2 :c 3)
-;  (assoc (assoc (assoc my-map :a 1) :b 2) :c 3)
-;
 ;  clojure.core/aset
 ;       (Label [rec]
 ;              (All [w [v :< w] :dotted [b]]
@@ -1716,55 +1712,6 @@ complete.core/completions
 ;                       [(Array _ x) AnyInteger b ... b
 ;                        :recur 
 ;                        (rec x b ... b)])))
-;
-;  clojure.core/assoc 
-;       (All [[h <: (IPersistentMap Any Any)]
-;             a b e ...2]
-;         [h k ...2 a b -> (Assoc h k ...2 a b)])
-;
-;       (Label [rec]
-;              (All [[h :< (HMap {})] x y [k :< (I AnyValue Keyword)] [e :< k] :dotted [b]]
-;                   [h k v -> (I h (HMap k v))]
-;                   [(Associative y x) y x -> (Associative y x)]
-;                   [h k v b ... b
-;                    :recur (rec (I h (HMap {k v})) b ... b)]
-;                   [(Associative y x) y x b ... b
-;                    :recur (rec (Associative y x) b ... b)]
-;                   ))
-;
-;  clojure.core/dissoc
-;       (Label [rec]
-;              (All [[m :< (Associative _ _)] :dotted [b]]
-;                   [nil Any * -> nil]
-;                   [m -> m]
-;                   [m k b ... b
-;                    :recur
-;                    (rec (I m (HMap {} :without [k])) b ... b)]))
-;
-;  (update-in {:a {:b 1}} [:a :b] inc)
-;  (update-in 
-;    (update-in {:a {:b 1}} [:a] inc) 
-;    [:b] 
-;    inc)
-;
-;  clojure.core/update-in
-;       (FixedPoint
-;         (All [[x :< (U nil (Associative Any Any))] k [l :< k] v r e
-;               :dotted [a b]]
-;              (IFn [(HMap {l v}) (Vector* k) [v a ... a -> r] a ... a -> (I x (HMap {l r}))]
-;                  [(HMap {l r}) (Vector* k b ... b) [v a ... a -> e] a ... a
-;                   :recur
-;                   [r (Vector* b ... b) [v a ... a -> e] a ... a]])))
-;
-;  ;clojure.core/get-in 
-;  ;     (Label [rec]
-;  ;       (All [[x :< (U nil (Associative Any Any))] k :dotted [b]]
-;  ;            (IFn [x (Vector*) -> x]
-;  ;                [x (Vector*) _ -> x]
-;  ;                [(U nil (Associative _ y) (Vector* k b ... b) a -> x
-;  ;                ;TODO
-;  ;                [(U nil (Associative Any y)) (Vector* k) -> (U nil x)]
-;  ;                    ))))
 ;
 ;  clojure.core/partial 
 ;       (Label [rec]
@@ -1784,6 +1731,18 @@ complete.core/completions
 ;                  (All [y b ... c ...]
 ;                       [[b ... b -> y] [b ... b -> c] ... c -> [b ... b -> (DottedVec y c ... c)]])
 ;  )
+; update-in (All [m b k ... a ...]
+;             [m '(k ... k) [(GetIn m k ... k) a ... a -> b] a ... a -> (AssocIn m k ... k b)])
+; assoc-in (All [m v k ...]
+;             [m '(k ... k) v -> (AssocIn m k ... k v)])
+; get-in (All [m d k ...]
+;          (IFn [m '(k ... k) -> (GetIn m k ... k)]
+;               [m '(k ... k) d -> (GetIn m k ... k d)])
+; get (All [m k d]
+;       (IFn [m k -> (Get m k)]
+;            [m k d -> (Get m k d)]))
+; update (All [m k d]
+;          [m k [(Get m k) a ... a -> b] a ... a -> (Assoc m k b)])
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Nocheck env

@@ -2341,6 +2341,15 @@
                                (find-val-type hmap k default)
                                r/-any))
                            :else r/-any))
+      ; FIXME see commented out tests in get-ann-test
+;      (and (r/HeterogeneousVector? t) 
+;           (not (:rest t))
+;           (not (:drest t))
+;           (not (:repeat t))
+;           (r/Value? k)
+;           (integer? (:val k)))
+;      (get (:types t) (:val k) default)
+
       (r/HeterogeneousMap? t) (let [pres ((:types t) k)
                                     opt  ((:optional t) k)]
                                 (when (complete-hmap? t)
@@ -2376,6 +2385,16 @@
                                                     " which does not declare the key absent ")
                                       (profile/p :check/find-val-type-with-hmap-fall-through)
                                       r/-any)))
+
+      (r/HSet? t) (let [ftype ((:fixed t) k)]
+                    (cond
+                      ftype ftype
+
+                      ; always goes to default
+                      (and (r/Value? k) (:complete? t))
+                      default
+
+                      :else (apply Un default (:fixed t))))
 
       (r/Record? t) (find-val-type (Record->HMap t) k default)
 

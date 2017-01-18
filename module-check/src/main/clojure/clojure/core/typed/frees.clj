@@ -18,7 +18,7 @@
                                         PrimitiveArray DataType Protocol TypeFn Poly PolyDots
                                         Mu HeterogeneousVector HeterogeneousList HeterogeneousMap
                                         CountRange Name Value Top Unchecked TopFunction B F Result AnyValue
-                                        HeterogeneousSeq Scope TCError Extends AssocType HSequential HSet)
+                                        HeterogeneousSeq Scope TCError Extends AssocType GetType HSequential HSet)
            (clojure.core.typed.filter_rep FilterSet TypeFilter NotTypeFilter ImpFilter
                                           AndFilter OrFilter TopFilter BotFilter)
            (clojure.core.typed.object_rep Path EmptyObject NoObject)
@@ -312,6 +312,10 @@
                                    (assert (symbol? name))
                                    [(t/ann-form {name :covariant} VarianceMap)
                                     (frees pre-type)]))))
+
+(add-frees-method [::any-var GetType]
+  [{:keys [target key not-found]}] 
+  (apply combine-frees (mapv frees [target key not-found])))
 
 ; are negative types covariant?
 (add-frees-method [::any-var NotType]
