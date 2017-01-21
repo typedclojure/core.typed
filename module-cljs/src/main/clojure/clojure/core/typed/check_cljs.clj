@@ -50,9 +50,7 @@
 (declare check)
 
 (defn check-asts [asts]
-  (doall
-    (for [ast asts]
-      (check ast))))
+  (mapv check asts))
 
 (defn check-ns [nsym]
   {:pre [(symbol? nsym)]
@@ -123,9 +121,9 @@
   (let [res (expr-type (check {:op :invoke
                                :from-js-op expr
                                :env env
-                               :f {:op :var
-                                   :env env
-                                   :info {:name js-op}}
+                               :fn {:op :var
+                                    :env env
+                                    :info {:name js-op}}
                                :args args}
                               expected))]
     (assoc expr
@@ -193,7 +191,7 @@
              expr-type final-ret))))
 
 (add-check-method :invoke
-  [{fexpr :f :keys [args] :as expr} & [expected]]
+  [{fexpr :fn :keys [args] :as expr} & [expected]]
   (let [e (invoke-special expr)]
     (cond
       (not= e ::not-special) e
