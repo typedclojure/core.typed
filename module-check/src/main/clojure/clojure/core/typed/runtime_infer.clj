@@ -3135,7 +3135,14 @@
                                     (every? set? %)]}
                             (into
                               ksets
-                              (map set (comb/combinations (vec kset) (- (count kset) n)))))
+                              (map set (comb/combinations 
+                                         (vec kset) 
+                                         ;; no idea if this is correct, used to
+                                         ;; be (- (count kset) n) but got arity
+                                         ;; exception in comb/combinations
+                                         (max
+                                           different-kset-thres
+                                           (- (count kset) n))))))
                           #{}
                           (range 1 (inc different-kset-thres)))]
               (reduce (fn [res kset]
