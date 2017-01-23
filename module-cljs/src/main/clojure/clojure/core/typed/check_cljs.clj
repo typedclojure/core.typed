@@ -85,12 +85,23 @@
     (assoc expr
            expr-type (ret t))))
 
+(set! *print-level* 4)
+(set! *print-length* 6)
+(add-check-method
+ :const
+ [{:keys [form] :as expr} & [expected]]
+ (let [t (r/-val form)
+       _ (when expected
+           (when-not (sub/subtype? t (ret-t expected))
+             (cu/expected-error t (ret-t expected))))]
+   (assoc expr expr-type (ret t))))
+
 (add-check-method :list
   [{:keys [items] :as expr} & [expected]]
   (let [citems (mapv check items)
         actual (r/HeterogeneousList-maker (mapv (comp ret-t expr-type) citems))
         _ (binding [vs/*current-env* (:env expr)]
-            (when expected 
+            (when expected
               (when-not (sub/subtype? actual (ret-t expected))
                 (cu/expected-error actual (ret-t expected)))))]
     (assoc expr
@@ -347,3 +358,36 @@
   [expr & [expected]]
   (assoc expr
          expr-type (ret r/-any)))
+
+
+(add-check-method :quote [{:keys [expr] :as quote-expr} & [expected]]
+  (let [cexpr (check expr expected)]
+    (assoc quote-expr
+           :expr cexpr
+           expr-type (expr-type cexpr))))
+
+(add-check-method
+ :throw [expr & [expected]]
+ (assoc expr
+        expr-type (ret r/-nothing)))
+
+;;fixme
+(add-check-method
+ :local [expr & [expected]]
+ (chk/check expr expected))
+
+(defn check-host
+  [{:keys [method target args] :as expr} expected]
+  {:post [#(-> % expr-type r/TCResult?)]})
+
+(add-check-method
+ :host-call [{:keys [method target args] :as expr} & [expected]]
+ ;{:pre [(= (:tag expr) "js")]}
+ (do
+   (println "ERROR ##CLJS## " (with-out-str (clojure.pprint/pprint expr)))
+   (throw
+    (Exception. "check:host-call not implemented, yet"))))
+
+(add-check-method
+ :js-var [expr & [expected]]
+ )

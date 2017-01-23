@@ -110,9 +110,10 @@
    :form val})
 
 (defn method-body-kw []
-  (impl/impl-case
-    :clojure :body
-    :cljs :expr))
+  #_(impl/impl-case
+   :clojure :body
+   :cljs :expr)
+  :body)
 
 (defn method-required-params [method]
   (impl/impl-case
