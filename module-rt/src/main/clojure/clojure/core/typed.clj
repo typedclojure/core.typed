@@ -2457,16 +2457,36 @@ for checking namespaces, cf for checking individual forms."}
   Then call `runtime-infer` to populate the namespace's
   corresponding file with these generated annotations.
 
+  Optional keys:
+    :ns     The namespace to infer types for. (Symbol/Namespace)
+            Default: *ns*
+    :fuel   Number of iterations to perform in inference algorithm
+            (integer)
+            Default: nil (don't restrict iterations)
+    :debug  Perform print debugging. (boolean/nil)
+            Default: nil
+
   eg. (runtime-infer) ; infer for *ns*
 
-      (runtime-infer 'my-ns) ; infer for my-ns
+      (runtime-infer :ns 'my-ns) ; infer for my-ns
+
+      (runtime-infer :fuel 0) ; iterations in type inference algorithm
+                              ; (higher = smaller types + more recursive)
+
+      (runtime-infer :debug true) ; enable debugging
   "
-  ([] (runtime-infer *ns*))
-  ([ns]
+  ([& kws]
    (load-if-needed)
    (require '[clojure.core.typed.runtime-infer])
-   ((impl/v 'clojure.core.typed.runtime-infer/runtime-infer)
-    {:ns ns})))
+   (let [m (-> (if (= 1 (count kws))
+                 (do
+                   (err/deprecated-warn
+                     "runtime-infer with 1 arg: use {:ns <ns>}")
+                   {:ns (first kws)})
+                 (apply hash-map kws))
+               (update :ns #(or % *ns*)))]
+     ((impl/v 'clojure.core.typed.runtime-infer/runtime-infer)
+      m))))
 
 (defn spec-infer 
   "Infer and insert specs for a given namespace.
@@ -2486,16 +2506,36 @@ for checking namespaces, cf for checking individual forms."}
   Then call `spec-infer` to populate the namespace's
   corresponding file with these generated specs.
 
+  Optional keys:
+    :ns     The namespace to infer specs for. (Symbol/Namespace)
+            Default: *ns*
+    :fuel   Number of iterations to perform in inference algorithm
+            (integer)
+            Default: nil (don't restrict iterations)
+    :debug  Perform print debugging. (boolean/nil)
+            Default: nil
+
   eg. (spec-infer) ; infer for *ns*
 
-      (spec-infer 'my-ns) ; infer for my-ns
+      (spec-infer :ns 'my-ns) ; infer for my-ns
+
+      (spec-infer :fuel 0) ; iterations in spec inference algorithm
+                           ; (higher = smaller specs + more recursive)
+
+      (spec-infer :debug true) ; enable debugging
   "
-  ([] (spec-infer *ns*))
-  ([ns]
+  ([& kws]
    (load-if-needed)
    (require '[clojure.core.typed.runtime-infer])
-   ((impl/v 'clojure.core.typed.runtime-infer/spec-infer)
-    {:ns ns})))
+   (let [m (-> (if (= 1 (count kws))
+                 (do
+                   (err/deprecated-warn
+                     "runtime-infer with 1 arg: use {:ns <ns>}")
+                   {:ns (first kws)})
+                 (apply hash-map kws))
+               (update :ns #(or % *ns*)))]
+     ((impl/v 'clojure.core.typed.runtime-infer/spec-infer)
+      m))))
 
 (defn pred* [tsyn nsym pred]
   pred)

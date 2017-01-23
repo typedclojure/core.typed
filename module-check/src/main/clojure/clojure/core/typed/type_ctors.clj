@@ -2312,19 +2312,30 @@
                                 :else {:upper r/-any :lower r/-nothing})]
     (r/Bounds-maker upper lower nil)))
 
-(defn find-val-type [t k default]
+(defn find-val-type 
+  ([t k default] (find-val-type t k default #{}))
+  ([t k default seen]
   {:pre [(r/Type? t)
          (r/Type? k)
          (r/Type? default)]
    :post [(r/Type? %)]}
-  (let [t (fully-resolve-type t)]
+  (let [_ (when (seen t)
+            (err/int-error
+              (str "Infinitely expanding type:" (ind/unparse-type t))))
+        t (fully-resolve-type t)
+        find-val-type (fn 
+                        ([t k default]
+                         (find-val-type t k default seen))
+                        ([t k default seen]
+                         (find-val-type t k default seen)))]
     (cond
       ; propagate the error
       (r/TCError? t) t
       (r/F? t) (let [bnd (free-ops/free-with-name-bnds (:name t))
                      _ (when-not bnd
                          (err/int-error (str "No bounds for type variable: " name bnds/*current-tvar-bnds*)))]
-                 (find-val-type (:upper-bound bnd) k default))
+                 (find-val-type (:upper-bound bnd) k default
+                                #{}))
       (r/Nil? t) default
       (r/AssocType? t) (let [t* (apply ind/assoc-pairs-noret (:target t) (:entries t))]
                          (cond
@@ -2399,7 +2410,7 @@
                                              ))))
                       [(r/ret t) (r/ret k) (r/ret default)] nil)
         r/ret-t)
-      :else r/-any)))
+      :else r/-any))))
 
 (defn -tapp [op & rands]
   (r/TApp-maker op (seq rands)))
