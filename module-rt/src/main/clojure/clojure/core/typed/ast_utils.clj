@@ -157,9 +157,7 @@
                                         [rest-param]))))))
 
 (defn let-body-kw []
-  (impl/impl-case
-    :clojure :body
-    :cljs :expr))
+  :body)
 
 (defn def-var-name [expr]
   {:post [(symbol? %)]}

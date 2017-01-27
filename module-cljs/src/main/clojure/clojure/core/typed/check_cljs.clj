@@ -398,11 +398,12 @@
 
 (add-check-method :host-call
   [{:keys [method target args] :as expr} & [expected]]
-  (fail-empty expr))
+  ;;return Any for now
+  (assoc expr expr-type (ret r/-any)))
 
 (add-check-method :host-field
   [expr & [expected]]
-  (fail-empty expr))
+  (assoc expr expr-type (ret r/-any)))
 
 (add-check-method :js-array
   [expr & [expected]]
@@ -414,7 +415,7 @@
 
 (add-check-method :js-var
   [expr & [expected]]
-  (fail-empty expr))
+  (assoc expr expr-type (ret r/-any)))
 
 ;;fixme
 (add-check-method :local
