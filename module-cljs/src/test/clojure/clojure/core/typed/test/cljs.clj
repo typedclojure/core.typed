@@ -152,6 +152,9 @@
                                         ;(t/check-ns* 'cljs.core.typed.async)
 
 
+(deftest ast-nodes-test
+  (t/check-ns* 'cljs.core.typed.test.ympbyc.ast-nodes))
+
 (deftest core-fns-test
   (t/check-ns* 'cljs.core.typed.test.ympbyc.test-base-env))
 

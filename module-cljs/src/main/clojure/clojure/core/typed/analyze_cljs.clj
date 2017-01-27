@@ -17,7 +17,7 @@
   [nsym form]
   (uc/with-cljs-typed-env
     (binding [ana/*cljs-ns* nsym]
-      (ast-for-form form))))
+      (ast-for-form form {:eval-fn false}))))
 
 ; FIXME reintroduce hygienic transformation!
 (defn ast-for-form

@@ -87,8 +87,7 @@
 
 (set! *print-level* 4)
 (set! *print-length* 6)
-(add-check-method
- :const
+(add-check-method :const
  [{:keys [form] :as expr} & [expected]]
  (let [t (r/-val form)
        _ (when expected
@@ -359,35 +358,93 @@
   (assoc expr
          expr-type (ret r/-any)))
 
+;; adding a bunch of missing methods: 
 
-(add-check-method :quote [{:keys [expr] :as quote-expr} & [expected]]
+(defn fail-empty [expr]
+  (println "ERROR ##CLJS## " (with-out-str (clojure.pprint/pprint expr)))
+  (throw (Exception. "Not implemented, yet")))
+
+(add-check-method :binding
+  [expr & [expected]]
+  (fail-empty expr))
+
+(add-check-method :case
+  [expr & [expected]]
+  (fail-empty expr))
+
+(add-check-method :case-node
+  [expr & [expected]]
+  (fail-empty expr))
+
+(add-check-method :case-test
+  [expr & [expected]]
+  (fail-empty expr))
+
+(add-check-method :case-then
+  [expr & [expected]]
+  (fail-empty expr))
+
+(add-check-method :defrecord
+  [expr & [expected]]
+  (fail-empty expr))
+
+(add-check-method :deftype
+  [expr & [expected]]
+  (fail-empty expr))
+
+(add-check-method :fn-method
+  [expr & [expected]]
+  (fail-empty expr))
+
+(add-check-method :host-call
+  [{:keys [method target args] :as expr} & [expected]]
+  (fail-empty expr))
+
+(add-check-method :host-field
+  [expr & [expected]]
+  (fail-empty expr))
+
+(add-check-method :js-array
+  [expr & [expected]]
+  (fail-empty expr))
+
+(add-check-method :js-object
+  [expr & [expected]]
+  (fail-empty expr))
+
+(add-check-method :js-var
+  [expr & [expected]]
+  (fail-empty expr))
+
+;;fixme
+(add-check-method :local
+  [expr & [expected]]
+  (chk/check expr expected))
+
+(add-check-method :ns*
+  [expr & [expected]]
+  (fail-empty expr))
+
+(add-check-method :quote
+  [{:keys [expr] :as quote-expr} & [expected]]
   (let [cexpr (check expr expected)]
     (assoc quote-expr
            :expr cexpr
            expr-type (expr-type cexpr))))
 
-(add-check-method
- :throw [expr & [expected]]
- (assoc expr
-        expr-type (ret r/-nothing)))
+(add-check-method :the-var
+  [expr & [expected]]
+  (fail-empty expr))
 
-;;fixme
-(add-check-method
- :local [expr & [expected]]
- (chk/check expr expected))
+(add-check-method :throw
+  [expr & [expected]]
+  (assoc expr
+    expr-type (ret r/-nothing)))
 
-(defn check-host
-  [{:keys [method target args] :as expr} expected]
-  {:post [#(-> % expr-type r/TCResult?)]})
+(add-check-method :try
+  [expr & [expected]]
+  (fail-empty expr))
 
-(add-check-method
- :host-call [{:keys [method target args] :as expr} & [expected]]
- ;{:pre [(= (:tag expr) "js")]}
- (do
-   (println "ERROR ##CLJS## " (with-out-str (clojure.pprint/pprint expr)))
-   (throw
-    (Exception. "check:host-call not implemented, yet"))))
-
-(add-check-method
- :js-var [expr & [expected]]
- )
+(add-check-method :with-meta
+  [expr & [expected]]
+  (fail-empty expr))
