@@ -100,6 +100,7 @@
     (parse-type s)))
 
 (defn parse-type [s]
+(prn "parse" s)
   (parse-type* s))
 
 (defmulti parse-type* class)
