@@ -390,7 +390,9 @@
 
 (t/ann ^:no-check make-Intersection [(t/U nil (t/Seqable r/Type)) -> r/Type])
 (defn make-Intersection [types]
-  (let [cnt (count types)]
+  (assert (not-any? (some-fn r/Union? r/Intersection?) types))
+  (let [types (remove #{r/-any} types)
+        cnt (count types)]
     (cond
       (= 0 cnt) r/-any
       (= 1 cnt) (first types)
@@ -430,17 +432,22 @@
 (defn intersect [t1 t2]
   {:pre [(r/Type? t1)
          (r/Type? t2)
-         #_(not (r/Union? t1))
-         #_(not (r/Union? t2))]
+         (not (r/Union? t1))
+         (not (r/Union? t2))]
    :post [(r/Type? %)]}
-  (let [subtype? @(subtype?-var)
+  (let [make-In (fn [t1 t2]
+                  (let [ts (flatten-intersections [t1 t2])]
+                    (cond
+                      (some r/Union? ts) (apply Un ts)
+                      :else (make-Intersection ts))))
+        subtype? @(subtype?-var)
         ;_ (prn "intersect" [t1 t2])
         t (cond
             ; Unchecked is "sticky" even though it's a subtype/supertype
             ; of everything
             (or (and (r/Unchecked? t1) (not (r/Unchecked? t2)))
                 (and (not (r/Unchecked? t1)) (r/Unchecked? t2)))
-            (make-Intersection [t1 t2])
+            (make-In t1 t2)
 
             (and (r/HeterogeneousMap? t1)
                  (r/HeterogeneousMap? t2))
@@ -466,15 +473,14 @@
 
             (subtype? t1 t2) t1
             (subtype? t2 t1) t2
-            :else (do
-                    ;(prn "failed to eliminate intersection" (make-Intersection [t1 t2]))
-                    (make-Intersection [t1 t2])))]
+            :else (do 
+                    (make-In t1 t2)))]
     t))
 
 (t/ann ^:no-check flatten-intersections [(t/U nil (t/Seqable r/Type)) -> (t/Seqable r/Type)])
 (defn flatten-intersections [types]
   {:pre [(every? r/Type? types)]
-   :post [(every? r/Type? %)]}
+   :post [(every? (every-pred r/Type? (complement r/Intersection?)) %)]}
   (t/loop [work :- (t/Seqable r/Type), types
            result :- (t/Seqable r/Type), []]
     (if (empty? work)
@@ -1591,23 +1597,25 @@
         (r/Intersection? t2)
         (every? #(overlap t1 %) (:types t2))
 
-;        (and (r/NotType? t1)
-;             (r/NotType? t2))
-;        ;FIXME what if both are Not's?
-;        true
-;
-;        ; eg. (overlap (Not Number) Integer) => false
-;        ;     (overlap (Not Integer) Number) => true
-;        ;     (overlap (Not y) x) => true
-;        (r/NotType? t1)
-;        (let [neg-type (fully-resolve-type (:type t1))]
-;          (prn "overlap" t1 t2)
-;          (or (some (some-fn r/B? r/F?) [neg-type t2])
-;              (not (overlap neg-type t2))))
-;
-;        (r/NotType? t2)
-;        ;switch arguments to catch above case
-;        (overlap t2 t1)
+        (and (r/NotType? t1)
+             (r/NotType? t2))
+        (overlap (:type t1) (:type t2))
+
+        ; eg. (overlap (Not Number) Integer) => false
+        ;     (overlap (Not Integer) Number) => true
+        ; TODO
+        ;     (overlap (Not y) x) => true
+        (and (r/NotType? t1)
+             ;; easy case
+             (and (r/RClass? (:type t1))
+                  (empty? (:poly? (:type t1))))
+             (and (r/RClass? t2)
+                  (empty? (:poly? t2))))
+        (not (subtype? t2 (:type t1)))
+
+        (r/NotType? t2)
+        ;switch arguments to catch above case
+        (overlap t2 t1)
 
         ;if both are Classes, and at least one isn't an interface, then they must be subtypes to have overlap
         ;      (and (r/RClass? t1)

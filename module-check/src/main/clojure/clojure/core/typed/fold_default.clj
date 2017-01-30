@@ -34,10 +34,8 @@
 
 (add-default-fold-case Intersection
                        (fn [ty _]
-                         ;(prn "fold-default Intersection" ty)
                          (let [ts (mapv type-rec (:types ty))]
-                           ; don't simplify types in case some types aren't defined yet
-                           (c/make-Intersection ts))))
+                           (apply c/In ts))))
 
 (add-default-fold-case Union 
                        (fn [ty _]

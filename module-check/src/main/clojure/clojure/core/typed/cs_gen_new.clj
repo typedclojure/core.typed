@@ -26,7 +26,31 @@
             [clojure.set :as set]
             [clojure.test :refer [deftest is]]
             [clojure.pprint :refer [pprint]]
-            [clojure.core.typed.test.test-utils :refer [is-clj]]))
+            [clojure.core.typed.debug :refer [dbg]]
+            [clojure.core.typed.test.test-utils :refer [is-clj]])
+  (:import (clojure.lang Seqable)))
+
+(declare ppcss ppcs
+         ppcss-str
+         cs-gen-normalized-no-tvar
+         )
+
+(t/ann gen-repeat [Number (t/Seqable Any) -> (t/Seqable Any)])
+(defn ^:private gen-repeat [times repeated]
+  (reduce (fn [acc cur]
+            (concat acc cur))
+          []
+          (repeat times repeated)))
+
+(defn fully-resolve-under-Not [t]
+  (cond
+    (r/NotType? t) (r/NotType-maker (fully-resolve-under-Not (:type t)))
+    (r/Intersection? t) (apply c/In (mapv fully-resolve-under-Not (:types t)))
+    (r/Union? t) (apply c/Un (mapv fully-resolve-under-Not (:types t)))
+    :else (c/fully-resolve-type t)))
+
+(defn group-by-boolean [p s]
+  (group-by (comp boolean p) s))
 
 (defn maybe-Mu* [name body]
   (let [original-name (-> name r/make-F r/F-original-name)
@@ -71,6 +95,10 @@
         (distinct)
         cs))
 
+(def fail-css (constraint-set-set))
+(def success-css (constraint-set-set
+                   (constraint-set)))
+
 (defn intersect-css2 [cs1 cs2]
   {:pre [(constraint-set-set? cs1)
          (constraint-set-set? cs2)]
@@ -111,6 +139,10 @@
 (def F-or-NotF (maybe-NotType-pred r/F?))
 
 ;; assume t is fully resolved at the top-level
+;; if variable a_k is contained in t as a negation,
+;; returns constraint t\~a_k <: a_k
+;; otherwise, returns a_k <: t\a_k 
+
 (defn single [a_k t]
   {:pre [(symbol? a_k)
          (r/Type? t)
@@ -123,16 +155,17 @@
         ;; named a_k or a negation of that.
         already-found (atom nil)
         {tvar true other false}
-        (group-by (maybe-NotType-pred
-                    (fn [t]
-                      {:pre [(r/Type? t)]}
-                      (when-not @already-found
-                        (when (r/F? t)
-                          (let [found? (= (:name t) a_k)]
-                            (when found?
-                              (reset! already-found true))
-                            found?)))))
-                  ts)
+        (group-by-boolean 
+          (maybe-NotType-pred
+            (fn [t]
+              {:pre [(r/Type? t)]}
+              (when-not @already-found
+                (when (r/F? t)
+                  (let [found? (= (:name t) a_k)]
+                    (when found?
+                      (reset! already-found true))
+                    found?)))))
+          ts)
         _ (assert (= 1 (count tvar))
                   (pr-str tvar))
         the-tvar (first tvar)
@@ -166,23 +199,22 @@
                         ~msg)))
      a#))
 
+(declare norm)
+
+(defn norm2 [no-mention S T M]
+  {:pre [(r/Type? S)
+         (r/Type? T)]}
+  (norm no-mention (c/In S (r/NotType-maker T)) M))
+
 (defn norm [no-mention t M]
   {:pre [(set? no-mention)
          (r/Type? t)
          (set? M)]
    :post [(post-msg (constraint-set-set? %)
                     (pr-str %))]}
-  (let [t (c/fully-resolve-type t)
-        t (cond
-            (r/Union? t) (apply c/Un (map 
-                                       (fn [t]
-                                         (let [t (c/fully-resolve-type t)]
-                                           (if (r/Intersection? t)
-                                             (apply c/In (map c/fully-resolve-type (:types t)))
-                                             t)))
-                                       (:types t)))
-            (r/Intersection? t) (apply c/In (map c/fully-resolve-type (:types t)))
-            :else t)]
+  ;(prn "norm" t)
+  (let [t (fully-resolve-under-Not t)]
+    ;(prn "norm resolved" t)
     (cond
       ;; already seen this type, trivial solution
       (contains? M t) (constraint-set-set
@@ -197,14 +229,15 @@
             fs (filter F-or-NotF ts)]
         (cond
           (seq fs) 
-          (let [fnames (map (fn [f] 
+          (let [;_ (prn "norm: frees case" fs)
+                fnames (map (fn [f] 
                               {:post [(symbol? %)]}
                               (:name 
                                 (if (r/NotType? f)
                                   (:type f)
                                   f)))
                             fs)
-                can-mention (sort (filter #(not (contains? no-mention %)) fnames))]
+                can-mention (sort (remove no-mention fnames))]
             (assert (every? symbol? can-mention))
             (cond
               ;; we have some variable that we can constrain
@@ -219,73 +252,101 @@
 
           ;; no type variables
           :else
-          (let [{fns true other false} (group-by (maybe-NotType-pred r/FnIntersection?) ts)]
-            (cond
+          (cs-gen-normalized-no-tvar no-mention ts M)
+          ;; ignore
+          ;#_(let [{fns true other false} (group-by-boolean (maybe-NotType-pred r/FnIntersection?) ts)]
+          ;  (prn "other" other)
+          ;  (cond
 
-              ;; just have functions
-              (and (empty? other)
-                   (seq fns))
-              (let [{P true N false} (group-by r/FnIntersection? fns)
-                    N (set (mapcat (comp :types :type) N))
-                    P (set (mapcat :types P))
-                    _ (assert (every? r/Function? N))
-                    _ (assert (every? r/Function? P))]
-                (apply
-                  union-css
-                  (map (fn [n]
-                         {:pre [(r/Function? n)]}
-                         (let [_ (assert (= 1 (count (:dom n))))
-                               s_n (first (:dom n))
-                               t_n (:t (:rng n))
-                               _ (assert (r/Type? s_n))
-                               _ (assert (r/Type? t_n))
-                               c1 (norm no-mention 
-                                        (apply c/In s_n
-                                               (map (fn [p]
-                                                      (assert (= 1 (count (:dom p))))
-                                                      (r/NotType-maker (first (:dom p))))
-                                                    P))
-                                        M)
-                               c2 (apply intersect-css
-                                         (map
-                                           (fn [P']
-                                             (assert (every? #(= 1 (count (:dom %))) P'))
-                                             (let [c3 (norm no-mention 
-                                                            (apply c/In s_n
-                                                                   (map (comp r/NotType-maker first :dom) P'))
-                                                            (conj M t))
-                                                   P-without-P' (set/difference P P')
-                                                   c4 (norm no-mention 
-                                                            (apply c/In
-                                                              (r/NotType-maker t_n)
-                                                              (map
-                                                                (fn [p]
-                                                                  {:pre [(r/Function? p)]}
-                                                                  (:t (:rng p)))
-                                                                P-without-P'))
-                                                            (conj M t))]
-                                               (union-css c3 c4)))
-                                           ;; want all proper subsets of P
-                                           (map set (butlast (comb/subsets (seq P))))))]
-                           (intersect-css c1 c2)))
-                       N)))
+          ;    ;; just have functions
+          ;    (and (empty? other)
+          ;         (seq fns))
+          ;    (let [{P true N false} (group-by-boolean r/FnIntersection? fns)
+          ;          N (set (mapcat (comp :types :type) N))
+          ;          P (set (mapcat :types P))
+          ;          _ (assert (every? r/Function? N))
+          ;          _ (assert (every? r/Function? P))]
+          ;      (apply
+          ;        union-css
+          ;        (map (fn [n]
+          ;               {:pre [(r/Function? n)]
+          ;                :post [(constraint-set-set? %)]}
+          ;               ;(prn "ensure" P "is under" n)
+          ;               (let [_ (assert (= 1 (count (:dom n))))
+          ;                     s_n (first (:dom n))
+          ;                     t_n (:t (:rng n))
+          ;                     _ (assert (r/Type? s_n))
+          ;                     _ (assert (r/Type? t_n))
+          ;                     ;; generate constraints for arguments 
+          ;                     ;_ (prn "c1")
+          ;                     c1 (let [nps (map (fn [p]
+          ;                                         {:pre [(r/Function? p)]
+          ;                                          :post [(r/Type? %)]}
+          ;                                         (assert (= 1 (count (:dom p))))
+          ;                                         (r/NotType-maker (first (:dom p))))
+          ;                                       P)]
+          ;                          ;(prn "ensure" s_n "is under" nps)
+          ;                          (norm no-mention (apply c/In s_n nps) M))
+          ;                     ;_ (ppcss c1)
+          ;                     c2 (apply intersect-css
+          ;                               (map
+          ;                                 (fn [P']
+          ;                                   {:pre [(set? P')
+          ;                                          (every? r/Function? P')]
+          ;                                    :post [(constraint-set-set? %)]}
+          ;                                   (assert (every? #(= 1 (count (:dom %))) P'))
+          ;                                   (let [c3 (norm no-mention 
+          ;                                                  (apply c/In s_n
+          ;                                                         (map (comp r/NotType-maker first :dom) P'))
+          ;                                                  (conj M t))
+          ;                                         P-without-P' (set/difference P P')
+          ;                                         c4 (norm no-mention 
+          ;                                                  (apply c/In
+          ;                                                    (r/NotType-maker t_n)
+          ;                                                    (map
+          ;                                                      (fn [p]
+          ;                                                        {:pre [(r/Function? p)]
+          ;                                                         :post [(r/Type? %)]}
+          ;                                                        (:t (:rng p)))
+          ;                                                      P-without-P'))
+          ;                                                  (conj M t))]
+          ;                                     (union-css c3 c4)))
+          ;                                 ;; want all proper subsets of P
+          ;                                 (map set (butlast (comb/subsets (seq P))))))
+          ;                     ;_ (prn "c2")
+          ;                     ;_ (ppcss c2)
+          ;                     c1+2 (intersect-css c1 c2)
+          ;                     ;_ (prn "c1+2")
+          ;                     ;_ (ppcss c1+2)
+          ;                     ]
+          ;                 c1+2
+          ;                 ))
+          ;             N)))
 
-              ;; other stuff (just RClasses for now)
-              :else 
-              (let [_ (assert (empty? fns))
-                    _ (assert (every? (maybe-NotType-pred r/RClass?) other))
-                    {P true N false} (group-by r/RClass? fns)
-                    N (set (map :type N))
-                    P (set P)
-                    _ (assert (every? r/RClass? N))
-                    _ (assert (every? r/RClass? P))]
-                (cond
-                  (sub/subtype? (apply r/Intersection? N)
-                                (apply r/Union? P))
-                  (constraint-set-set
-                    (constraint-set))
+          ;    ;; other stuff (just RClasses for now)
+          ;    :else 
+          ;    (cs-gen-normalized-no-tvar no-mention other M)
+          ;    #_
+          ;    (let [_ (assert (empty? fns))
+          ;          empty-RClass? (fn [t]
+          ;                          (and (r/RClass? t)
+          ;                               (empty? (:poly? t))))
+          ;          _ (assert (every? (maybe-NotType-pred empty-RClass?) other)
+          ;                    (vec (remove (maybe-NotType-pred empty-RClass?) other)))
+          ;          {P true N false} (group-by-boolean r/RClass? fns)
+          ;          N (set (map :type N))
+          ;          P (set P)
+          ;          _ (assert (every? empty-RClass? N))
+          ;          _ (assert (every? empty-RClass? P))]
+          ;      (prn "RClasses")
+          ;      (cond
+          ;        (sub/subtype? (apply c/In N)
+          ;                      (apply c/Un P))
+          ;        (constraint-set-set
+          ;          (constraint-set))
 
-                  :else (constraint-set-set)))))))
+          ;        :else (constraint-set-set)))))
+))
 
       (r/Union? t)
       (apply intersect-css 
@@ -294,7 +355,1043 @@
                   (:types t)))
 
       ;; no solution
+      :else (constraint-set-set M))))
+
+(defn norm-with-variance
+  [no-mention variance S T M]
+  {:pre [(r/variance? variance)
+         (r/AnyType? S)
+         (r/AnyType? T)]
+   :post [(constraint-set-set? %)]}
+  (prn "norm-with-variance" S T variance)
+  (let [ret (case variance
+              (:covariant :constant) (norm no-mention (c/In S (r/NotType-maker T)) M)
+              :contravariant (norm no-mention (c/In T (r/NotType-maker S)) M)
+              :invariant (intersect-css (norm no-mention (c/In S (r/NotType-maker T)) M)
+                                        (norm no-mention (c/In T (r/NotType-maker S)) M)))]
+    (println "norm-with-variance return" "\n" (ppcss-str ret))
+    ret
+    ))
+
+(defn norm-RClass
+  [no-mention S T M]
+  {:pre [(r/RClass? S)
+         (r/RClass? T)]
+   :post [(constraint-set-set? %)]}
+  (prn "norm-RClass" S T)
+  (let [rsupers (c/RClass-supers* S)
+        relevant-S (some #(when (r/RClass? %)
+                            (and (= (:the-class %) (:the-class T))
+                                 %))
+                         (map c/fully-resolve-type (conj rsupers S)))]
+    (prn "relevant-S" relevant-S)
+    (cond
+      relevant-S
+      (let [css (map (fn [vari si ti]
+                       (norm-with-variance no-mention vari si ti M))
+                     (:variances T)
+                     (:poly? relevant-S)
+                     (:poly? T))]
+        (apply println "norm-RClass after" relevant-S T (map ppcss css))
+        (apply intersect-css css))
       :else (constraint-set-set))))
+
+(declare cs-gen)
+
+(defn cs-gen2 [no-mention S T M]
+  (cs-gen no-mention S T M))
+
+(defn cs-gen-filter [no-mention s t M]
+  {:pre [(fr/Filter? s)
+         (fr/Filter? t)]
+   :post [(constraint-set-set? %)]}
+  (let [norm #(norm no-mention %1 %2 M)]
+    (cond
+      (= s t) success-css
+      (fr/TopFilter? t) success-css
+
+      (and (fr/TypeFilter? s)
+           (fr/TypeFilter? t)
+           (and (= (:path s) (:path t))
+                (= (:id s) (:id t))))
+      (intersect-css (norm (:type s) (:type t))
+                     (norm (:type t) (:type s)))
+
+      (and (fr/NotTypeFilter? s)
+           (fr/NotTypeFilter? t)
+           (and (= (:path s) (:path t))
+                (= (:id s) (:id t))))
+      (intersect-css (norm (:type s) (:type t))
+                     (norm (:type t) (:type s)))
+
+      ; simple case for unifying x and y in (& (is x sym) ...) (is y sym)
+  ;    (and (fr/AndFilter? s)
+  ;         (fr/TypeFilter? t)
+  ;         (every? fo/atomic-filter? (:fs s))
+  ;         (= 1 (count (filter fr/TypeFilter? (:fs s)))))
+  ;    (let [tf (first (filter fr/TypeFilter? (:fs s)))]
+  ;      (cs-gen-filter V X Y tf t))
+      :else fail-css)))
+
+(defn cs-gen-filter-set [no-mentions s t M]
+  {:pre [(fr/FilterSet? s)
+         (fr/FilterSet? t)]
+   :post [(constraint-set-set? %)]}
+  (cond
+    (= s t) success-css
+    :else
+    (let [{s+ :then s- :else} s
+          {t+ :then t- :else} t]
+      (intersect-css (cs-gen-filter no-mentions s+ t+ M)
+                     (cs-gen-filter no-mentions s- t- M)))))
+
+(defn cs-gen-datatypes-or-records 
+  [no-mention S T M]
+  {:pre [(every? r/DataType? [S T])]}
+  (cond
+    ;fail
+    (not (= (:the-class S) (:the-class T)))
+    (constraint-set-set)
+
+    :else (apply intersect-css
+                 (map (fn [variance s t]
+                        (norm-with-variance no-mention variance s t M))
+                      (:variances T) (:poly? S) (:poly? T)))))
+
+(defn cs-gen-object [no-mention s t M]
+  {:pre [(or/RObject? s)
+         (or/RObject? t)]
+   :post [(constraint-set-set? %)]}
+  (cond
+    (= s t) success-css
+    (or/EmptyObject? t) success-css
+    ;;FIXME do something here
+    :else fail-css))
+
+(declare cnorm)
+
+(defn cs-gen-HSequential
+  [no-mention S T M]
+  {:pre [(r/HSequential? S)
+         (r/HSequential? T)]
+   :post [(cr/cset? %)]}
+  (let [norm* (fn [Ss Ts]
+                (cnorm no-mention Ss Ts M))]
+    (apply intersect-css
+      (concat
+        (cond
+          ;simple case
+          (not-any? (some-fn :rest :drest :repeat) [S T])
+          [(norm* (:types S) (:types T))]
+
+          ;rest on right, optionally on left
+          (and (:rest T)
+               (not-any? (some-fn :drest :repeat) [S]))
+          (concat [(norm* (:types S) (concat (:types T)
+                                             (repeat (- (count (:types S))
+                                                        (count (:types T)))
+                                                     (:rest T))))]
+                  (when (:rest S)
+                    [(norm* (:rest S) (:rest T))]))
+
+          ; repeat on right, nothing on left
+          (and (:repeat T)
+               (not-any? (some-fn :rest :drest :repeat) [S]))
+          (let [s-types (:types S)
+                t-types (:types T)
+                s-types-count (count s-types)
+                t-types-count (count t-types)]
+            (if (and (>= s-types-count t-types-count)
+                     (zero? (rem s-types-count t-types-count)))
+              [(norm* s-types (gen-repeat (/ s-types-count
+                                             t-types-count)
+                                          t-types))]
+              [(constraint-set-set)]))
+
+          ; repeat on left, rest on right
+          (and (:repeat S)
+               (:rest T))
+          (let [s-types (:types S)
+                t-types (:types T)
+                s-types-count (count s-types)
+                t-types-count (count t-types)]
+            (if (>= s-types-count t-types-count)
+              [(norm* s-types (concat t-types
+                                      (repeat (- s-types-count
+                                                 t-types-count)
+                                              (:rest T))))]
+              (err/nyi-error (pr-str "NYI HSequential inference " S T))))
+
+          ; repeat on left, drest on right
+          (and (:repeat S)
+               (:drest T))
+          (let [_ (assert nil "FIXME repeat on left, drest on right")
+                ;{t-dty :pre-type dbound :name} (:drest T)
+                ;_ (when-not (Y dbound)
+                ;    (fail! S T))
+                ;merged-X (merge X {dbound (Y dbound)})
+                ;get-list-of-c (fn get-list-of-c [S-list]
+                ;                (mapv #(get-c-from-cmap % dbound)
+                ;                      (t/for [s :- r/Type, S-list]
+                ;                        :- cset
+                ;                        (cs-gen V merged-X Y s t-dty))))
+                ;repeat-c (get-list-of-c (:types S))
+                ]
+            ;[(assoc-in (cr/empty-cset X Y) [:maps 0 :dmap :map dbound] (cr/dcon-repeat-maker [] repeat-c))]
+            )
+
+          ;; dotted on the left, nothing on the right
+          (and (:drest S)
+               (not-any? (some-fn :rest :drest :repeat) [T]))
+          (assert nil "FIXME repeat on left, drest on right")
+          #_(let [{dty :pre-type dbound :name} (:drest S)]
+            (when-not (Y dbound)
+              (fail! S T))
+            (when-not (<= (count (:types S)) (count (:types T)))
+              (fail! S T))
+            (let [vars (var-store-take dbound dty (- (count (:types T))
+                                                     (count (:types S))))
+                  new-tys (doall (t/for
+                                   [var :- t/Sym, vars] :- r/AnyType
+                                   (subst/substitute (r/make-F var) dbound dty)))
+                  new-s-hsequential (r/-hsequential (concat (:types S) new-tys))
+                  new-cset (cs-gen-HSequential V 
+                                               ;move dotted lower/upper bounds to vars
+                                               (merge X (zipmap vars (repeat (Y dbound)))) Y new-s-hsequential T)]
+              [(move-vars-to-dmap new-cset dbound vars)]))
+
+          ;; dotted on the right, nothing on the left
+          (and (not-any? (some-fn :rest :drest :repeat) [S])
+               (:drest T))
+          (assert nil "FIXME repeat on left, drest on right")
+          #_(let [{dty :pre-type dbound :name} (:drest T)]
+            (when-not (Y dbound)
+              (fail! S T))
+            (when-not (<= (count (:types T)) (count (:types S)))
+              (fail! S T))
+            (let [vars (var-store-take dbound dty (- (count (:types S)) (count (:types T))))
+                  new-tys (doall
+                            (t/for
+                              [var :- t/Sym, vars] :- r/AnyType
+                              (subst/substitute (r/make-F var) dbound dty)))
+                  new-t-hsequential (r/-hsequential (concat (:types T) new-tys))
+                  new-cset (cs-gen-HSequential V 
+                                               ;move dotted lower/upper bounds to vars
+                                               (merge X (zipmap vars (repeat (Y dbound)))) Y S new-t-hsequential)]
+              [(move-vars-to-dmap new-cset dbound vars)]))
+
+          ;TODO cases
+          :else (err/nyi-error (pr-str "NYI HSequential inference " S T)))
+        (map (fn [fs1 fs2]
+               (cs-gen-filter-set no-mention fs1 fs2 M))
+             (:fs S) (:fs T))
+        (map (fn [o1 o2]
+               (cs-gen-object no-mention o1 o2 M))
+             (:objects S) (:objects T))))))
+
+(defn cs-gen-TApp
+  [no-mention S T M]
+  {:pre [(r/TApp? S)
+         (r/TApp? T)]
+   :post [(constraint-set-set? %)]}
+  (let [Srator (c/fully-resolve-type (:rator S))
+        Trator (c/fully-resolve-type (:rator T))]
+    (cond
+      (not= Srator Trator) fail-css
+      :else
+      (let [;; these should be TypeFn's (I think?)
+            _ (assert ((every-pred r/TypeFn?) Srator Trator))
+            variances (:variances Srator)]
+        (assert (= (count variances)
+                   (count (:rands S))
+                   (count (:rands T))))
+        (apply intersect-css
+          (mapv (fn [var s1 t1]
+                  (norm-with-variance no-mention var s1 t1 M))
+                variances (:rands S) (:rands T)))))))
+
+(declare cs-gen-Function)
+
+(defn cs-gen-FnIntersection
+  [no-mention S T M]
+  {:pre [(r/FnIntersection? S)
+         (r/FnIntersection? T)]
+   :post [(constraint-set-set? %)]}
+  (apply intersect-css
+         (map
+           (fn [t-arr]
+             {:pre [(r/Function? t-arr)]}
+             ;; for each t-arr, we need to get at least s-arr that works
+             (let [results (filter identity
+                                   (mapv
+                                     (fn [s-arr]
+                                       {:pre [(r/Function? s-arr)]}
+                                       (cs-gen-Function no-mention s-arr t-arr M))
+                                     (:types S)))
+                   comb (apply union-css results)]
+               comb))
+           (:types T))))
+
+(defn cs-gen-flow-set [no-mention s t M]
+  {:pre [(r/FlowSet? s)
+         (r/FlowSet? t)]
+   :post [(constraint-set-set? %)]}
+  (cond
+    (= s t) success-css
+    :else
+    (let [{n1 :normal} s
+          {n2 :normal} t]
+      (cs-gen-filter no-mention n1 n2 M))))
+
+(defn cs-gen-Result
+  [no-mention S T M]
+  {:pre [(r/Result? S)
+         (r/Result? T)]}
+  (intersect-css (norm2 no-mention (r/Result-type* S) (r/Result-type* T) M)
+                 (cs-gen-filter-set no-mention (r/Result-filter* S) (r/Result-filter* T) M)
+                 (cs-gen-object no-mention (r/Result-object* S) (r/Result-object* T) M)
+                 (cs-gen-flow-set no-mention (r/Result-flow* S) (r/Result-flow* T) M)))
+
+(defn cs-gen-Function-just-rests [no-mention S T M]
+  ;just a rest arg, no drest, no keywords, no prest
+  {:pre [(and (some-fn :rest [S T])
+              (not-any? (some-fn :drest :kws :prest) [S T]))]
+   :post [(constraint-set-set? %)]}
+  (let [norm* (fn [Ss Ts] (cnorm no-mention Ss Ts M))
+        arg-mapping (cond
+                      ;both rest args are present, so make them the same length
+                      (and (:rest S) (:rest T))
+                      (norm* (cons (:rest T) (u/pad-right (count (:dom S)) (:dom T) (:rest T)))
+                             (cons (:rest S) (u/pad-right (count (:dom T)) (:dom S) (:rest S))))
+                      ;no rest arg on the right, so just pad left and forget the rest arg
+                      (and (:rest S) (not (:rest T)))
+                      (let [new-S (u/pad-right (count (:dom T)) (:dom S) (:rest S))]
+                        ;                            (prn "infer rest arg on left")
+                        ;                            (prn "left dom" (map prs/unparse-type (:dom S)))
+                        ;                            (prn "right dom" (map prs/unparse-type (:dom T)))
+                        ;                            (prn "new left dom" (map prs/unparse-type new-S))
+                        (norm* (:dom T) new-S))
+                      ;no rest arg on left, or wrong number = fail
+                      :else fail-css)
+        ret-mapping (cs-gen-Result no-mention (:rng S) (:rng T) M)]
+    (intersect-css arg-mapping ret-mapping)))
+
+(defn cs-gen-Function-prest-on-left [no-mention S T M]
+  ; prest on left, nothing on right
+  {:pre [(and (:prest S)
+              (not-any? (some-fn :rest :drest :kws :prest) [T]))]}
+  (let [s-dom (:dom S)
+        t-dom (:dom T)
+        s-dom-count (count s-dom)
+        t-dom-count (count t-dom)]
+    (if (and (<= t-dom-count s-dom-count)
+             (not (zero? (rem (- t-dom-count s-dom-count)
+                              (count (-> S :prest :types))))))
+      fail-css
+      (let [norm* #(cnorm no-mention %1 %2 M)
+            norm2 #(norm2 no-mention %1 %2 M)
+            [short-T rest-T] (split-at s-dom-count t-dom)
+            short-cs (norm* short-T s-dom)
+            s-prest-types (-> S :prest :types)
+            rest-S (gen-repeat (/ (count rest-T) (count s-prest-types)) s-prest-types)
+            rest-cs (norm* rest-T rest-S)
+            ret-mapping (norm2 (:rng S) (:rng T))]
+        (intersect-css short-cs rest-cs ret-mapping)))))
+
+(defn cs-gen-Function-prest-drest [no-mention S T M]
+  (assert nil "TODO cs-gen-Function-prest-drest")
+  #_(let [{t-dty :pre-type dbound :name} (:drest T)
+        _ (when-not (Y dbound)
+            (fail! S T))
+        S-dom (:dom S)
+        S-dom-count (count S-dom)
+        T-dom (:dom T)
+        T-dom-count (count T-dom)
+        S-prest-types (-> S :prest :types)
+        S-prest-types-count (count S-prest-types)
+        merged-X (merge X {dbound (Y dbound)})
+        get-list-of-c (fn get-list-of-c [S-list]
+                        (mapv #(get-c-from-cmap % dbound)
+                              (map
+                                (fn [s] (cs-gen V merged-X Y t-dty s))
+                                S-list)))
+        repeat-c (get-list-of-c S-prest-types)
+        ret-mapping (cg (:rng S) (:rng T))]
+    (if (<= S-dom-count T-dom-count)
+      ; hard mode
+      (let [T-rest-count (- T-dom-count S-dom-count)
+            [arg-S-prest remain-S-prest] (split-at (rem T-rest-count
+                                                        S-prest-types-count) S-prest-types)
+            new-S (concat S-dom
+                          (gen-repeat (quot T-rest-count S-prest-types-count) S-prest-types)
+                          arg-S-prest)
+            arg-mapping (cs-gen-list V X Y T-dom new-S)
+            fixed-c (if (= (count arg-S-prest) 0)
+                      []
+                      (get-list-of-c remain-S-prest))
+            darg-mapping (assoc-in (cr/empty-cset X Y)
+                                   [:maps 0 :dmap :map dbound]
+                                   (cr/dcon-repeat-maker fixed-c repeat-c))]
+        (cset-meet* [arg-mapping darg-mapping ret-mapping]))
+      ; easy mode
+      (let [[arg-S rest-S] (split-at T-dom-count S-dom)
+            arg-mapping (cs-gen-list V X Y T-dom arg-S)
+            fixed-c (get-list-of-c rest-S)
+            darg-mapping (assoc-in (cr/empty-cset X Y)
+                                   [:maps 0 :dmap :map dbound]
+                                   (cr/dcon-repeat-maker fixed-c repeat-c))]
+        (cset-meet* [arg-mapping darg-mapping ret-mapping])))))
+
+(defn cs-gen-Function
+  [no-mention S T M]
+  {:pre [(r/Function? S)
+         (r/Function? T)]
+   :post [(constraint-set-set? %)]}
+  (let [norm2 (fn [S T] (norm2 no-mention S T M))
+        norm* (fn [Ss Ts] (cnorm no-mention Ss Ts M))]
+    (cond
+      ;easy case - no rests, drests, kws, prest
+      (not-any? (some-fn :rest :drest :kws :prest) [S T])
+      (intersect-css
+             ; contravariant
+             (norm* (:dom T) (:dom S))
+             ; covariant
+             (cs-gen-Result no-mention (:rng S) (:rng T) M))
+
+      ;just a rest arg, no drest, no keywords, no prest
+      (and (some-fn :rest [S T])
+           (not-any? (some-fn :drest :kws :prest) [S T]))
+      (cs-gen-Function-just-rests no-mention S T M)
+
+      ; :rest is less restricted than :prest
+      (and (:prest S)
+           (:rest T)
+           (> (-> S :prest :types count) 1))
+      fail-css
+
+      (and (:rest S)
+           (:prest T))
+      (cs-gen-Function-just-rests no-mention S T M)
+
+      ; prest on left, nothing on right
+      (and (:prest S)
+           (not-any? (some-fn :rest :drest :kws :prest) [T]))
+      (cs-gen-Function-prest-on-left no-mention S T M)
+
+      ; prest on left, drest on right
+      (and (:prest S)
+           (:drest T))
+      (cs-gen-Function-prest-drest no-mention S T M)
+
+      ;; dotted on the left, nothing on the right
+      (and (:drest S)
+           (not-any? (some-fn :rest :drest :kws :prest) [T]))
+      (assert nil "TODO cs-gen-Function-dotted-left-nothing-right")
+      #_(cs-gen-Function-dotted-left-nothing-right V X Y S T)
+
+      ;; dotted on the right, nothing on the left
+      (and (not-any? (some-fn :rest :drest :kws :prest) [S])
+           (:drest T))
+      (assert nil "TODO cs-gen-Function-dotted-right-nothing-left")
+      #_(cs-gen-Function-dotted-right-nothing-left V X Y S T)
+
+      ;; * <: ...
+      (and (:rest S)
+           (:drest T))
+      (assert nil "TODO cs-gen-Function-star-<-dots")
+      #_
+      (cs-gen-Function-star-<-dots cg V X Y S T)
+
+      ;; ... <: *
+      ; Typed Racket notes that this might not be a correct subtyping case?
+      (and (:drest S)
+           (:rest T))
+      (assert nil "TODO cs-gen-Function-dots-<-star")
+      #_
+      (cs-gen-Function-dots-<-star cg V X Y S T)
+
+      :else 
+      (err/nyi-error (pr-str "NYI Function inference " (prs/unparse-type S) (prs/unparse-type T))))))
+
+(defn cs-gen-Protocol
+  [no-mention S T M]
+  {:pre [(r/Protocol? S)
+         (r/Protocol? T)]
+   :post [(constraint-set-set? %)]}
+  (let [norm2 #(norm2 no-mention %1 %2 M)]
+    (if (= (:the-var S)
+           (:the-var T))
+      (apply intersect-css
+             (for
+               [[vari si ti]
+                (map vector
+                     (:variances T)
+                     (:poly? S)
+                     (:poly? T))]
+               (case vari
+                 (:covariant :constant) (norm2 si ti)
+                 :contravariant (norm2 ti si)
+                 :invariant (intersect-css (norm2 si ti)
+                                           (norm2 ti si)))))
+      fail-css)))
+
+(defn cs-gen [no-mention S T M]
+  {:pre [(r/Type? S)
+         (r/Type? T)]
+   :post [(constraint-set-set? %)]}
+  ;(prn "cs-gen" (prs/unparse-type S) (prs/unparse-type T))
+  (if (or (contains? no-mention (c/In S (r/NotType-maker T)))
+          (sub/subtype? S T))
+    ;already been around this loop, is a subtype
+    (constraint-set-set
+      (constraint-set))
+    (let [M (conj M (c/In S (r/NotType-maker T)))
+          norm2 #(norm2 no-mention %1 %2 M)
+          norm* (fn [Ss Ts]
+                  (cnorm no-mention Ss Ts M))
+          cg #(cs-gen no-mention %1 %2 M)]
+      (cond
+        (r/Top? T)
+        (constraint-set-set
+          (constraint-set))
+        
+        ;values are subtypes of their classes
+        (and (r/Value? S)
+             (impl/checking-clojure?))
+        (impl/impl-case
+          :clojure (if (nil? (:val S))
+                     fail-css
+                     (norm2 (apply c/In (c/RClass-of (class (:val S)))
+                                   (cond 
+                                     ;keyword values are functions
+                                     (keyword? (:val S)) [(c/keyword->Fn (:val S))]
+                                     ;strings have a known length as a seqable
+                                     (string? (:val S)) [(r/make-ExactCountRange (count (:val S)))]))
+                            T))
+          :cljs (cond
+                  (integer? (:val S)) (norm2 (r/IntegerCLJS-maker) T)
+                  (number? (:val S)) (norm2 (r/NumberCLJS-maker) T)
+                  (string? (:val S)) (norm2 (r/StringCLJS-maker) T)
+                  (con/boolean? (:val S)) (norm2 (r/BooleanCLJS-maker) T)
+                  (symbol? (:val S)) (norm2 (c/DataType-of 'cljs.core/Symbol) T)
+                  (keyword? (:val S)) (norm2 (c/DataType-of 'cljs.core/Keyword) T)
+                  :else (constraint-set-set)))
+
+        ;; constrain body to be below T, but don't mention the new vars
+        (r/Poly? S)
+        (assert "TODO poly on left")
+        #_
+        (let [_ 
+              nms (c/Poly-fresh-symbols* S)
+              body (c/Poly-body* nms S)
+              bbnds (c/Poly-bbnds* nms S)]
+          (free-ops/with-bounded-frees (zipmap (map r/F-maker nms) bbnds)
+                   (cs-gen (set/union (set nms) V) X Y body T)))
+
+        (r/Name? S)
+        (norm2 (c/resolve-Name S) T)
+
+        (r/Name? T)
+        (norm2 S (c/resolve-Name T))
+
+        ; copied from TR's infer-unit
+        ;; if we have two mu's, we rename them to have the same variable
+        ;; and then compare the bodies
+        ;; This relies on (B 0) only unifying with itself, and thus only hitting the first case of this `match'
+        (and (r/Mu? S)
+             (r/Mu? T))
+        (norm2 (r/Mu-body-unsafe S) (r/Mu-body-unsafe T))
+
+        ;; other mu's just get unfolded
+        (r/Mu? S) (norm2 (c/unfold S) T)
+        (r/Mu? T) (norm2 S (c/unfold T))
+
+        (and (r/TApp? S)
+             (not (r/F? (:rator S))))
+        (norm2 (c/resolve-TApp S) T)
+
+        (and (r/TApp? T)
+             (not (r/F? (:rator T))))
+        (norm2 S (c/resolve-TApp T))
+
+        ;constrain *each* element of S to be below T, and then combine the constraints
+        (r/Union? S)
+        (norm2 S T)
+
+        ;; find *an* element of T which can be made a supertype of S
+        (r/Union? T)
+        (norm2 S T)
+
+        ; Does it matter which order the Intersection cases go?
+
+        ;constrain *every* element of T to be above S, and then meet the constraints
+        ; we meet instead of cset-combine because we want all elements of T to be under
+        ; S simultaneously.
+        (r/Intersection? T)
+        (norm2 S T)
+
+        ;; find *an* element of S which can be made a subtype of T
+        (r/Intersection? S)
+        (norm2 S T)
+
+        (and (r/Extends? S)
+             (r/Extends? T))
+        (norm2 (apply c/In (:extends S) (mapv r/NotType? (:without S)))
+               (apply c/In (:extends T) (mapv r/NotType? (:without T))))
+
+        (r/Extends? S)
+        (norm2 (apply c/In (:extends S) (mapv r/NotType? (:without S)))
+               T)
+
+        (r/Extends? T)
+        (norm2 S
+               (apply c/In (:extends T) (mapv r/NotType? (:without T))))
+
+
+        (r/App? S)
+        (norm2 (c/resolve-App S) T)
+
+        (r/App? T)
+        (norm2 S (c/resolve-App T))
+
+        (and (r/DataType? S)
+             (r/DataType? T)) (cs-gen-datatypes-or-records no-mention S T M)
+
+        ; handle Record as HMap
+        (r/Record? S) (norm2 (c/Record->HMap S) T)
+
+        (and (r/HeterogeneousVector? S)
+             (r/HeterogeneousVector? T))
+        (cs-gen-HSequential no-mention (c/HVec->HSequential S) (c/HVec->HSequential T) M)
+
+        (and (r/HeterogeneousSeq? S)
+             (r/HeterogeneousSeq? T))
+        (cs-gen-HSequential no-mention (c/HSeq->HSequential S) (c/HSeq->HSequential T) M)
+
+        (and (r/HeterogeneousList? S)
+             (r/HeterogeneousList? T))
+        (cs-gen-HSequential no-mention (c/HList->HSequential S) (c/HList->HSequential T) M)
+
+        ; HList/HSeq/HVector are HSequential
+        (and ((some-fn r/HeterogeneousList?
+                       r/HeterogeneousSeq?
+                       r/HeterogeneousVector?)
+              S)
+             (r/HSequential? T))
+        (norm (cond
+                (r/HeterogeneousList? S) (c/HList->HSequential S) 
+                (r/HeterogeneousVector? S) (c/HVec->HSequential S) 
+                :else (c/HSeq->HSequential S))
+              T)
+
+        ; HList is a HSeq
+        (and (r/HeterogeneousList? S)
+             (r/HeterogeneousSeq? T))
+        (cs-gen-HSequential no-mention (c/HList->HSequential S) (c/HSeq->HSequential T) M)
+
+        (and (r/HSequential? S)
+             (r/HSequential? T))
+        (cs-gen-HSequential no-mention S T M)
+
+        (and (r/HeterogeneousMap? S)
+             (r/HeterogeneousMap? T))
+        ; assumes optional/mandatory/absent keys are disjoint
+        (let [Skeys (set (keys (:types S)))
+              Tkeys (set (keys (:types T)))
+              Soptk (set (keys (:optional S)))
+              Toptk (set (keys (:optional T)))
+              Sabsk (:absent-keys S)
+              Tabsk (:absent-keys T)]
+          (cond
+            ; All keys must be values
+            (not (every? r/Value? 
+                         (concat
+                           Skeys Tkeys
+                           Soptk Toptk
+                           Sabsk Tabsk)))
+            fail-css
+
+            ; If the right is complete, the left must also be complete
+            (and (c/complete-hmap? T)
+                 (not (c/complete-hmap? S)))
+            fail-css
+
+            ; check mandatory keys
+            (if (c/complete-hmap? T)
+              ; If right is complete, mandatory keys must be identical
+              (= Tkeys Skeys)
+              ; If right is partial, all mandatory keys on the right must also appear mandatory on the left
+              (seq (set/difference Tkeys Skeys)))
+            fail-css
+
+            ; All optional keys on the right must appear either absent, mandatory or optional
+            ; on the left
+            (seq (set/difference Toptk 
+                                 (set/union Skeys 
+                                            Soptk 
+                                            Sabsk)))
+            fail-css
+
+            ; All absent keys on the right must appear absent on the left
+            (seq (set/difference Tabsk Sabsk))
+            fail-css
+
+            :else
+            ; now check the values with cs-gen
+            (let [;only check mandatory entries that appear on the right
+                  check-mandatory-keys Tkeys
+                  Svals (map (:types S) check-mandatory-keys)
+                  Tvals (map (:types T) check-mandatory-keys)
+                  _ (assert (every? r/Type? Svals))
+                  _ (assert (every? r/Type? Tvals))
+                  ;only check optional entries that appear on the right
+                  ; and also appear as mandatory or optional on the left
+                  check-optional-keys (set/intersection
+                                        Toptk (set/union Skeys Soptk))
+                  Sopts (map (some-fn (:types S) (:optional S)) check-optional-keys)
+                  Topts (map (:optional T) check-optional-keys)
+                  _ (assert (every? r/Type? Sopts))
+                  _ (assert (every? r/Type? Topts))]
+              (intersect-css (norm* Svals Tvals)
+                             (norm* Sopts Topts)))))
+
+        (and (r/GetType? S)
+             (not (r/F? (:target S))))
+        (norm2 (c/-resolve S) T)
+
+        (and (r/GetType? T)
+             (not (r/F? (:target T))))
+        (norm2 S (c/-resolve T))
+
+        (and (r/AssocType? S)
+             (r/AssocType? T))
+        (let [{S-target :target S-entries :entries S-dentries :dentries} S
+              {T-target :target T-entries :entries T-dentries :dentries} T
+              target-cset (cg S-target T-target)
+              S-entries (reduce concat S-entries)
+              T-entries (reduce concat T-entries)
+              entries-cset (norm* S-entries T-entries)
+              _ (when (and S-dentries T-dentries)
+                  (err/nyi-error "NYI dentries of Assoc in cs-gen"))
+              ]
+          (intersect-css target-cset entries-cset))
+
+        (and (r/AssocType? S)
+             (r/RClass? T)
+             ; (Map xx yy)
+             (= 'clojure.lang.IPersistentMap (:the-class T)))
+        (assert nil "TODO AssocType RClass")
+#_
+        (let [{:keys [target entries dentries]} S
+              {:keys [poly? the-class]} T
+              dentries-cset (when-let [{dty :pre-type dbound :name} dentries]
+                              (when (and dbound (not (Y dbound)))
+                                (fail! S T))
+                              ;(println "passed when")
+                              (let [merged-X (merge X {dbound (Y dbound)})
+                                    get-list-of-c (fn get-list-of-c [t-list]
+                                                    (mapv #(get-c-from-cmap % dbound)
+                                                          (t/for [t :- r/Type, t-list]
+                                                                :- cset
+                                                                (cs-gen V merged-X Y dty t))))
+                                    repeat-c (get-list-of-c poly?)]
+                                (assoc-in (cr/empty-cset X Y)
+                                          [:maps 0 :dmap :map dbound]
+                                          ; don't constrain on fixed, otherwise will fail
+                                          ; on (assoc m x y)
+                                          (cr/dcon-repeat-maker [] repeat-c))))
+              ;_ (println "dentries-cset" dentries-cset)
+
+              ; if it's nil, we also accept it
+              map-cset (when-not (r/Nil? target)
+                         (cs-gen V X Y target T))
+              entries-keys (map first entries)
+              entries-vals (map second entries)
+              cg #(cs-gen V X Y %1 %2)
+              key-cset (map cg entries-keys (repeat (first poly?)))
+              val-cset (map cg entries-vals (repeat (second poly?)))]
+          (cset-meet* (concat (when map-cset [map-cset]) key-cset val-cset)))
+
+        ; transform Record to HMap, this is not so useful until we can do
+        ; cs-gen Assoc with dentries with HMap
+        (and (r/AssocType? S)
+             (r/Record? T))
+        (let [{:keys [target]} S
+              target-cset (norm2 target T)
+              cset (norm2 S (c/Record->HMap T))]
+          (intersect-css target cset))
+
+; Completeness matters:
+;
+; (Assoc x ':a Number ':b Long) <: (HMap {:a Number :b Long} :complete? true)
+; (Assoc x ':a Number ':b Long ':c Foo) <!: (HMap {:a Number :b Long} :complete? true)
+        (and (r/AssocType? S)
+             (r/HeterogeneousMap? T))
+        (assert nil "TODO AssocType HeterogeneousMap")
+#_
+        (let [;_ (prn "cs-gen Assoc HMap")
+              {:keys [target entries dentries]} S
+              {:keys [types absent-keys]} T
+              _ (when-not (nil? dentries) (err/nyi-error (pr-str "NYI cs-gen of dentries AssocType with HMap " S T)))
+              Assoc-keys (map first entries)
+              Tkeys (keys types)
+              ; All keys must be keyword values
+              _ (when-not (every? c/keyword-value? (concat Tkeys Assoc-keys absent-keys))
+                  (fail! S T))
+              ; All keys explicitly not in T should not appear in the Assoc operation
+              absents-satisfied?
+              (if (c/complete-hmap? T)
+                ; if T is partial, we just need to ensure the absent keys in T
+                ; don't appear in the entries of the Assoc.
+                (empty?
+                  (set/intersection
+                    (set absent-keys)
+                    (set (map first entries))))
+                ; if T is complete, all entries of the Assoc should *only* have
+                ; keys that are mandatory keys of T.
+                (empty?
+                  (set/difference
+                    (set (map first entries))
+                    (set Tkeys))))
+              _ (when-not absents-satisfied?
+                  (fail! S T))
+              ;; Isolate the entries of Assoc in a new HMap, with a corresponding expected HMap.
+              ; keys on the right overwrite those on the left.
+              assoc-args-hmap (c/make-HMap :mandatory (into {} entries))
+              expected-assoc-args-hmap (c/make-HMap :mandatory (select-keys (:types assoc-args-hmap) (set Assoc-keys)))
+              
+              ;; The target of the Assoc needs all the keys not explicitly Assoc'ed.
+              expected-target-hmap 
+              (let [types (select-keys (into {} entries)
+                                       (set/difference (set Assoc-keys) (set Tkeys)))]
+                (if (c/complete-hmap? T) 
+                  (c/-complete-hmap types)
+                  (c/-partial-hmap types absent-keys)))
+              
+              ;_ (prn assoc-args-hmap :< expected-assoc-args-hmap)
+              ;_ (prn (:target S) :< expected-target-hmap)
+              ]
+          (cs-gen-list V X Y
+                       [assoc-args-hmap 
+                        (:target S)]
+                       [expected-assoc-args-hmap
+                        expected-target-hmap]))
+
+        (and (r/AssocType? S)
+             (r/HeterogeneousVector? T))
+        (assert nil "TODO AssocType HVec")
+#_
+        (let [elem-type (apply c/Un
+                               (concat
+                                 (:types T)
+                                 (when-let [rest (:rest T)]
+                                   [rest])
+                                 (when (:drest T)
+                                   [r/-any])))
+              vec-any (r/-hvec [] :rest r/-any)
+              num-type (c/RClass-of 'java.lang.Number)
+              target-cset (cs-gen V X Y (:target S) vec-any)
+              entries-key (map first (:entries S))
+              entries-val (map second (:entries S))
+              key-cset (cs-gen-list V X Y entries-key (repeat (count entries-key)
+                                                              num-type))
+              ;_ (println "key-cset" key-cset)
+              val-cset (cs-gen-list V X Y entries-val (repeat (count entries-val)
+                                                              elem-type))
+              ;_ (println "val-cset" val-cset)
+              dentries-cset (when-let [{dty :pre-type dbound :name} (:dentries S)]
+                              (when (and dbound (not (Y dbound)))
+                                (fail! S T))
+                              ;(println "passed when")
+                              (let [merged-X (merge X {dbound (Y dbound)})
+                                    get-list-of-c (fn get-list-of-c [t-list]
+                                                    (mapv #(get-c-from-cmap % dbound)
+                                                          (t/for [t :- r/Type, t-list]
+                                                            :- cset
+                                                            (cs-gen V merged-X Y dty t))))
+                                    repeat-c (get-list-of-c [num-type elem-type])]
+                                (assoc-in (cr/empty-cset X Y)
+                                          [:maps 0 :dmap :map dbound]
+                                          ; don't constrain on fixed, otherwise will fail
+                                          ; on (assoc m x y)
+                                          (cr/dcon-repeat-maker [] repeat-c))))
+              ]
+          (cset-meet* (concat [target-cset key-cset val-cset]
+                              (when dentries-cset [dentries-cset]))))
+
+        (and (r/PrimitiveArray? S)
+             (r/PrimitiveArray? T)
+             (impl/checking-clojure?))
+        (norm* 
+          ;input contravariant
+          ;output covariant
+          [(:input-type T) (:output-type S)]
+          [(:input-type S) (:output-type T)])
+
+        ; some RClass's have heterogeneous vector ancestors (in "unchecked ancestors")
+        ; It's useful to also trigger this case with HSequential, as that's more likely
+        ; to be on the right.
+        (and (r/RClass? S)
+             ((some-fn r/HeterogeneousVector? r/HSequential?) T))
+        (if-let [[Sv] (seq
+                        (filter (some-fn r/HeterogeneousVector? r/HSequential?)
+                                (map c/fully-resolve-type (c/RClass-supers* S))))]
+          (norm2 Sv T)
+          fail-css)
+        
+        (and (r/TApp? S)
+             (r/TApp? T))
+        (cs-gen-TApp no-mention S T M)
+
+        (and (r/FnIntersection? S)
+             (r/FnIntersection? T))
+        (cs-gen-FnIntersection no-mention S T M)
+
+        (and (r/Function? S)
+             (r/Function? T))
+        (cs-gen-Function no-mention S T M)
+
+        (and (r/Result? S)
+             (r/Result? T))
+        (cs-gen-Result no-mention S T M)
+
+        (and (r/Value? S)
+             (r/AnyValue? T))
+        fail-css
+
+; must remember to update these if HeterogeneousList gets rest/drest
+        (and (r/HeterogeneousSeq? S)
+             (r/RClass? T))
+        (norm2 (let [ss (apply c/Un
+                               (concat
+                                 (:types S)
+                                 (when-let [rest (:rest S)]
+                                   [rest])
+                                 (when (:drest S)
+                                   [r/-any])))]
+                 (c/In (impl/impl-case
+                         :clojure (c/RClass-of clojure.lang.ISeq [ss])
+                         :cljs (c/Protocol-of 'cljs.core/ISeq [ss]))
+                       ((if (or (:rest S) (:drest S)) r/make-CountRange r/make-ExactCountRange)
+                        (count (:types S)))))
+               T)
+
+; must remember to update these if HeterogeneousList gets rest/drest
+        (and (r/HeterogeneousList? S)
+             (r/RClass? T))
+        (norm2 (c/In (impl/impl-case
+                       :clojure (c/RClass-of clojure.lang.IPersistentList [(apply c/Un (:types S))])
+                       :cljs (c/Protocol-of 'cljs.core/IList [(apply c/Un (:types S))]))
+                     (r/make-ExactCountRange (count (:types S))))
+               T)
+
+        ; TODO add :repeat support
+        (and (r/HSequential? S)
+             (r/RClass? T))
+        (norm2 (let [ss (apply c/Un
+                               (concat
+                                 (:types S)
+                                 (when-let [rest (:rest S)]
+                                   [rest])
+                                 (when (:drest S)
+                                   [r/-any])))]
+                 (c/In (impl/impl-case
+                         :clojure (c/In (c/RClass-of clojure.lang.IPersistentCollection [ss])
+                                        (c/RClass-of clojure.lang.Sequential))
+                         :cljs (throw (Exception. "TODO CLJS HSequential cs-gen")))
+                       ((if (or (:rest S) (:drest S)) r/make-CountRange r/make-ExactCountRange)
+                        (count (:types S)))))
+               T)
+
+        ; TODO add :repeat support
+        (and (r/HeterogeneousVector? S)
+             (r/RClass? T))
+        (norm2 (let [ss (apply c/Un 
+                               (concat
+                                 (:types S)
+                                 (when-let [rest (:rest S)]
+                                   [rest])
+                                 (when (:drest S)
+                                   [r/-any])))]
+                 (c/In (impl/impl-case
+                         :clojure (c/RClass-of clojure.lang.APersistentVector [ss])
+                         :cljs (c/Protocol-of 'cljs.core/IVector [ss]))
+                       ((if (or (:rest S) (:drest S)) r/make-CountRange r/make-ExactCountRange)
+                        (count (:types S)))))
+               T)
+
+        (and (r/RClass? S)
+             (r/RClass? T))
+        (norm-RClass no-mention S T M)
+
+        (and (r/Protocol? S)
+             (r/Protocol? T))
+        (cs-gen-Protocol no-mention S T M)
+
+        (r/HeterogeneousMap? S)
+        (let [new-S (c/upcast-hmap S)]
+          (norm2 new-S T))
+
+        (r/HSet? S)
+        (let [new-S (c/upcast-hset S)]
+          (norm2 new-S T))
+
+        (r/HeterogeneousVector? S)
+        (norm2 (c/upcast-hvec S) T)
+
+        (and (r/AssocType? S)
+             (r/Protocol? T))
+        (norm2 (:target S) T)
+
+        :else
+        (if (not (sub/subtype? S T))
+          fail-css
+          success-css)))))
+
+(defn cs-gen-normalized-no-tvar [no-mention ts M]
+  {:pre [(set? no-mention)
+         (every? symbol? no-mention)
+         (set? M)
+         (every? r/Type? M)]
+   :post [(constraint-set-set? %)]}
+  (let [pred (fn [t]
+                   (let [t (fully-resolve-under-Not t)
+                         t (if (r/NotType? t)
+                             (:type t)
+                             t)]
+                     (and (r/Type? t)
+                          (not (r/NotType? t))
+                          (or (r/Bottom? t)
+                              (not (r/Union? t)))
+                          (not (r/F? t))
+                          (not (r/Intersection? t)))))]
+    (assert (every? pred ts) (vec (remove pred ts))))
+  (let [ts (mapv fully-resolve-under-Not ts)
+        {N true P false} (group-by-boolean r/NotType? ts)
+        _ (assert (every? (every-pred r/Type? (complement r/NotType?)) P))
+        N (map :type N)
+        _ (assert (every? r/Type? N))
+        ;; every P must be under at least one N
+        css (apply
+              ;; not sure if intersect-css is correct here
+              intersect-css
+              (map (fn [p]
+                     {:pre [(r/Type? p)]
+                      :post [(constraint-set-set? %)]}
+                     ;; not sure if union-css is correct here
+                     (let [css' (map (fn [n]
+                                       {:pre [(r/Type? n)]
+                                        :post [(constraint-set-set? %)]}
+                                       (cs-gen2 no-mention p n M))
+                                     N)
+                           ;_ (apply println "inner union-css" "\n" (map ppcss-str css'))
+                           ret (apply union-css css')]
+                       ;(prn "ret inner union-css" (ppcss-str ret))
+                       ret))
+                   P))
+        ]
+    css
+    ))
 
 (defn csmerge [no-mention cs M]
   {:pre [(constraint-set? cs)
@@ -369,7 +1466,7 @@
 
 (defn cnorm 
   "Normalize types Ss <: Ts, pairwise."
-  [no-mention Ss Ts]
+  [no-mention Ss Ts M]
   {:pre [(set? no-mention)
          (every? symbol? no-mention)
          (every? r/Type? Ss)
@@ -378,7 +1475,7 @@
    :post [(constraint-set-set? %)]}
   (apply intersect-css
          (map (fn [s t]
-                (norm no-mention (c/In s (r/NotType-maker t)) #{}))
+                (norm no-mention (c/In s (r/NotType-maker t)) M))
               Ss Ts)))
 
 (defn substitution? [m]
@@ -433,6 +1530,27 @@
                                  rec_a)} 
              sigma))))
 
+(declare unify-all ppsubst)
+
+(defn infer-substs [no-mentions Ss Tt]
+  (let [css (cnorm no-mentions Ss Tt #{})
+        _ (prn "after norm")
+        _ (ppcss css)
+        _ (assert (seq css) "Fail after norm")
+        css (cssmerge no-mentions css)
+        _ (prn "after merge")
+        _ (ppcss css)
+        _ (assert (seq css))
+        substs (csssolve css)
+        _ (ppsubst subst)
+        substs (unify-all substs)]
+    substs))
+
+(defn ppinfer-substs [no-mention Ss Tt]
+  (let [substs (infer-substs no-mention Ss Tt)]
+    (run! ppsubst substs)
+    substs))
+
 (defn clean-placeholders [s]
   {:pre [(substitution? s)]
    :post [(substitution? %)]}
@@ -456,16 +1574,31 @@
    :post [(every? substitution? %)]}
   (mapv (comp clean-placeholders unify) substs))
 
+(defn ppcs [cs]
+  (pprint
+    (read-string
+      (pr-str
+        (map 
+          (fn [{:keys [:constraint/S :constraint/var :constraint/T]}]
+            [S :< var :< T])
+          (sort-by :constraint/var cs))))))
+
 (defn ppcss [css]
+  {:pre [(constraint-set-set? css)]}
   (pprint
     (read-string
       (pr-str
         (mapv (fn [cs]
+                {:pre [(constraint-set? cs)]}
                 (map 
-                  (fn [{:keys [:constraint/S :constraint/var :constraint/T]}]
+                  (fn [{:keys [:constraint/S :constraint/var :constraint/T] :as c}]
+                    {:pre [(constraint? c)]}
                     [S :< var :< T])
                   (sort-by :constraint/var cs)))
               css)))))
+
+(defn ppcss-str [css]
+  (with-out-str (ppcss css)))
 
 (defn ppsubst [subst]
   (pprint
@@ -521,14 +1654,81 @@
                     [(r/make-F 'a)]
                     (r/make-F 'b)))
           no-mentions #{}
-          css (cnorm no-mentions [left1 left2] [right1 right2])
-          _ (assert (seq css))
-          css (cssmerge no-mentions css)
-          ;_ (ppcss css)
-          _ (assert (seq css))
-          substs (csssolve css)
-          ;_ (ppsubst subst)
-          substs (unify-all substs)
-          _ (run! ppsubst substs)
+          css (ppinfer-substs no-mentions [left1 left2] [right1 right2])
           ]
-      true)))
+      true))
+  (is-clj
+    (let [left1 (r/make-FnIntersection
+                 (r/make-Function
+                   [(r/make-F 'a)]
+                   (c/RClass-of Seqable [(c/RClass-of Boolean)])))
+          right1 (r/make-FnIntersection
+                  (r/make-Function
+                    [(r/make-F 'b)]
+                    (r/make-F 'b)))
+          left2 (r/make-FnIntersection
+                 (r/make-Function
+                   [(c/Un (c/RClass-of Seqable [(c/RClass-of Integer)])
+                          (c/RClass-of Seqable [(c/RClass-of Boolean)]))]
+                   (c/RClass-of Integer)))
+          right2 (r/make-FnIntersection
+                  (r/make-Function
+                    [(r/make-F 'a)]
+                    (r/make-F 'b)))
+          no-mentions #{}
+          css (ppinfer-substs no-mentions [left1 left2] [right1 right2])
+          ]
+      true))
+  (is-clj
+    (let [left1 (c/RClass-of Boolean)
+          right1 (r/make-F 'b)
+          no-mentions #{}
+          css (ppinfer-substs no-mentions [left1] [right1])
+          ]
+      true))
+  (is-clj
+    (let [left1 (c/RClass-of Seqable [(c/RClass-of Boolean)])
+          right1 (c/RClass-of Seqable [(r/make-F 'b)])
+          no-mentions #{}
+          css (ppinfer-substs no-mentions [left1] [right1])
+          ]
+      true))
+  (is-clj
+    (let [left1 (r/make-FnIntersection
+                  (r/make-Function
+                    [(r/make-FnIntersection
+                       (r/make-Function
+                         [(r/make-F 'a1)]
+                         (r/make-F 'b1)))]
+                    (r/make-FnIntersection
+                      (r/make-Function
+                        [(c/RClass-of Seqable [(r/make-F 'a1)])]
+                        (c/RClass-of Seqable [(r/make-F 'b1)])))))
+          right1 (r/make-FnIntersection
+                   (r/make-Function
+                     [(r/make-FnIntersection
+                        (r/make-Function
+                          [(c/RClass-of Integer)]
+                          (c/RClass-of Boolean))
+                        (r/make-Function
+                          [(c/In (r/make-F 'a) (r/NotType-maker
+                                                 (c/RClass-of Integer)))]
+                          (c/In (r/make-F 'a) (r/NotType-maker
+                                                 (c/RClass-of Integer)))))]
+                     (r/make-F 'gamma)))
+          no-mentions #{}
+          css (ppinfer-substs no-mentions [left1] [right1])
+          ]
+      true))
+)
+
+;(c/flatten-intersections
+;  [(c/In (c/In (r/make-F 'b) (r/NotType-maker (r/make-F 'a)))
+;        (r/NotType-maker (c/RClass-of Integer)))])
+;
+;(fully-resolve-under-Not
+;  (c/In (c/In (r/make-F 'b) (r/NotType-maker (r/make-F 'a)))
+;        (r/NotType-maker (c/RClass-of Integer))))
+;
+;(c/In (r/make-F 'b) (r/NotType-maker (r/make-F 'a))
+;      (r/NotType-maker (c/RClass-of Integer)))
