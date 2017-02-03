@@ -85,8 +85,6 @@
     (assoc expr
            expr-type (ret t))))
 
-(set! *print-level* 4)
-(set! *print-length* 6)
 (add-check-method :const
  [{:keys [form] :as expr} & [expected]]
  (let [t (r/-val form)
@@ -361,7 +359,7 @@
 ;; adding a bunch of missing methods: 
 
 (defn fail-empty [expr]
-  (println "ERROR ##CLJS## " (with-out-str (clojure.pprint/pprint expr)))
+  ;;(println "ERROR ##CLJS## " (with-out-str (clojure.pprint/pprint expr)))
   (throw (Exception. "Not implemented, yet")))
 
 (add-check-method :binding

@@ -12,7 +12,8 @@
             [clojure.core.typed.base-env-common :refer [delay-and-cache-env]
              :as common]
             [clojure.core.typed.var-env :as var-env]
-            [clojure.core.typed.test.cljs-core :as core-test]))
+            [clojure.core.typed.test.cljs-core :as core-test]
+            [clojure.core.typed.analyzer-api-intercept :as fake-ana-api]))
 
 (deftest parse-prims-cljs-test
   (is-cljs (= (prs/parse-cljs 'number)
@@ -81,19 +82,21 @@
   (is-tc-e (+ 1 1)))
 
 (deftest fn-test
-  (is-tc-e (fn a [b] a))
+  ;;(is-tc-e (fn a [b] a))
   (is-tc-e (fn [a] a)
            (t/All [x] [x -> x])))
 
 (deftest inst-test
   (is-tc-e (let [f (-> (fn [a] a)
                        (t/ann-form (t/All [x] [x -> x])))]
-             ((t/inst f number) 1))))
+             ((t/inst f number) 1))
+           number))
 
 (deftest letfn-test
   (is-tc-e (t/letfn> [a :- (t/All [x] [x -> x])
-                      (a [b] b)]
-             (a 1))))
+                      (fn [b] b)]
+                     (a 1))
+           number))
 
 #_(deftest async-test
   (is-cljs (t/check-ns* 'cljs.core.typed.async)))
@@ -162,3 +165,24 @@
   (testing "unparsing protocols is fully qualified in :unknown"
     (is-cljs (= (prs/unparse-type (c/Protocol-of 'cljs.core/ISet [r/-any]))
                 '(cljs.core/ISet clojure.core.typed/Any)))))
+
+
+(def nodes #{:binding :case :case-node :case-test :case-then :const :def :defrecord :deftype :do :fn :fn-method :host-call :host-field :if :invoke :js :js-array :js-object :js-var :let :letfn :local :loop :map :new :no-op :ns :ns* :quote :recur :set :set! :the-var :throw :try :var :vector :with-meta
+            })
+
+(deftest check-case-coverage-test
+  (fake-ana-api/reset-found)
+
+  ;;const
+  (is-tc-e 1 number)
+
+  
+  (is-tc-e (case "foo"
+               "foo" 1
+               "bar" 2)
+           (U nil number))
+
+  (print "MISSING NODES (fake ERROR): ")
+  (doseq [op (clojure.set/difference nodes @fake-ana-api/ops-found)]
+    (print (str op " ")))
+  (println))

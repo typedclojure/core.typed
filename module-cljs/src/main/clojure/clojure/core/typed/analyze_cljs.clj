@@ -2,7 +2,7 @@
   (:refer-clojure :exclude [extenders])
   (:require [clojure.core.typed.current-impl :as impl]
             [clojure.core.typed.util-cljs :as uc]
-            [cljs.analyzer.api :as api]
+            [clojure.core.typed.analyzer-api-intercept :as api]
             [cljs.analyzer :as ana]
             [clojure.tools.reader :as reader]
             [clojure.java.io :as io]
@@ -27,7 +27,7 @@
   ;; TODO propagate analyzer env from opt
   (uc/with-cljs-typed-env
     (let [ast (api/analyze (api/empty-env) form)]
-      (prn "ast-for-form" (:op ast) ast)
+      ;;(prn "ast-for-form" (:op ast) ast)
       (if eval-fn
         (eval-fn opt ast)
         ast))))
