@@ -61,73 +61,267 @@
       :else body)))
 
 (defn constraint? [c]
-  (and (map? c)
-       (symbol? (:constraint/var c))
-       (r/Type? (:constraint/S c))
-       (r/Type? (:constraint/T c))))
+  (cr/c? c))
 
 (defn constraint-set? [cs]
-  (and (set? cs)
-       (every? constraint? cs)))
+  (cr/cset-entry? cs))
 
 (defn constraint-set-set? [css]
-  (and (vector? css)
-       (every? constraint-set? css)))
+  (cr/cset? css))
 
 (defn constraint [S var T]
   {:pre [(r/Type? S)
          (symbol? var)
          (r/Type? T)]
    :post [(constraint? %)]}
-  {:constraint/S S
-   :constraint/var var
-   :constraint/T T})
+  (cr/c-maker S var T nil))
 
-(defn constraint-set [& c]
-  {:pre [(every? constraint? c)]
+(defn constraint-set [& cs]
+  {:pre [(every? constraint? cs)]
    :post [(constraint-set? %)]}
-  (set c))
+  (let [ts (group-by :X cs)
+        ord-tvars (sort (keys ts))
+        ;; turn all constraints of form:
+        ;;    S1 <: a <: T1
+        ;;    S2 <: a <: T2
+        ;;    ...
+        ;;    Sn <: a <: Tn
+        ;;
+        ;; into 
+        ;;
+        ;;    S1 v S2 v ... v Sn <: a <: T1 ^ T2 ^ ... ^ Tn
+        cs (reduce
+             (fn [cs var-constraints]
+               {:pre [(every? constraint? cs)
+                      (seq var-constraints)
+                      (every? constraint? var-constraints)]
+                :post [(every? constraint? %)]}
+               (conj cs
+                     (constraint
+                       (apply c/Un (map :S var-constraints))
+                       (:X (first var-constraints))
+                       (apply c/In (map :T var-constraints)))))
+             []
+             (map #(get ts %) ord-tvars))]
+    (assert (distinct? (map :X cs)))
+    (cr/make-cset-entry
+      (zipmap (map :X cs) cs))))
 
 (defn constraint-set-set [& cs]
   {:pre [(every? constraint-set? cs)]
-   :post [(constraint-set-set? %)]}
-  (into []
-        (distinct)
-        cs))
+  :post [(constraint-set-set? %)]}
+  (cr/cset-maker cs))
 
 (def fail-css (constraint-set-set))
-(def success-css (constraint-set-set
-                   (constraint-set)))
+(def success-css 
+  (constraint-set-set
+    (constraint-set)))
+
+(defn c-meet 
+  ([c1 c2] (c-meet c1 c2 nil))
+  ([{S  :S X  :X T  :T :as c1}
+    {S* :S X* :X T* :T :as c2}
+    var]
+   (when-not (or var (= X X*))
+     (err/int-error (str "Non-matching vars in c-meet:" X X*)))
+   (let [S (c/Un S S*)
+         T (c/In T T*)]
+     (cr/c-maker S (or var X) T nil))))
+
+(defn dcon-meet [dc1 dc2]
+  {:pre [(cr/dcon-c? dc1)
+         (cr/dcon-c? dc2)]
+   :post [((some-fn nil? cr/dcon-c?) %)]}
+  (cond
+    (and (cr/dcon-exact? dc1)
+         (or (cr/dcon? dc2) 
+             (cr/dcon-exact? dc2)))
+    (let [{fixed1 :fixed rest1 :rest} dc1
+          {fixed2 :fixed rest2 :rest} dc2]
+      (when (and rest2 (= (count fixed1) (count fixed2)))
+        (cr/dcon-exact-maker
+          (mapv
+            (fn [c1 c2]
+              (c-meet c1 c2 (:X c1)))
+            fixed1 fixed2)
+          (c-meet rest1 rest2 (:X rest1)))))
+    ;; redo in the other order to call the first case
+    (and (cr/dcon? dc1)
+         (cr/dcon-exact? dc2))
+    (dcon-meet dc2 dc1)
+
+    (and (cr/dcon? dc1)
+         (not (:rest dc1))
+         (cr/dcon? dc2)
+         (not (:rest dc2)))
+    (let [{fixed1 :fixed} dc1
+          {fixed2 :fixed} dc2]
+      (when (= (count fixed1) (count fixed2))
+        (cr/dcon-maker
+          (doall
+            (for [[c1 c2] (map vector fixed1 fixed2)]
+              (c-meet c1 c2 (:X c1))))
+          nil)))
+
+    (and (cr/dcon? dc1)
+         (not (:rest dc1))
+         (cr/dcon? dc2))
+    (let [{fixed1 :fixed} dc1
+          {fixed2 :fixed rest :rest} dc2]
+      (assert rest)
+      (when (>= (count fixed1) (count fixed2))
+        (cr/dcon-maker
+          (let [vector' (t/inst vector c c t/Any t/Any t/Any t/Any)]
+            (doall
+              (t/for
+                [[c1 c2] :- '[c c], (map vector' fixed1 (concat fixed2 (repeat rest)))]
+                :- c
+                (c-meet c1 c2 (:X c1)))))
+          nil)))
+
+    (and (cr/dcon? dc1)
+         (cr/dcon? dc2)
+         (not (:rest dc2)))
+    (dcon-meet dc2 dc1)
+
+    (and (cr/dcon? dc1)
+         (cr/dcon? dc2))
+    (let [{fixed1 :fixed rest1 :rest} dc1
+          {fixed2 :fixed rest2 :rest} dc2
+          [shorter longer srest lrest]
+          (if (< (count fixed1) (count fixed2))
+            [fixed1 fixed2 rest1 rest2]
+            [fixed2 fixed1 rest2 rest1])]
+      (cr/dcon-maker
+        (mapv (fn [c1 c2] (c-meet c1 c2 (:X c1)))
+              longer (concat shorter (repeat srest)))
+        (c-meet lrest srest (:X lrest))))
+
+    (and (cr/dcon-dotted? dc1)
+         (cr/dcon-dotted? dc2))
+    (let [{fixed1 :fixed c1 :dc {bound1 :name} :dbound} dc1
+          {fixed2 :fixed c2 :dc {bound2 :name} :dbound} dc2]
+      (when (and (= (count fixed1) (count fixed2))
+                     (= bound1 bound2))
+        (cr/dcon-dotted-maker 
+          (mapv (fn [c1 c2] (c-meet c1 c2 (:X c1))) fixed1 fixed2)
+          (c-meet c1 c2 bound1) bound1)))
+
+    (and (cr/dcon? dc1)
+         (cr/dcon-dotted? dc2))
+    nil
+
+    (and (cr/dcon-dotted? dc1)
+         (cr/dcon? dc2))
+    nil
+
+    (and (cr/dcon-repeat? dc1)
+         (cr/dcon? dc2)
+         (not (:rest dc2)))
+    (let [{fixed1 :fixed repeated :repeat} dc1
+          {fixed2 :fixed} dc2
+          fixed1-count (count fixed1)
+          fixed2-count (count fixed2)
+          repeat-count (count repeated)
+          diff (- fixed2-count fixed1-count)]
+      (assert repeated)
+      (when (and (>= fixed2-count fixed1-count)
+                 (zero? (rem diff repeat-count)))
+        (cr/dcon-repeat-maker
+          (let [vector' (t/inst vector c c Any Any Any Any)]
+            (doall
+              (t/for 
+                [[c1 c2] :- '[c c], (map vector'
+                                         fixed2
+                                         (concat fixed1
+                                                 (gen-repeat (quot diff repeat-count) repeated)))]
+                :- c
+                (c-meet c1 c2 (:X c1)))))
+          repeated)))
+    (and (cr/dcon-repeat? dc2)
+         (cr/dcon? dc1)
+         (not (:rest dc1)))
+    (dcon-meet dc2 dc1)
+
+    (every? cr/dcon-repeat? [dc1 dc2])
+    (let [[{short-fixed :fixed short-repeat :repeat}
+           {long-fixed :fixed long-repeat :repeat}]
+          (sort-by (fn [x] (-> x :fixed count)) [dc1 dc2])
+          s-fixed-count (count short-fixed)
+          l-fixed-count (count long-fixed)
+          s-repeat-count (count short-repeat)
+          l-repeat-count (count long-repeat)
+          diff (- l-fixed-count s-fixed-count)
+          _ (assert (= s-repeat-count l-repeat-count))
+          vector' (t/inst vector c c Any Any Any Any)
+          merged-repeat (mapv (fn [c1 c2] (c-meet c1 c2 (:X c1)))
+                              short-repeat long-repeat)]
+      (assert (zero? (rem diff s-repeat-count)))
+      (cr/dcon-repeat-maker
+        (mapv (fn [c1 c2] (c-meet c1 c2 (:X c1)))
+              long-fixed
+              (concat short-fixed
+                      (gen-repeat (quot diff s-repeat-count) short-repeat)))
+        merged-repeat))
+
+    :else (err/nyi-error (str "NYI dcon-meet " dc1 dc2))))
+
+(defn merge-with-or-nil [f m1 m2]
+  {:pre [(map? m1)
+         (map? m2)]
+   :post [((some-fn nil? map?) %)]}
+  (reduce (fn [m [k v]]
+            (if-let [[_ v-m] (find m k)]
+              (if-some [r (f v-m v)]
+                (assoc m k r)
+                (reduced nil))
+              (assoc m k v)))
+          m1 m2))
+
+(defn dmap-meet [dm1 dm2]
+  {:pre [(cr/dmap? dm1)
+         (cr/dmap? dm2)]
+   :post [((some-fn cr/dmap? nil?) %)]}
+  (some-> (merge-with-or-nil dcon-meet (:map dm1) (:map dm2))
+          cr/dmap-maker))
+
+(defn cset-meet [{maps1 :maps :as x} {maps2 :maps :as y}]
+  {:pre [(cr/cset? x)
+         (cr/cset? y)]
+   :post [(cr/cset? %)]}
+  (let [maps (filter identity
+                     (for [{map1 :fixed dmap1 :dmap} maps1
+                           {map2 :fixed dmap2 :dmap} maps2]
+                       (when-let [cm (merge-with-or-nil c-meet map1 map2)]
+                         (when-let [dm (dmap-meet dmap1 dmap2)]
+                           (cr/cset-entry-maker cm dm)))))]
+    (cr/cset-maker maps)))
 
 (defn intersect-css2 [cs1 cs2]
   {:pre [(constraint-set-set? cs1)
          (constraint-set-set? cs2)]
    :post [(constraint-set-set? %)]}
-  (apply
-    constraint-set-set
-    (for [c1 cs1
-          c2 cs2]
-      (set/union c1 c2))))
+  (cset-meet cs1 cs2))
+
+(defn cset-meet* [args]
+  {:pre [(every? cr/cset? args)]
+   :post [(cr/cset? %)]}
+  (reduce cset-meet
+          (cr/cset-maker [(cr/cset-entry-maker {} (cr/dmap-maker {}))])
+          args))
 
 (defn intersect-css [& cs]
   {:pre [(every? constraint-set-set? cs)]
    :post [(constraint-set-set? %)]}
-  (cond
-    (empty? cs)
-    (constraint-set-set?)
-
-    (= 1 (count cs))
-    (first cs)
-
-    :else
-    (reduce intersect-css2 (first cs) (next cs))))
+  (cset-meet* cs))
 
 (defn union-css [& cs]
   {:pre [(every? constraint-set-set? cs)]
    :post [(constraint-set-set? %)]}
-  (into []
-       (mapcat identity)
-       cs))
+  (cr/cset-maker
+    (into []
+          (mapcat :maps)
+          cs)))
 
 (defn maybe-NotType-pred [p]
   (fn [t]
@@ -148,6 +342,7 @@
          (r/Type? t)
          (not (r/Union? t))]
    :post [(constraint? %)]}
+  (prn "single" a_k t)
   (let [ts (if (r/Intersection? t)
              (:types t)
              [t])
@@ -204,6 +399,7 @@
 (defn norm2 [no-mention S T M]
   {:pre [(r/Type? S)
          (r/Type? T)]}
+  (prn "norm2" S T)
   (norm no-mention (c/In S (r/NotType-maker T)) M))
 
 (defn norm [no-mention t M]
@@ -212,7 +408,7 @@
          (set? M)]
    :post [(post-msg (constraint-set-set? %)
                     (pr-str %))]}
-  ;(prn "norm" t)
+  (prn "norm" t)
   (let [t (fully-resolve-under-Not t)]
     ;(prn "norm resolved" t)
     (cond
@@ -355,7 +551,7 @@
                   (:types t)))
 
       ;; no solution
-      :else (constraint-set-set M))))
+      :else fail-css)))
 
 (defn norm-with-variance
   [no-mention variance S T M]
@@ -856,8 +1052,7 @@
           (constraint-set))
         
         ;values are subtypes of their classes
-        (and (r/Value? S)
-             (impl/checking-clojure?))
+        (r/Value? S)
         (impl/impl-case
           :clojure (if (nil? (:val S))
                      fail-css
@@ -1397,46 +1592,28 @@
   {:pre [(constraint-set? cs)
          (set? M)]
    :post [(constraint-set-set? %)]}
-  (let [ts (group-by :constraint/var cs)
-        ord-tvars (sort (keys ts))
-        ;; turn all constraints of form:
-        ;;    S1 <: a <: T1
-        ;;    S2 <: a <: T2
-        ;;    ...
-        ;;    Sn <: a <: Tn
-        ;;
-        ;; into 
-        ;;
-        ;;    S1 v S2 v ... v Sn <: a <: T1 ^ T2 ^ ... ^ Tn
-        cs (apply
-             constraint-set
-             (reduce 
-               (fn [cs var-constraints]
-                 {:pre [(every? constraint? cs)
-                        (seq var-constraints)
-                        (every? constraint? var-constraints)]
-                  :post [(every? constraint? %)]}
-                 (conj cs
-                       (constraint
-                         (apply c/Un (map :constraint/S var-constraints))
-                         (:constraint/var (first var-constraints))
-                         (apply c/In (map :constraint/T var-constraints)))))
-               []
-               (map #(get ts %) ord-tvars)))
-        _ (assert (constraint-set? cs))
-        
-        ;; check, for each constraint S <: a <: T,
+  (let [;; check, for each constraint S <: a <: T,
         ;;  that S <: T
         not-in-M (first
                    (filter
-                     (fn [{:keys [:constraint/S :constraint/T] :as c}]
+                     (fn [{:keys [S T] :as c}]
                        {:pre [(constraint? c)]}
                        (contains? M (c/In S (r/NotType-maker T))))
-                     cs))
+                     (concat (vals (:fixed cs))
+                             (reduce (fn [r dcon]
+                                       (cond
+                                         (cr/dcon? dcon) 
+                                         (into r
+                                               (concat (:fixed dcon)
+                                                       (when (:rest dcon)
+                                                         [(:rest dcon)])))
+                                         :else (throw (Exception.
+                                                        (str "What is this? " (pr-str (class dcon)))))))
+                                     [] (-> cs :dmap :map vals)))))
         ;; if there exists a contract such that S <: T, but S ^ ~T is not in M,
         ;; then recur.
         css
-        (if-let [{:keys [:constraint/S :constraint/T]} not-in-M]
+        (if-let [{:keys [S T]} not-in-M]
           (let [_ (assert (constraint? not-in-M))
                 t (c/In S (r/NotType-maker T))
                 l (intersect-css
@@ -1462,7 +1639,7 @@
                     :post [(every? constraint-set-set? %)]}
                    (conj css (csmerge no-mention cs #{})))
                  []
-                 css)))
+                 (:maps css))))
 
 (defn cnorm 
   "Normalize types Ss <: Ts, pairwise."
@@ -1479,9 +1656,7 @@
               Ss Ts)))
 
 (defn substitution? [m]
-  (and (map? m)
-       (every? symbol? (keys m))
-       (every? r/Type? (vals m))))
+  (cr/substitution-c? m))
 
 (def placeholder-prefix "placeholder_4422__")
 
@@ -1497,17 +1672,39 @@
   {:pre [(constraint-set? cs)]
    :post [(substitution? %)]}
   (into {}
-        (map (fn [{:keys [:constraint/S :constraint/var :constraint/T]}]
-               [var (c/In (c/Un S (r/make-F (placeholder-tvar-name)))
-                          T)]))
-        cs))
+        (map (fn [{:keys [S X T]}]
+               [X (cr/t-subst-maker
+                    (c/In (c/Un S (r/make-F (placeholder-tvar-name)))
+                          T)
+                    nil)]))
+        (vals (:fixed cs))))
 
 (declare unify)
 
 (defn csssolve [css]
   {:pre [(constraint-set-set? css)]
    :post [(every? substitution? %)]}
-  (mapv solve css))
+  (mapv solve (:maps css)))
+
+(defn subst-in-subst [subst target]
+  {:pre [(substitution? subst)
+         (cr/subst-rhs? target)]
+   :post [(cr/subst-rhs? %)]}
+  (let [f #(subst/subst-all subst %)]
+    (cond
+      (cr/t-subst? target) (cr/t-subst-maker
+                             (f (:type target))
+                             nil)
+      (cr/i-subst? target) (cr/i-subst-maker
+                             (mapv f (:types target)))
+      (cr/i-subst-starred? target) (cr/i-subst-starred-maker
+                                     (mapv f (:types target))
+                                     (f (:starred target)))
+      (cr/i-subst-dotted? target) (cr/i-subst-dotted-maker
+                                    (mapv f (:types target))
+                                    (f (:dty target))
+                                    (f (:dbound target)))
+      :else (throw (Exception. (str "What is this? " (class target)))))))
 
 (defn unify [E]
   {:pre [(substitution? E)]
@@ -1517,22 +1714,25 @@
     (let [;; select smallest variable
           a (first (sort (keys E)))
           t_a (get E a)
-          rec_a (maybe-Mu* a t_a)
+          rec_a (cond
+                  (cr/t-subst? t_a) (cr/t-subst-maker (maybe-Mu* a (:type t_a))
+                                                      nil)
+                  :else (throw (Exception. (str "What is this? " (pr-str (class t_a))))))
+          _ (assert (cr/subst-rhs? rec_a))
           E' (into {}
                    (map (fn [[k v]]
-                          [k (subst/subst-all (c/make-simple-substitution [a] [rec_a])
-                                              v)]))
+                          {:pre [(cr/subst-rhs? v)]}
+                          [k (subst-in-subst {a rec_a} v)]))
                    (dissoc E a))
+          _ (assert (substitution? E'))
           sigma (unify E')]
-      (merge {a (subst/subst-all (c/make-simple-substitution
-                                   (keys E')
-                                   (vals E'))
-                                 rec_a)} 
+      (merge {a (subst-in-subst E' rec_a)}
              sigma))))
 
 (declare unify-all ppsubst)
 
 (defn infer-substs [no-mentions Ss Tt]
+  (prn "infer-substs" no-mentions Ss Tt)
   (let [css (cnorm no-mentions Ss Tt #{})
         _ (prn "after norm")
         _ (ppcss css)
@@ -1542,8 +1742,9 @@
         _ (ppcss css)
         _ (assert (seq css))
         substs (csssolve css)
-        _ (ppsubst subst)
+        _ (run! ppsubst substs)
         substs (unify-all substs)]
+    (prn "final subst: " substs)
     substs))
 
 (defn ppinfer-substs [no-mention Ss Tt]
@@ -1556,17 +1757,23 @@
    :post [(substitution? %)]}
   (into {}
         (map (fn [[k v]]
-               [k (let [fvs (filter (comp placeholder? key) (frees/fv-variances v))]
-                    (reduce (fn [t [pl variance]]
-                              (subst/subst-all
-                                (c/make-simple-substitution
-                                  [pl]
-                                  [(case variance
-                                     :covariant r/-nothing
-                                     :contravariant r/-any)])
-                                t))
-                            v
-                            fvs))]))
+               {:pre [(cr/subst-rhs? v)]}
+               [k (cond
+                    (cr/t-subst? v)
+                    (let [t (:type v)
+                          fvs (filter (comp placeholder? key) (frees/fv-variances t))]
+                      (cr/t-subst-maker
+                        (reduce (fn [t [pl variance]]
+                                  (subst/subst-all
+                                    (c/make-simple-substitution
+                                      [pl]
+                                      [(case variance
+                                         :covariant r/-nothing
+                                         :contravariant r/-any)])
+                                    t))
+                                t fvs)
+                        nil))
+                    :else (throw (Exception. (str "What is this? " (class v)))))]))
         s))
 
 (defn unify-all [substs]
@@ -1591,11 +1798,11 @@
         (mapv (fn [cs]
                 {:pre [(constraint-set? cs)]}
                 (map 
-                  (fn [{:keys [:constraint/S :constraint/var :constraint/T] :as c}]
+                  (fn [{:keys [S X T] :as c}]
                     {:pre [(constraint? c)]}
-                    [S :< var :< T])
-                  (sort-by :constraint/var cs)))
-              css)))))
+                    [S :< X :< T])
+                  (sort-by :X (-> cs :fixed vals))))
+              (:maps css))))))
 
 (defn ppcss-str [css]
   (with-out-str (ppcss css)))
@@ -1604,7 +1811,11 @@
   (pprint
     (read-string
       (pr-str
-        subst))))
+        (map (fn [[k v]]
+               [k (cond
+                    (cr/t-subst? v) (:type v)
+                    :else (throw (Exception. "What is this? " (class v))))])
+             subst)))))
 
 (deftest norm-test
   (is-clj
@@ -1716,6 +1927,19 @@
                           (c/In (r/make-F 'a) (r/NotType-maker
                                                  (c/RClass-of Integer)))))]
                      (r/make-F 'gamma)))
+          no-mentions #{}
+          css (ppinfer-substs no-mentions [left1] [right1])
+          ]
+      true))
+  (is-clj
+    (let [left1 (r/make-FnIntersection
+                  (r/make-Function
+                    [(r/make-F 'x)]
+                    (r/make-F 'x)))
+          right1 (r/make-FnIntersection
+                   (r/make-Function
+                     [(r/-val 1)]
+                     (r/make-F 'result)))
           no-mentions #{}
           css (ppinfer-substs no-mentions [left1] [right1])
           ]

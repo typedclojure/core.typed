@@ -4,6 +4,7 @@
     ; this loads the type system, must go first
     [clojure.core.typed.test.test-utils :refer :all]
             [clojure.test :refer :all]
+            [clojure.core.typed.util-vars :as vs]
             [clojure.core.typed.analyze-clj :as ana]
             [clojure.tools.analyzer.passes.jvm.emit-form :as emit-form]
             [clojure.repl :refer [pst]]
@@ -5460,6 +5461,20 @@
   (is-tc-e (let [x (ann-form 1 (U nil Int))]
              (when (some? x)
                (inc x)))))
+
+(defmacro with-new-cs-gen [& body]
+  `(binding [vs/*new-cs-gen* true]
+     ~@body))
+
+(deftest new-cs-gen-test
+  (is-clj (with-new-cs-gen
+            (tc-e (let [id (ann-form (fn [a] a)
+                                     (All [x] [x -> x]))]
+                    (id 1 )))))
+  (is-clj (with-new-cs-gen
+            (tc-e (identity 1))))
+)
+
 
 ;    (is-tc-e 
 ;      (let [f (fn [{:keys [a] :as m} :- '{:a (U nil Num)}] :- '{:a Num} 

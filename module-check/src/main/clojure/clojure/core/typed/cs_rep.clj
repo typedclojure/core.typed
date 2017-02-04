@@ -15,7 +15,8 @@
 (u/def-type t-subst [type bnds]
   ""
   [(r/Type? type)
-   (r/Bounds? bnds)])
+   (or (nil? bnds)
+       (r/Bounds? bnds))])
 
 (u/ann-record i-subst [types :- (t/U nil (t/Seqable r/Type))])
 (u/def-type i-subst [types]
@@ -63,7 +64,8 @@
   [(r/Type? S)
    (symbol? X)
    (r/Type? T)
-   (r/Bounds? bnds)])
+   (or (r/Bounds? bnds)
+       (nil? bnds))])
 
 ;; fixed : Listof[c]
 ;; rest : option[c]
@@ -100,7 +102,7 @@
 (u/def-type dcon-repeat [fixed repeat]
   ""
   [(every? c? fixed)
-   (not-empty repeat)
+   (seq repeat)
    (every? c? repeat)])
 
 (t/defalias DCon (U dcon dcon-exact dcon-dotted dcon-repeat))

@@ -428,6 +428,8 @@
     :complete?
       (not-any? :other-keys? [t1 t2])))
 
+(declare flatten-intersections)
+
 (t/ann ^:no-check intersect [r/Type r/Type -> r/Type])
 (defn intersect [t1 t2]
   {:pre [(r/Type? t1)
@@ -1653,11 +1655,12 @@
             (and (some (fn [pos] (overlap pos other-type)) (.extends the-extends))
                  (not-any? (fn [neg] (overlap neg other-type)) (.without the-extends)))))
 
-        ;; already rules out free variables, so this is safe.
-        (or (r/Value? t1)
-            (r/Value? t2))
-        (or (subtype? t1 t2)
-            (subtype? t2 t1))
+;; probably not that safe after all
+;        ;; already rules out free variables, so this is safe.
+;        (or (r/Value? t1)
+;            (r/Value? t2))
+;        (or (subtype? t1 t2)
+;            (subtype? t2 t1))
 
         (and (r/CountRange? t1)
              (r/CountRange? t2)) 
