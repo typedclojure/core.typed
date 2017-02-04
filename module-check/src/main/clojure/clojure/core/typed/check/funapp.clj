@@ -1,6 +1,7 @@
 (ns ^:skip-wiki clojure.core.typed.check.funapp
   (:require [clojure.core.typed.type-rep :as r]
             [clojure.core.typed.utils :as u]
+            [clojure.core.typed.current-impl :as impl]
             [clojure.core.typed.util-vars :as uv]
             [clojure.core.typed.subtype :as sub]
             [clojure.core.typed.coerce-utils :as coerce]
@@ -14,7 +15,7 @@
             [clojure.core.typed.check.app-error :as app-err]
             [clojure.core.typed.cs-rep :as crep]
             [clojure.core.typed.cs-gen :as cgen]
-            [clojure.core.typed.cs-gen-new :as cgen-new]
+            ;[clojure.core.typed.cs-gen-new :as cgen-new]
             [clojure.core.typed.free-ops :as free-ops]
             [clojure.core.typed.contract-utils :as con]
             [clojure.core.typed.indirect-utils :as ind-u]
@@ -61,16 +62,22 @@
             _ (assert (r/FnIntersection? fin))
             no-mentions (set (keys tvar/*current-tvars*))
             result-var (gensym "result")
+            _ (require 'clojure.core.typed.cs-gen-new)
+            infer-substs (impl/v 'clojure.core.typed.cs-gen-new/infer-substs)
+            cs (concat
+                 [[fin (r/make-FnIntersection
+                         (r/make-Function
+                           (mapv :t arg-ret-types)
+                           (r/make-F result-var)))]]
+                 (when expected
+                   [[(r/make-F result-var) (r/ret-t expected)]]))
             ;; Only infer free variables in the return type
             ret-subst
             (free-ops/with-bounded-frees (zipmap (map r/F-maker fs-names) bbnds)
-              (cgen-new/infer-substs 
+              (infer-substs 
                 no-mentions
-                [fin]
-                [(r/make-FnIntersection
-                   (r/make-Function
-                     (mapv :t arg-ret-types)
-                     (r/make-F result-var)))]))]
+                (map first cs)
+                (map second cs)))]
         (if-let [[_ sbst] (and (= 1 (count ret-subst))
                                (find (first ret-subst) result-var))]
           (cond

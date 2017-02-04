@@ -5472,7 +5472,33 @@
                                      (All [x] [x -> x]))]
                     (id 1 )))))
   (is-clj (with-new-cs-gen
-            (tc-e (identity 1))))
+            (tc-e (identity 1)
+                  Num)))
+  (is-clj (with-new-cs-gen
+            (tc-e (identity 1)
+                  Bool)))
+  (is-clj (with-new-cs-gen
+            (tc-e (map identity [1]))))
+  (is-clj (with-new-cs-gen
+            (tc-e (do
+                    (ann ^:no-check vec2 (All [x] [(t/Seqable x) -> (t/Seqable Any)]))
+                    (def vec2 vec)
+                    (vec2 [(ann-form 1 Num)])
+                  ))))
+  (is-clj (with-new-cs-gen
+            (tc-e (do
+                    (ann ^:no-check vec2 (All [x] [(t/Seqable x) -> (t/Seqable x)]))
+                    (def vec2 vec)
+                    (vec2 [1])
+                  ))))
+  (is-clj (with-new-cs-gen
+            (tc-e (do
+                    (ann ^:no-check map2 (All [x a] [[x -> a] (t/Seqable x) -> (t/Seqable a)]))
+                    (def map2 map)
+                    (let [id (ann-form (fn [a] a)
+                                       (All [b] [b -> b]))]
+                      (map2 id [1]))
+                  ))))
 )
 
 

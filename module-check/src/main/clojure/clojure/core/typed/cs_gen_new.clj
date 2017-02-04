@@ -27,6 +27,7 @@
             [clojure.test :refer [deftest is]]
             [clojure.pprint :refer [pprint]]
             [clojure.core.typed.debug :refer [dbg]]
+            [clojure.tools.trace :refer [trace-vars]]
             [clojure.core.typed.test.test-utils :refer [is-clj]])
   (:import (clojure.lang Seqable)))
 
@@ -108,8 +109,8 @@
       (zipmap (map :X cs) cs))))
 
 (defn constraint-set-set [& cs]
-  {:pre [(every? constraint-set? cs)]
-  :post [(constraint-set-set? %)]}
+  {:pre  [(every? constraint-set? cs)]
+   :post [(constraint-set-set? %)]}
   (cr/cset-maker cs))
 
 (def fail-css (constraint-set-set))
@@ -408,150 +409,58 @@
          (set? M)]
    :post [(post-msg (constraint-set-set? %)
                     (pr-str %))]}
-  (prn "norm" t)
-  (let [t (fully-resolve-under-Not t)]
-    ;(prn "norm resolved" t)
-    (cond
-      ;; already seen this type, trivial solution
-      (contains? M t) (constraint-set-set
-                        (constraint-set))
+  (prn "norm:" t)
+  (let [t (fully-resolve-under-Not t)
+        res (cond
+              ;; already seen this type, trivial solution
+              (contains? M t) (constraint-set-set
+                                (constraint-set))
 
-      ;; we have an intersection, or a singleton intersection
-      (or (r/Bottom? t)
-          (not (r/Union? t)))
-      (let [ts (if (r/Intersection? t)
-                 (:types t)
-                 [t])
-            fs (filter F-or-NotF ts)]
-        (cond
-          (seq fs) 
-          (let [;_ (prn "norm: frees case" fs)
-                fnames (map (fn [f] 
-                              {:post [(symbol? %)]}
-                              (:name 
-                                (if (r/NotType? f)
-                                  (:type f)
-                                  f)))
-                            fs)
-                can-mention (sort (remove no-mention fnames))]
-            (assert (every? symbol? can-mention))
-            (cond
-              ;; we have some variable that we can constrain
-              (seq can-mention)
-              (constraint-set-set
-                (constraint-set
-                  (single (first can-mention) t)))
+              ;; we have an intersection, or a singleton intersection
+              (or (r/Bottom? t)
+                  (not (r/Union? t)))
+              (let [ts (if (r/Intersection? t)
+                         (:types t)
+                         [t])
+                    fs (filter F-or-NotF ts)]
+                (cond
+                  (seq fs) 
+                  (let [;_ (prn "norm: frees case" fs)
+                        fnames (map (fn [f] 
+                                      {:post [(symbol? %)]}
+                                      (:name 
+                                        (if (r/NotType? f)
+                                          (:type f)
+                                          f)))
+                                    fs)
+                        can-mention (sort (remove no-mention fnames))]
+                    (assert (every? symbol? can-mention))
+                    (cond
+                      ;; we have some variable that we can constrain
+                      (seq can-mention)
+                      (constraint-set-set
+                        (constraint-set
+                          (single (first can-mention) t)))
 
-              ;; all are in no-mention
-              :else (norm no-mention (apply c/In (remove F-or-NotF ts)) 
-                          (conj M t))))
+                      ;; all are in no-mention
+                      :else (norm no-mention (apply c/In (remove F-or-NotF ts))
+                                  (conj M t))))
 
-          ;; no type variables
-          :else
-          (cs-gen-normalized-no-tvar no-mention ts M)
-          ;; ignore
-          ;#_(let [{fns true other false} (group-by-boolean (maybe-NotType-pred r/FnIntersection?) ts)]
-          ;  (prn "other" other)
-          ;  (cond
+                  ;; no type variables
+                  :else
+                  (cs-gen-normalized-no-tvar no-mention ts M)))
 
-          ;    ;; just have functions
-          ;    (and (empty? other)
-          ;         (seq fns))
-          ;    (let [{P true N false} (group-by-boolean r/FnIntersection? fns)
-          ;          N (set (mapcat (comp :types :type) N))
-          ;          P (set (mapcat :types P))
-          ;          _ (assert (every? r/Function? N))
-          ;          _ (assert (every? r/Function? P))]
-          ;      (apply
-          ;        union-css
-          ;        (map (fn [n]
-          ;               {:pre [(r/Function? n)]
-          ;                :post [(constraint-set-set? %)]}
-          ;               ;(prn "ensure" P "is under" n)
-          ;               (let [_ (assert (= 1 (count (:dom n))))
-          ;                     s_n (first (:dom n))
-          ;                     t_n (:t (:rng n))
-          ;                     _ (assert (r/Type? s_n))
-          ;                     _ (assert (r/Type? t_n))
-          ;                     ;; generate constraints for arguments 
-          ;                     ;_ (prn "c1")
-          ;                     c1 (let [nps (map (fn [p]
-          ;                                         {:pre [(r/Function? p)]
-          ;                                          :post [(r/Type? %)]}
-          ;                                         (assert (= 1 (count (:dom p))))
-          ;                                         (r/NotType-maker (first (:dom p))))
-          ;                                       P)]
-          ;                          ;(prn "ensure" s_n "is under" nps)
-          ;                          (norm no-mention (apply c/In s_n nps) M))
-          ;                     ;_ (ppcss c1)
-          ;                     c2 (apply intersect-css
-          ;                               (map
-          ;                                 (fn [P']
-          ;                                   {:pre [(set? P')
-          ;                                          (every? r/Function? P')]
-          ;                                    :post [(constraint-set-set? %)]}
-          ;                                   (assert (every? #(= 1 (count (:dom %))) P'))
-          ;                                   (let [c3 (norm no-mention 
-          ;                                                  (apply c/In s_n
-          ;                                                         (map (comp r/NotType-maker first :dom) P'))
-          ;                                                  (conj M t))
-          ;                                         P-without-P' (set/difference P P')
-          ;                                         c4 (norm no-mention 
-          ;                                                  (apply c/In
-          ;                                                    (r/NotType-maker t_n)
-          ;                                                    (map
-          ;                                                      (fn [p]
-          ;                                                        {:pre [(r/Function? p)]
-          ;                                                         :post [(r/Type? %)]}
-          ;                                                        (:t (:rng p)))
-          ;                                                      P-without-P'))
-          ;                                                  (conj M t))]
-          ;                                     (union-css c3 c4)))
-          ;                                 ;; want all proper subsets of P
-          ;                                 (map set (butlast (comb/subsets (seq P))))))
-          ;                     ;_ (prn "c2")
-          ;                     ;_ (ppcss c2)
-          ;                     c1+2 (intersect-css c1 c2)
-          ;                     ;_ (prn "c1+2")
-          ;                     ;_ (ppcss c1+2)
-          ;                     ]
-          ;                 c1+2
-          ;                 ))
-          ;             N)))
+              (r/Union? t)
+              (apply intersect-css 
+                     (map (fn [t_i]
+                            (norm no-mention t_i M))
+                          (:types t)))
 
-          ;    ;; other stuff (just RClasses for now)
-          ;    :else 
-          ;    (cs-gen-normalized-no-tvar no-mention other M)
-          ;    #_
-          ;    (let [_ (assert (empty? fns))
-          ;          empty-RClass? (fn [t]
-          ;                          (and (r/RClass? t)
-          ;                               (empty? (:poly? t))))
-          ;          _ (assert (every? (maybe-NotType-pred empty-RClass?) other)
-          ;                    (vec (remove (maybe-NotType-pred empty-RClass?) other)))
-          ;          {P true N false} (group-by-boolean r/RClass? fns)
-          ;          N (set (map :type N))
-          ;          P (set P)
-          ;          _ (assert (every? empty-RClass? N))
-          ;          _ (assert (every? empty-RClass? P))]
-          ;      (prn "RClasses")
-          ;      (cond
-          ;        (sub/subtype? (apply c/In N)
-          ;                      (apply c/Un P))
-          ;        (constraint-set-set
-          ;          (constraint-set))
-
-          ;        :else (constraint-set-set)))))
-))
-
-      (r/Union? t)
-      (apply intersect-css 
-             (map (fn [t_i]
-                    (norm no-mention t_i M))
-                  (:types t)))
-
-      ;; no solution
-      :else fail-css)))
+              ;; no solution
+              :else fail-css)]
+    (println "norm result: " (ppcss-str res))
+    res
+    ))
 
 (defn norm-with-variance
   [no-mention variance S T M]
@@ -560,14 +469,14 @@
          (r/AnyType? T)]
    :post [(constraint-set-set? %)]}
   (prn "norm-with-variance" S T variance)
-  (let [ret (case variance
-              (:covariant :constant) (norm no-mention (c/In S (r/NotType-maker T)) M)
-              :contravariant (norm no-mention (c/In T (r/NotType-maker S)) M)
-              :invariant (intersect-css (norm no-mention (c/In S (r/NotType-maker T)) M)
-                                        (norm no-mention (c/In T (r/NotType-maker S)) M)))]
+  (let [norm2 #(norm2 no-mention %1 %2 M)
+        ret (case variance
+              (:covariant :constant) (norm2 S T)
+              :contravariant (norm2 T S)
+              :invariant (intersect-css (norm2 S T)
+                                        (norm2 T S)))]
     (println "norm-with-variance return" "\n" (ppcss-str ret))
-    ret
-    ))
+    ret))
 
 (defn norm-RClass
   [no-mention S T M]
@@ -583,11 +492,11 @@
     (prn "relevant-S" relevant-S)
     (cond
       relevant-S
-      (let [css (map (fn [vari si ti]
-                       (norm-with-variance no-mention vari si ti M))
-                     (:variances T)
-                     (:poly? relevant-S)
-                     (:poly? T))]
+      (let [css (mapv (fn [vari si ti]
+                        (norm-with-variance no-mention vari si ti M))
+                      (:variances T)
+                      (:poly? relevant-S)
+                      (:poly? T))]
         (apply println "norm-RClass after" relevant-S T (map ppcss css))
         (apply intersect-css css))
       :else (constraint-set-set))))
@@ -1036,11 +945,10 @@
          (r/Type? T)]
    :post [(constraint-set-set? %)]}
   ;(prn "cs-gen" (prs/unparse-type S) (prs/unparse-type T))
-  (if (or (contains? no-mention (c/In S (r/NotType-maker T)))
+  (if (or (contains? M (c/In S (r/NotType-maker T)))
           (sub/subtype? S T))
     ;already been around this loop, is a subtype
-    (constraint-set-set
-      (constraint-set))
+    success-css
     (let [M (conj M (c/In S (r/NotType-maker T)))
           norm2 #(norm2 no-mention %1 %2 M)
           norm* (fn [Ss Ts]
@@ -1048,8 +956,7 @@
           cg #(cs-gen no-mention %1 %2 M)]
       (cond
         (r/Top? T)
-        (constraint-set-set
-          (constraint-set))
+        success-css
         
         ;values are subtypes of their classes
         (r/Value? S)
@@ -1072,16 +979,14 @@
                   (keyword? (:val S)) (norm2 (c/DataType-of 'cljs.core/Keyword) T)
                   :else (constraint-set-set)))
 
-        ;; constrain body to be below T, but don't mention the new vars
+        ;; constrain body to be below T
         (r/Poly? S)
-        (assert "TODO poly on left")
-        #_
-        (let [_ 
-              nms (c/Poly-fresh-symbols* S)
+        (let [nms (c/Poly-fresh-symbols* S)
               body (c/Poly-body* nms S)
               bbnds (c/Poly-bbnds* nms S)]
+          (prn "Poly?" body T)
           (free-ops/with-bounded-frees (zipmap (map r/F-maker nms) bbnds)
-                   (cs-gen (set/union (set nms) V) X Y body T)))
+            (norm2 body T)))
 
         (r/Name? S)
         (norm2 (c/resolve-Name S) T)
@@ -1546,20 +1451,22 @@
 (defn cs-gen-normalized-no-tvar [no-mention ts M]
   {:pre [(set? no-mention)
          (every? symbol? no-mention)
+         (every? r/Type? ts)
          (set? M)
          (every? r/Type? M)]
    :post [(constraint-set-set? %)]}
+  (prn "cs-gen-normalized-no-tvar" ts)
   (let [pred (fn [t]
-                   (let [t (fully-resolve-under-Not t)
-                         t (if (r/NotType? t)
-                             (:type t)
-                             t)]
-                     (and (r/Type? t)
-                          (not (r/NotType? t))
-                          (or (r/Bottom? t)
-                              (not (r/Union? t)))
-                          (not (r/F? t))
-                          (not (r/Intersection? t)))))]
+               (let [t (fully-resolve-under-Not t)
+                     t (if (r/NotType? t)
+                         (:type t)
+                         t)]
+                 (and (r/Type? t)
+                      (not (r/NotType? t))
+                      (or (r/Bottom? t)
+                          (not (r/Union? t)))
+                      (not (r/F? t))
+                      (not (r/Intersection? t)))))]
     (assert (every? pred ts) (vec (remove pred ts))))
   (let [ts (mapv fully-resolve-under-Not ts)
         {N true P false} (group-by-boolean r/NotType? ts)
@@ -1569,19 +1476,21 @@
         ;; every P must be under at least one N
         css (apply
               ;; not sure if intersect-css is correct here
-              intersect-css
+              union-css
+              ;intersect-css
               (map (fn [p]
                      {:pre [(r/Type? p)]
                       :post [(constraint-set-set? %)]}
                      ;; not sure if union-css is correct here
+                     (prn "inner union" p)
                      (let [css' (map (fn [n]
                                        {:pre [(r/Type? n)]
                                         :post [(constraint-set-set? %)]}
                                        (cs-gen2 no-mention p n M))
                                      N)
                            ;_ (apply println "inner union-css" "\n" (map ppcss-str css'))
-                           ret (apply union-css css')]
-                       ;(prn "ret inner union-css" (ppcss-str ret))
+                           ret (apply intersect-css css')]
+                       (prn "ret inner union-css" (ppcss-str ret))
                        ret))
                    P))
         ]
@@ -1709,6 +1618,7 @@
 (defn unify [E]
   {:pre [(substitution? E)]
    :post [(substitution? %)]}
+  (prn "unify top" E)
   (if (empty? E)
     {}
     (let [;; select smallest variable
@@ -1945,6 +1855,13 @@
           ]
       true))
 )
+
+(impl/with-clojure-impl
+  (norm2
+    #{}
+    (prs/parse-type '(t/I (clojure.lang.APersistentVector t/Num) (t/ExactCount 1)))
+    (c/RClass-of clojure.lang.Seqable [(r/make-F 'x)])
+    #{}))
 
 ;(c/flatten-intersections
 ;  [(c/In (c/In (r/make-F 'b) (r/NotType-maker (r/make-F 'a)))
