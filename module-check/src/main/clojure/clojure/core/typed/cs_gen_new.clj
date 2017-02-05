@@ -45,7 +45,7 @@
 
 (defn fully-resolve-under-Not [t]
   (cond
-    (r/NotType? t) (r/NotType-maker (fully-resolve-under-Not (:type t)))
+    (r/NotType? t) (c/-not (fully-resolve-under-Not (:type t)))
     (r/Intersection? t) (apply c/In (mapv fully-resolve-under-Not (:types t)))
     (r/Union? t) (apply c/Un (mapv fully-resolve-under-Not (:types t)))
     :else (c/fully-resolve-type t)))
@@ -1654,7 +1654,8 @@
         substs (csssolve css)
         _ (run! ppsubst substs)
         substs (unify-all substs)]
-    (prn "final subst: " substs)
+    (prn "final subst: ") 
+    (run! ppsubst substs)
     substs))
 
 (defn ppinfer-substs [no-mention Ss Tt]

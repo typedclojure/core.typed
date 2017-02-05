@@ -5499,7 +5499,116 @@
                                        (All [b] [b -> b]))]
                       (map2 id [1]))
                   ))))
+  (is-clj (with-new-cs-gen
+            (tc-e (do
+                    (ann even (All [a]
+                                (IFn [Int -> Boolean]
+                                     [(I a (Not Int)) -> (I a (Not Int))])))
+                    (defn even [a]
+                      (cond
+                        (integer? a) (even? a)
+                        :else a))
+                    (even 1)
+                  ))))
+  (is-clj (with-new-cs-gen
+            (tc-e (do
+                    (ann even (All [a]
+                                (IFn [Int -> Boolean]
+                                     [(I a (Not Int)) -> (I a (Not Int))])))
+                    (defn even [a]
+                      (cond
+                        (integer? a) (even? a)
+                        :else a))
+                    (ann ^:no-check map2 (All [x a] [[x -> a] (t/Seqable x) -> (t/Seqable a)]))
+                    (def map2 map)
+                    (map2 even [1])
+                  ))))
 )
+
+(deftest intersect-not-test
+  (is (= 
+        -nothing
+        (In (RClass-of Integer)
+            (make-F 'a)
+            (-not (RClass-of Integer)))))
+  (is (= 
+        -nothing
+        (clj
+          (In (RClass-of Integer)
+              (make-F 'a)
+              (-not (RClass-of Integer))
+              (-not (RClass-of Long))))))
+  (is-clj (not= -nothing
+             (-not (Un (RClass-of Integer)
+                       (RClass-of Long)))))
+  (is-clj (not= -nothing
+                (-not (Name-maker `tc/Int))))
+  (is-clj (not= -nothing
+                (In (-not (RClass-of Integer))
+                    (-not (RClass-of Byte)))))
+  (is-clj (overlap (-not (RClass-of Integer))
+                   (-not (RClass-of Byte))))
+  (is-clj (not=
+            (RClass-of Number)
+            (clj (Un 
+                   (In (RClass-of Number)
+                       (RClass-of java.lang.Comparable))
+                   (In (RClass-of Number)
+                       (RClass-of java.lang.Cloneable))))))
+  ; since Serializable <: Number
+  (is-clj (= 
+            (RClass-of Number)
+            (clj (Un 
+                   (RClass-of Number)
+                   (In (RClass-of Number)
+                       (RClass-of java.io.Serializable))))))
+  (is-clj (Intersection?
+            (In (RClass-of Number)
+                (RClass-of java.lang.Comparable))))
+  (is-clj (Union?
+            (clj (Un 
+                   (RClass-of java.lang.Comparable)
+                   (RClass-of Number)))))
+  ;; all simplify to Number, because (U t (I t s)) = t
+  ;; because the union forgets the more specific information.
+  (is-clj (=
+           (RClass-of Number)
+            (clj 
+              (Un (In (RClass-of Number)
+                      (RClass-of Number))
+                  (In (RClass-of Number)
+                      (RClass-of java.lang.Comparable))))
+            (clj (Un 
+                   (In (RClass-of Number)
+                       (RClass-of java.lang.Comparable))
+                   (RClass-of Number)))))
+  (is-clj (=
+            (RClass-of Number)
+            (clj (Un 
+                   (In (RClass-of Number)
+                       (RClass-of java.lang.Comparable))
+                   (In (RClass-of Number)
+                       (RClass-of java.io.Serializable))))))
+  (is-clj (=
+           (clj (Un 
+                  (In (RClass-of Number)
+                      (RClass-of java.lang.Comparable))
+                  (In (RClass-of Number)
+                      (RClass-of java.lang.Cloneable))))
+           (In (RClass-of Number)
+               (Un (RClass-of java.lang.Comparable)
+                   (RClass-of java.lang.Cloneable)))))
+  (is-clj (false?
+            (overlap (RClass-of Integer)
+                     (RClass-of Long))))
+  (is (= 
+        -nothing
+        (clj
+          (In (RClass-of Integer)
+              (make-F 'a)
+              (-not (Un (RClass-of Integer)
+                        (RClass-of Long)))))))
+  )
 
 
 ;    (is-tc-e 
