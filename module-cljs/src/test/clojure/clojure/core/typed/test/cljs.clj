@@ -189,14 +189,16 @@
   (fake-ana-api/reset-found)
 
   ;;let
-  (tc-e (let [x 0
-              y x]
-          (println y)))
+  (is-tc-e (let [x 0
+                   y x]
+             y)
+           t/Num)
 
   ;;case
-  (tc-e (case 1
-          0 "zero"
-          "non-zero"))
+  (is-tc-e (fn [x] (case x
+                    0 "zero"
+                    "non-zero"))
+           [number -> string])
 
   ;;def
   (tc-e (def x 1))
@@ -214,7 +216,14 @@
   ;;letfn
   (tc-e (t/letfn> [foo :- [t/Num -> t/Num]
                  (foo [x] x)]
-                (foo 2)))
+                  (foo 2)))
+
+  ;;loop
+  (is-tc-e (t/loop [a :- t/Num 1
+               b :- (t/U nil t/Num) nil]
+             (if b (str a)
+                 (recur 1 1)))
+           t/Str)
 
   (print "MISSING NODES (fake ERROR): ")
   (doseq [op (sort (clojure.set/difference nodes @fake-ana-api/ops-found))]

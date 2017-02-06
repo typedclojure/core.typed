@@ -278,7 +278,7 @@
 (add-check-method :do
   [{:keys [ret statements] :as expr} & [expected]]
   {:post [(-> % u/expr-type r/TCResult?)
-          (con/nne-seq? (:statements %))]}
+          (con/nne-seq? (seq (:statements %)))]}
   (do/check-do check internal-special-form expr expected))
 
 (add-check-method :fn
