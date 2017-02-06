@@ -225,6 +225,17 @@
                  (recur 1 1)))
            t/Str)
 
+  ;;map
+  (tc-e {:name "Bob" :job "unemployed"})
+
+  ;;set
+  (tc-e #{1 2 3})
+
+  ;;quote
+  (tc-e '(1 2 3))
+
+  
+
   (print "MISSING NODES (fake ERROR): ")
   (doseq [op (sort (clojure.set/difference nodes @fake-ana-api/ops-found))]
     (print (str op " ")))
