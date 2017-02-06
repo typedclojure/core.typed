@@ -313,14 +313,17 @@
 
 (defn -not [t]
   {:pre [(r/Type? t)]}
-  (let [t (fully-resolve-type t)]
-    (cond
-      (r/NotType? t) (:type t)
-      ;; (Not (I a b)) ==> (U (Not a) (Not b))
-      (r/Intersection? t) (apply Un (map -not (:types t)))
-      ;; (Not (U a b)) ==> (I (Not a) (Not b))
-      (r/Union? t) (apply In (map -not (:types t)))
-      :else (r/NotType-maker t))))
+  (let [t (fully-resolve-type t)
+        t' (cond
+             (r/NotType? t) (:type t)
+             ;; (Not (I a b)) ==> (U (Not a) (Not b))
+             (r/Intersection? t) (apply Un (map -not (:types t)))
+             ;; (Not (U a b)) ==> (I (Not a) (Not b))
+             (r/Union? t) (apply In (map -not (:types t)))
+             (r/Top? t) r/-nothing
+             :else (r/NotType-maker t))]
+    ;(prn "-not" t t')
+    t'))
 
 (t/ann ^:no-check initial-Un-cache TypeCache)
 (def ^:private initial-Un-cache (cache/lu-cache-factory {} :threshold 256))
@@ -352,13 +355,17 @@
                          :post [(set? %)]}
                         (let [b* (make-Union b)
                               ;_ (prn "merge-type" a b*)
+                              sub-pick-b (subtype? a b*)
+                              ;_ (prn "sub-pick-b" sub-pick-b b)
+                              sub-pick-a (subtype? b* a)
+                              ;_ (prn "sub-pick-a" sub-pick-a #{a})
                               res (cond
                                     ; don't resolve type applications in case types aren't
                                     ; fully defined yet
                                     ; TODO basic error checking, eg. number of params
                                     (some (some-fn r/Name? r/TApp?) (conj b a)) (conj b a)
-                                    (subtype? a b*) b
-                                    (subtype? b* a) #{a}
+                                    sub-pick-b b
+                                    sub-pick-a #{a}
                                     :else (set (cons a 
                                                      (remove #(subtype? % a) b))))]
                           ;(prn "res" res)
@@ -487,6 +494,7 @@
             (subtype? t2 t1) t2
             :else (do 
                     (make-In t1 t2)))]
+    ;(prn "intersect res" t)
     t))
 
 (t/ann ^:no-check flatten-intersections [(t/U nil (t/Seqable r/Type)) -> (t/Seqable r/Type)])
@@ -542,6 +550,7 @@
                             intersect-non-unions 
                             (p :intersect-in-In (when (seq non-unions)
                                                   (reduce intersect non-unions)))
+                            ;_ (prn "intersect-non-unions" intersect-non-unions)
                             ;if we have an intersection above, use it to update each
                             ;member of the unions we're intersecting
                             flat-unions (set (flatten-unions unions))

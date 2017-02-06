@@ -23,8 +23,7 @@
 
 (add-default-fold-case NotType
                        (fn [ty _]
-                         (-> ty
-                           (update-in [:type] type-rec))))
+                         (c/-not (type-rec (:type ty)))))
 
 (add-default-fold-case DifferenceType
                        (fn [ty _]

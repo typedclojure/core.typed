@@ -28,10 +28,10 @@
             [clojure.pprint :refer [pprint]]
             [clojure.core.typed.debug :refer [dbg]]
             [clojure.tools.trace :refer [trace-vars]]
-            [clojure.core.typed.test.test-utils :refer [is-clj]])
+            [clojure.core.typed.test.test-utils :refer [is-clj clj]])
   (:import (clojure.lang Seqable)))
 
-(declare ppcss ppcs
+(declare ppcss
          ppcss-str
          cs-gen-normalized-no-tvar
          )
@@ -44,11 +44,13 @@
           (repeat times repeated)))
 
 (defn fully-resolve-under-Not [t]
-  (cond
-    (r/NotType? t) (c/-not (fully-resolve-under-Not (:type t)))
-    (r/Intersection? t) (apply c/In (mapv fully-resolve-under-Not (:types t)))
-    (r/Union? t) (apply c/Un (mapv fully-resolve-under-Not (:types t)))
-    :else (c/fully-resolve-type t)))
+  (let [t' (cond
+             (r/NotType? t) (c/-not (fully-resolve-under-Not (:type t)))
+             (r/Intersection? t) (apply c/In (mapv fully-resolve-under-Not (:types t)))
+             (r/Union? t) (apply c/Un (mapv fully-resolve-under-Not (:types t)))
+             :else (c/fully-resolve-type t))]
+    ;(prn "fully-resolve-under-Not" t t')
+    t'))
 
 (defn group-by-boolean [p s]
   (group-by (comp boolean p) s))
@@ -290,12 +292,13 @@
   {:pre [(cr/cset? x)
          (cr/cset? y)]
    :post [(cr/cset? %)]}
-  (let [maps (filter identity
-                     (for [{map1 :fixed dmap1 :dmap} maps1
-                           {map2 :fixed dmap2 :dmap} maps2]
-                       (when-let [cm (merge-with-or-nil c-meet map1 map2)]
-                         (when-let [dm (dmap-meet dmap1 dmap2)]
-                           (cr/cset-entry-maker cm dm)))))]
+  (let [maps (into #{}
+                   (remove nil?)
+                   (for [{map1 :fixed dmap1 :dmap} maps1
+                         {map2 :fixed dmap2 :dmap} maps2]
+                     (when-let [cm (merge-with-or-nil c-meet map1 map2)]
+                       (when-let [dm (dmap-meet dmap1 dmap2)]
+                         (cr/cset-entry-maker cm dm)))))]
     (cr/cset-maker maps)))
 
 (defn intersect-css2 [cs1 cs2]
@@ -308,19 +311,24 @@
   {:pre [(every? cr/cset? args)]
    :post [(cr/cset? %)]}
   (reduce cset-meet
-          (cr/cset-maker [(cr/cset-entry-maker {} (cr/dmap-maker {}))])
+          (cr/cset-maker #{(cr/cset-entry-maker {} (cr/dmap-maker {}))})
           args))
 
 (defn intersect-css [& cs]
   {:pre [(every? constraint-set-set? cs)]
    :post [(constraint-set-set? %)]}
-  (cset-meet* cs))
+  (let [res (cset-meet* (set cs))]
+    (prn "intersect-css in")
+    (run! ppcss cs)
+    (prn "intersect-css out")
+    (ppcss res)
+    res))
 
 (defn union-css [& cs]
   {:pre [(every? constraint-set-set? cs)]
    :post [(constraint-set-set? %)]}
   (cr/cset-maker
-    (into []
+    (into #{}
           (mapcat :maps)
           cs)))
 
@@ -342,8 +350,8 @@
   {:pre [(symbol? a_k)
          (r/Type? t)
          (not (r/Union? t))]
-   :post [(constraint? %)]}
-  (prn "single" a_k t)
+   :post [(constraint-set? %)]}
+  ;(prn "single" a_k t)
   (let [ts (if (r/Intersection? t)
              (:types t)
              [t])
@@ -366,27 +374,28 @@
                   (pr-str tvar))
         the-tvar (first tvar)
         _ (assert (r/Type? the-tvar))
-        ]
-    (cond
-      (r/F? the-tvar)
-      (constraint
-        r/-nothing
-        (:name the-tvar)
-        (apply c/Un 
-               ;; flip negations
-               (map (fn [t]
-                      (if (r/NotType? t)
-                        (:type t)
-                        (r/NotType-maker t)))
-                    other)))
+        c (cond
+            (r/F? the-tvar)
+            (constraint
+              r/-nothing
+              (:name the-tvar)
+              (apply c/Un 
+                     ;; flip negations
+                     (map (fn [t]
+                            (if (r/NotType? t)
+                              (:type t)
+                              (c/-not t)))
+                          other)))
 
-      (r/NotType? the-tvar)
-      (constraint
-        (apply c/In other)
-        (:name (:type the-tvar))
-        r/-any)
-      
-      :else (assert nil (str "What is this? " the-tvar)))))
+            (r/NotType? the-tvar)
+            (constraint
+              (apply c/In other)
+              (:name (:type the-tvar))
+              r/-any)
+
+            :else (assert nil (str "What is this? " the-tvar)))
+        ]
+    (constraint-set c)))
 
 (defmacro post-msg [assert msg]
   `(let [a# ~assert]
@@ -401,7 +410,7 @@
   {:pre [(r/Type? S)
          (r/Type? T)]}
   (prn "norm2" S T)
-  (norm no-mention (c/In S (r/NotType-maker T)) M))
+  (norm no-mention (c/In S (c/-not T)) M))
 
 (defn norm [no-mention t M]
   {:pre [(set? no-mention)
@@ -409,20 +418,26 @@
          (set? M)]
    :post [(post-msg (constraint-set-set? %)
                     (pr-str %))]}
-  (prn "norm:" t)
+  (prn "norm:" t (class t))
   (let [t (fully-resolve-under-Not t)
         res (cond
               ;; already seen this type, trivial solution
-              (contains? M t) (constraint-set-set
-                                (constraint-set))
+              (contains? M t) success-css
 
-              ;; we have an intersection, or a singleton intersection
-              (or (r/Bottom? t)
-                  (not (r/Union? t)))
+              (r/Union? t)
+              (do
+                (prn "union" t)
+                (apply intersect-css 
+                       (map (fn [t_i]
+                              (norm no-mention t_i M))
+                            (:types t))))
+
+              :else
               (let [ts (if (r/Intersection? t)
                          (:types t)
                          [t])
                     fs (filter F-or-NotF ts)]
+                (prn "non union" ts)
                 (cond
                   (seq fs) 
                   (let [;_ (prn "norm: frees case" fs)
@@ -439,8 +454,7 @@
                       ;; we have some variable that we can constrain
                       (seq can-mention)
                       (constraint-set-set
-                        (constraint-set
-                          (single (first can-mention) t)))
+                        (single (first can-mention) t))
 
                       ;; all are in no-mention
                       :else (norm no-mention (apply c/In (remove F-or-NotF ts))
@@ -448,17 +462,9 @@
 
                   ;; no type variables
                   :else
-                  (cs-gen-normalized-no-tvar no-mention ts M)))
-
-              (r/Union? t)
-              (apply intersect-css 
-                     (map (fn [t_i]
-                            (norm no-mention t_i M))
-                          (:types t)))
-
-              ;; no solution
-              :else fail-css)]
-    (println "norm result: " (ppcss-str res))
+                  (cs-gen-normalized-no-tvar no-mention ts M))))]
+    (prn "norm result:")
+    (ppcss res)
     res
     ))
 
@@ -468,14 +474,14 @@
          (r/AnyType? S)
          (r/AnyType? T)]
    :post [(constraint-set-set? %)]}
-  (prn "norm-with-variance" S T variance)
+  ;(prn "norm-with-variance" S T variance)
   (let [norm2 #(norm2 no-mention %1 %2 M)
         ret (case variance
               (:covariant :constant) (norm2 S T)
               :contravariant (norm2 T S)
               :invariant (intersect-css (norm2 S T)
                                         (norm2 T S)))]
-    (println "norm-with-variance return" "\n" (ppcss-str ret))
+    ;(println "norm-with-variance return" "\n" (ppcss-str ret))
     ret))
 
 (defn norm-RClass
@@ -483,13 +489,13 @@
   {:pre [(r/RClass? S)
          (r/RClass? T)]
    :post [(constraint-set-set? %)]}
-  (prn "norm-RClass" S T)
+  ;(prn "norm-RClass" S T)
   (let [rsupers (c/RClass-supers* S)
         relevant-S (some #(when (r/RClass? %)
                             (and (= (:the-class %) (:the-class T))
                                  %))
                          (map c/fully-resolve-type (conj rsupers S)))]
-    (prn "relevant-S" relevant-S)
+    ;(prn "relevant-S" relevant-S)
     (cond
       relevant-S
       (let [css (mapv (fn [vari si ti]
@@ -497,7 +503,7 @@
                       (:variances T)
                       (:poly? relevant-S)
                       (:poly? T))]
-        (apply println "norm-RClass after" relevant-S T (map ppcss css))
+        ;(apply println "norm-RClass after" relevant-S T (map ppcss css))
         (apply intersect-css css))
       :else (constraint-set-set))))
 
@@ -942,14 +948,16 @@
 
 (defn cs-gen [no-mention S T M]
   {:pre [(r/Type? S)
-         (r/Type? T)]
+         (r/Type? T)
+         (not (r/F? S))
+         (not (r/F? T))]
    :post [(constraint-set-set? %)]}
   ;(prn "cs-gen" (prs/unparse-type S) (prs/unparse-type T))
-  (if (or (contains? M (c/In S (r/NotType-maker T)))
+  (if (or (contains? M (c/In S (c/-not T)))
           (sub/subtype? S T))
     ;already been around this loop, is a subtype
     success-css
-    (let [M (conj M (c/In S (r/NotType-maker T)))
+    (let [M (conj M (c/In S (c/-not T)))
           norm2 #(norm2 no-mention %1 %2 M)
           norm* (fn [Ss Ts]
                   (cnorm no-mention Ss Ts M))
@@ -1443,10 +1451,7 @@
              (r/Protocol? T))
         (norm2 (:target S) T)
 
-        :else
-        (if (not (sub/subtype? S T))
-          fail-css
-          success-css)))))
+        :else fail-css))))
 
 (defn cs-gen-normalized-no-tvar [no-mention ts M]
   {:pre [(set? no-mention)
@@ -1457,8 +1462,7 @@
    :post [(constraint-set-set? %)]}
   (prn "cs-gen-normalized-no-tvar" ts)
   (let [pred (fn [t]
-               (let [t (fully-resolve-under-Not t)
-                     t (if (r/NotType? t)
+               (let [t (if (r/NotType? t)
                          (:type t)
                          t)]
                  (and (r/Type? t)
@@ -1474,25 +1478,32 @@
         N (map :type N)
         _ (assert (every? r/Type? N))
         ;; every P must be under at least one N
+        ucss
+        (if (empty? N)
+          []
+          (mapv (fn [p]
+                  {:pre [(r/Type? p)]
+                   :post [(constraint-set-set? %)]}
+                  ;; not sure if union-css is correct here
+                  ;(prn "inner union" p)
+                  (let [css' (mapv (fn [n]
+                                     {:pre [(r/Type? n)]
+                                      :post [(constraint-set-set? %)]}
+                                     ;(prn "inner union*" p n)
+                                     (cs-gen2 no-mention p n M))
+                                   N)
+                        ;_ (prn "before inner union-css" "\n")
+                        _ (run! ppcss css')
+                        ret (apply intersect-css css')]
+                    ;(prn "ret inner union-css" (ppcss-str ret))
+                    ret))
+                P))
+        ;_ (prn "ucss")
+        ;_ (run! ppcss ucss)
         css (apply
               ;; not sure if intersect-css is correct here
               union-css
-              ;intersect-css
-              (map (fn [p]
-                     {:pre [(r/Type? p)]
-                      :post [(constraint-set-set? %)]}
-                     ;; not sure if union-css is correct here
-                     (prn "inner union" p)
-                     (let [css' (map (fn [n]
-                                       {:pre [(r/Type? n)]
-                                        :post [(constraint-set-set? %)]}
-                                       (cs-gen2 no-mention p n M))
-                                     N)
-                           ;_ (apply println "inner union-css" "\n" (map ppcss-str css'))
-                           ret (apply intersect-css css')]
-                       (prn "ret inner union-css" (ppcss-str ret))
-                       ret))
-                   P))
+              ucss)
         ]
     css
     ))
@@ -1504,11 +1515,11 @@
   (let [;; check, for each constraint S <: a <: T,
         ;;  that S <: T
         not-in-M (first
-                   (filter
+                   (remove
                      (fn [{:keys [S T] :as c}]
                        {:pre [(constraint? c)]}
-                       (contains? M (c/In S (r/NotType-maker T))))
-                     (concat (vals (:fixed cs))
+                       (contains? M (c/In S (c/-not T))))
+                     (concat (sort-by :X (vals (:fixed cs)))
                              (reduce (fn [r dcon]
                                        (cond
                                          (cr/dcon? dcon) 
@@ -1522,9 +1533,10 @@
         ;; if there exists a contract such that S <: T, but S ^ ~T is not in M,
         ;; then recur.
         css
-        (if-let [{:keys [S T]} not-in-M]
-          (let [_ (assert (constraint? not-in-M))
-                t (c/In S (r/NotType-maker T))
+        (if-let [{:keys [S X T]} not-in-M]
+          (let [_ (prn "merge" X)
+                _ (assert (constraint? not-in-M))
+                t (c/In S (c/-not T))
                 l (intersect-css
                     (constraint-set-set cs)
                     (norm no-mention t #{}))]
@@ -1532,8 +1544,8 @@
                    (map (fn [C']
                           {:pre [(constraint-set? C')]
                            :post [(constraint-set-set? %)]}
-                          (csmerge C' (conj M t)))
-                        l)))
+                          (csmerge no-mention C' (conj M t)))
+                        (:maps l))))
           (constraint-set-set cs))]
     css))
 
@@ -1541,6 +1553,8 @@
   {:pre [(set? no-mention)
          (constraint-set-set? css)]
    :post [(constraint-set-set? %)]}
+  (prn "cssmerge")
+  (ppcss css)
   (apply union-css
          (reduce (fn [css cs]
                    {:pre [(every? constraint-set-set? css)
@@ -1561,7 +1575,7 @@
    :post [(constraint-set-set? %)]}
   (apply intersect-css
          (map (fn [s t]
-                (norm no-mention (c/In s (r/NotType-maker t)) M))
+                (norm2 no-mention s t M))
               Ss Ts)))
 
 (defn substitution? [m]
@@ -1601,9 +1615,11 @@
    :post [(cr/subst-rhs? %)]}
   (let [f #(subst/subst-all subst %)]
     (cond
-      (cr/t-subst? target) (cr/t-subst-maker
-                             (f (:type target))
-                             nil)
+      (cr/t-subst? target) (do
+                             (prn "subst-in-subst" (read-string (with-out-str (ppsubst subst))) (:type target))
+                             (cr/t-subst-maker
+                               (f (:type target))
+                               nil))
       (cr/i-subst? target) (cr/i-subst-maker
                              (mapv f (:types target)))
       (cr/i-subst-starred? target) (cr/i-subst-starred-maker
@@ -1618,11 +1634,13 @@
 (defn unify [E]
   {:pre [(substitution? E)]
    :post [(substitution? %)]}
-  (prn "unify top" E)
+  (prn "unify top")
+  (prn (ppsubst E))
   (if (empty? E)
     {}
     (let [;; select smallest variable
           a (first (sort (keys E)))
+          _ (prn "unify var" a)
           t_a (get E a)
           rec_a (cond
                   (cr/t-subst? t_a) (cr/t-subst-maker (maybe-Mu* a (:type t_a))
@@ -1633,7 +1651,8 @@
                    (map (fn [[k v]]
                           {:pre [(cr/subst-rhs? v)]}
                           [k (subst-in-subst {a rec_a} v)]))
-                   (dissoc E a))
+                   ; adding this sort-by seems to make inference more deterministic?
+                   (sort-by first (dissoc E a)))
           _ (assert (substitution? E'))
           sigma (unify E')]
       (merge {a (subst-in-subst E' rec_a)}
@@ -1641,22 +1660,30 @@
 
 (declare unify-all ppsubst)
 
+(defn css-potential-solution? [css]
+  {:pre [(constraint-set-set? css)]}
+  (boolean (seq (:maps css))))
+
 (defn infer-substs [no-mentions Ss Tt]
   (prn "infer-substs" no-mentions Ss Tt)
   (let [css (cnorm no-mentions Ss Tt #{})
-        _ (prn "after norm")
-        _ (ppcss css)
-        _ (assert (seq css) "Fail after norm")
-        css (cssmerge no-mentions css)
-        _ (prn "after merge")
-        _ (ppcss css)
-        _ (assert (seq css))
-        substs (csssolve css)
-        _ (run! ppsubst substs)
-        substs (unify-all substs)]
-    (prn "final subst: ") 
-    (run! ppsubst substs)
-    substs))
+        _ (prn "after norm" (count (:maps css)))
+        _ (ppcss css)]
+    (if-not (css-potential-solution? css)
+      (do (prn "Fail after norm")
+          nil)
+      (let [css (cssmerge no-mentions css)
+            _ (prn "after merge" (count (:maps css)))
+            _ (ppcss css)]
+        (if-not (css-potential-solution? css)
+          (do (prn "Fail after merge")
+              nil)
+          (let [substs (csssolve css)
+                _ (run! ppsubst substs)
+                substs (unify-all substs)]
+            (prn "final subst: " (count substs)) 
+            ;(run! ppsubst substs)
+            substs))))))
 
 (defn ppinfer-substs [no-mention Ss Tt]
   (let [substs (infer-substs no-mention Ss Tt)]
@@ -1672,16 +1699,19 @@
                [k (cond
                     (cr/t-subst? v)
                     (let [t (:type v)
-                          fvs (filter (comp placeholder? key) (frees/fv-variances t))]
+                          fvs (filter key (frees/fv-variances t))]
                       (cr/t-subst-maker
                         (reduce (fn [t [pl variance]]
-                                  (subst/subst-all
-                                    (c/make-simple-substitution
-                                      [pl]
-                                      [(case variance
-                                         :covariant r/-nothing
-                                         :contravariant r/-any)])
-                                    t))
+                                  {:pre [(r/variance? variance)]}
+                                  (case variance
+                                    :invariant t
+                                    (subst/subst-all
+                                      (c/make-simple-substitution
+                                        [pl]
+                                        [(case variance
+                                           :covariant r/-nothing
+                                           :contravariant r/-any)])
+                                      t)))
                                 t fvs)
                         nil))
                     :else (throw (Exception. (str "What is this? " (class v)))))]))
@@ -1691,15 +1721,6 @@
   {:pre [(every? substitution? substs)]
    :post [(every? substitution? %)]}
   (mapv (comp clean-placeholders unify) substs))
-
-(defn ppcs [cs]
-  (pprint
-    (read-string
-      (pr-str
-        (map 
-          (fn [{:keys [:constraint/S :constraint/var :constraint/T]}]
-            [S :< var :< T])
-          (sort-by :constraint/var cs))))))
 
 (defn ppcss [css]
   {:pre [(constraint-set-set? css)]}
@@ -1722,10 +1743,11 @@
   (pprint
     (read-string
       (pr-str
-        (map (fn [[k v]]
-               [k (cond
-                    (cr/t-subst? v) (:type v)
-                    :else (throw (Exception. "What is this? " (class v))))])
+        (into {}
+              (map (fn [[k v]]
+                     [k (cond
+                          (cr/t-subst? v) (:type v)
+                          :else (throw (Exception. "What is this? " (class v))))]))
              subst)))))
 
 (deftest norm-test
@@ -1738,7 +1760,7 @@
                   (r/make-Function
                     [(r/make-F 'b)]
                     (r/make-F 'b)))
-          t (c/In left (r/NotType-maker right))]
+          t (c/In left (c/-not right))]
       (norm #{}
             t
             #{})))
@@ -1751,7 +1773,7 @@
                   (r/make-Function
                     [(r/make-F 'b)]
                     (r/make-F 'b)))
-          t (c/In left (r/NotType-maker right))
+          t (c/In left (c/-not right))
           no-mentions #{}
           cs (norm no-mentions t #{})
           cs (cssmerge no-mentions cs)]
@@ -1833,9 +1855,9 @@
                           [(c/RClass-of Integer)]
                           (c/RClass-of Boolean))
                         (r/make-Function
-                          [(c/In (r/make-F 'a) (r/NotType-maker
+                          [(c/In (r/make-F 'a) (c/-not
                                                  (c/RClass-of Integer)))]
-                          (c/In (r/make-F 'a) (r/NotType-maker
+                          (c/In (r/make-F 'a) (c/-not
                                                  (c/RClass-of Integer)))))]
                      (r/make-F 'gamma)))
           no-mentions #{}
@@ -1855,8 +1877,76 @@
           css (ppinfer-substs no-mentions [left1] [right1])
           ]
       true))
+  (is-clj
+    (cs-gen-normalized-no-tvar #{} [r/-nothing] #{}))
+  (is-clj
+    (let [left1  r/-nothing
+          right1 (r/make-F 'result)
+          no-mentions #{}
+          css (ppinfer-substs no-mentions [left1] [right1])
+          ]
+      true))
+  (is-clj
+    (let [left1  (r/make-F 'result)
+          right1 r/-nothing
+          no-mentions #{}
+          css (ppinfer-substs no-mentions [left1] [right1])
+          ]
+      true))
+  (is-clj
+    (let [
+          left1  (r/make-F 'chain1)
+          right1 (r/make-F 'chain2)
+          left2  (r/make-F 'chain2)
+          right2 (r/make-F 'chain3)
+          left3  (c/RClass-of Integer)
+          right3 (r/make-F 'chain3)
+          no-mentions #{}
+          css (ppinfer-substs no-mentions [left1 left2 left3] [right1 right2 right3])
+          ]
+      true))
+  (is-clj
+    (let [
+          left1  (c/RClass-of Integer)
+          right1 (r/make-F 'chain1)
+          left2  (r/make-F 'chain1)
+          right2 (r/make-F 'chain2)
+          no-mentions #{}
+          css (ppinfer-substs no-mentions [left1 left2 ] [right1 right2 ])
+          ]
+      true))
+  (is-clj
+    (let [
+          left1  (c/RClass-of Integer)
+          right1 r/-nothing
+          no-mentions #{}
+          css (ppinfer-substs no-mentions [left1] [right1])
+          ]
+      true))
+  (is-clj
+    (let [
+          left1  (c/RClass-of Integer)
+          right1 r/-nothing
+          no-mentions #{}
+          css (ppinfer-substs no-mentions [left1] [right1])
+          ]
+      true))
+  (is-clj
+    (let [left1 (r/make-FnIntersection
+                  (r/make-Function
+                    [r/-nothing]
+                    r/-nothing))
+          right1 (r/make-FnIntersection
+                   (r/make-Function
+                     [(r/-val 1)]
+                     (r/make-F 'result)))
+          no-mentions #{}
+          css (ppinfer-substs no-mentions [left1] [right1])
+          ]
+      true))
 )
 
+(comment
 (impl/with-clojure-impl
   (norm2
     #{}
@@ -1864,13 +1954,35 @@
     (c/RClass-of clojure.lang.Seqable [(r/make-F 'x)])
     #{}))
 
-;(c/flatten-intersections
-;  [(c/In (c/In (r/make-F 'b) (r/NotType-maker (r/make-F 'a)))
-;        (r/NotType-maker (c/RClass-of Integer)))])
-;
-;(fully-resolve-under-Not
-;  (c/In (c/In (r/make-F 'b) (r/NotType-maker (r/make-F 'a)))
-;        (r/NotType-maker (c/RClass-of Integer))))
-;
-;(c/In (r/make-F 'b) (r/NotType-maker (r/make-F 'a))
-;      (r/NotType-maker (c/RClass-of Integer)))
+(impl/with-clojure-impl
+  (norm
+    #{}
+    (c/RClass-of Integer)
+    #{}))
+
+(c/flatten-intersections
+  [(c/In (c/In (r/make-F 'b) (c/-not (r/make-F 'a)))
+        (c/-not (c/RClass-of Integer)))])
+
+(fully-resolve-under-Not
+  (c/In (c/In (r/make-F 'b) (c/-not (r/make-F 'a)))
+        (c/-not (c/RClass-of Integer))))
+
+(c/In (r/make-F 'b) (c/-not (r/make-F 'a))
+      (c/-not (c/RClass-of Integer)))
+(clj
+  (c/In (r/-val 1)
+        (c/-not 
+          (c/In (r/make-F 'a)
+                (c/-not (c/RClass-of Integer))))))
+(clj
+  (c/-not 
+    (c/In (r/make-F 'a)
+          (c/-not (c/RClass-of Integer)))))
+
+(clj
+  (c/In (r/-val 1)
+        (c/-not 
+          (c/In (r/make-F 'a)
+                (c/-not (c/RClass-of Integer))))))
+)

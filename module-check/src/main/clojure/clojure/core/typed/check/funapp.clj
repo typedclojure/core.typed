@@ -72,19 +72,33 @@
                  (when expected
                    [[(r/make-F result-var) (r/ret-t expected)]]))
             ;; Only infer free variables in the return type
-            ret-subst
+            ret-substs
             (free-ops/with-bounded-frees (zipmap (map r/F-maker fs-names) bbnds)
-              (infer-substs 
+              (infer-substs
                 no-mentions
                 (map first cs)
-                (map second cs)))]
-        (if-let [[_ sbst] (and (= 1 (count ret-subst))
-                               (find (first ret-subst) result-var))]
-          (cond
-            (crep/t-subst? sbst) (r/ret (:type sbst))
-            :else (assert nil (str "What is this? " (pr-str sbst))))
-          (assert nil (str "bad inference, inferred: " (pr-str ret-subst))))
-        )
+                (map second cs)))
+            _ (prn "ret-substs" ret-substs)
+            result-var-substs (keep #(get % result-var) ret-substs)
+            _ (prn "result-var-substs" result-var-substs)
+            result-intersect (when (seq result-var-substs)
+                               (apply c/In (map (fn [sbst]
+                                                  (cond
+                                                    (crep/t-subst? sbst) (:type sbst)
+                                                    :else (assert nil (str "What is this? " (pr-str sbst)))))
+                                                result-var-substs)))
+            result-fvs (when result-intersect
+                         (filter (set fs-names) (frees/fv result-intersect)))
+            poly-result (when result-fvs
+                          (if (seq result-fvs)
+                            (c/Poly* result-fvs
+                                     (map (constantly r/no-bounds) result-fvs)
+                                     result-intersect)
+                            result-intersect))
+                          ]
+        (if poly-result
+          (r/ret poly-result)
+          (app-err/polyapp-type-error fexpr args fexpr-type arg-ret-types expected)))
 :else
       (assert nil "TODO new-cs-gen cases")
       )))

@@ -5489,7 +5489,7 @@
             (tc-e (do
                     (ann ^:no-check vec2 (All [x] [(t/Seqable x) -> (t/Seqable x)]))
                     (def vec2 vec)
-                    (vec2 [1])
+                    (vec2 [1 2])
                   ))))
   (is-clj (with-new-cs-gen
             (tc-e (do
@@ -5499,10 +5499,11 @@
                                        (All [b] [b -> b]))]
                       (map2 id [1]))
                   ))))
+  ;; fails with non-int arity
   (is-clj (with-new-cs-gen
-            (tc-e (do
+            (tc-err (do
                     (ann even (All [a]
-                                (IFn [Int -> Boolean]
+                                (IFn #_[Int -> Boolean]
                                      [(I a (Not Int)) -> (I a (Not Int))])))
                     (defn even [a]
                       (cond
@@ -5510,18 +5511,77 @@
                         :else a))
                     (even 1)
                   ))))
+  ;; FIXME choice of intersect-css to combine results of the Union case in norm
+  ;; makes this fail.
   (is-clj (with-new-cs-gen
             (tc-e (do
                     (ann even (All [a]
-                                (IFn [Int -> Boolean]
+                                (IFn #_[Int -> Boolean]
                                      [(I a (Not Int)) -> (I a (Not Int))])))
                     (defn even [a]
                       (cond
                         (integer? a) (even? a)
                         :else a))
-                    (ann ^:no-check map2 (All [x a] [[x -> a] (t/Seqable x) -> (t/Seqable a)]))
+                    (even 'a)
+                  ))))
+  (is-clj (with-new-cs-gen
+            (tc-e (do
+                    (ann even (All [a]
+                                (IFn #_[Int -> Boolean]
+                                     [(I a (Not Int)) -> (I a (Not Int))])))
+                    (defn even [a]
+                      (cond
+                        (integer? a) (even? a)
+                        :else a))
+                    (ann ^:no-check map2 (All [x b] [[x -> b] (t/Seqable x) -> (t/Seqable b)]))
                     (def map2 map)
-                    (map2 even [1])
+                    (map2 (inst even Int) [1])
+                  ))))
+  (is-clj (with-new-cs-gen
+            (tc-e (do
+                    (ann nothin [Nothing -> Any])
+                    (defn nothin [a] a)
+                    (ann ^:no-check map2 (All [x] [[x -> Any] (t/Seqable x) -> Any]))
+                    (def map2 map)
+                    (map2 nothin [1])
+                  ))))
+  (is-clj (with-new-cs-gen
+            (tc-e (do
+                    (ann any [Any -> Any])
+                    (defn any [a] a)
+                    (ann ^:no-check map2 (All [x b] [[x -> b] (t/Seqable x) -> (t/Seqable b)]))
+                    (def map2 map)
+                    (map2 any [1])
+                  ))))
+  (is-clj (with-new-cs-gen
+            (tc-e (do
+                    (ann id (All [y] [y -> y]))
+                    (defn id [a] a)
+                    (ann ^:no-check map2 (All [x] [[x -> x] (t/Seqable x) -> (t/Seqable x)]))
+                    (def map2 map)
+                    (map2 id [1])
+                  ))))
+  (is-clj (with-new-cs-gen
+            (tc-e (do
+                    (ann id (All [z] [z -> z]))
+                    (defn id [a] a)
+                    (ann ^:no-check map2 (All [x y] [[x -> y] (t/Seqable x) -> (t/Seqable y)]))
+                    (def map2 map)
+                    (map2 id [1])
+                  ))))
+  (is-clj (with-new-cs-gen
+            (tc-e (do
+                    (ann idvec (All [y] [y -> '[y]]))
+                    (defn idvec [a] [a])
+                    (ann ^:no-check map2 (All [x y] [[x -> y] (t/Seqable x) -> (t/Seqable y)]))
+                    (def map2 map)
+                    (map2 idvec [1])
+                  ))))
+  (is-clj (with-new-cs-gen
+            (tc-e (do
+                    (ann nothin (All [y] [Nothing -> Nothing]))
+                    (defn nothin [a] a)
+                    (nothin 1)
                   ))))
 )
 
@@ -5608,6 +5668,32 @@
               (make-F 'a)
               (-not (Un (RClass-of Integer)
                         (RClass-of Long)))))))
+  (is (NotType?
+            (-not (make-FnIntersection
+                    (make-Function
+                      []
+                      -any)))))
+  (is (= -any (-not -nothing)))
+  (is
+    (not= (-val 1)
+          (clj
+            (In (-val 1)
+                (-not 
+                  (In (make-F 'a)
+                      (-not (RClass-of Integer))))))))
+  (is (= (Un (RClass-of Integer)
+             (-not (make-F 'a)))
+         (-not 
+           (In (make-F 'a)
+               (-not (RClass-of Integer))))))
+  (is (clj
+        (In (RClass-of Boolean)
+            (Un (RClass-of Integer)
+                (-not (make-F 'a))))))
+  (is (not= (-val 1)
+            (Un (-val 1)
+                (In (-val 1)
+                    (-not (make-F 'a))))))
   )
 
 
