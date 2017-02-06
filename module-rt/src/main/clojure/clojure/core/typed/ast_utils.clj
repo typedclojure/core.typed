@@ -232,3 +232,14 @@
                   (check ce)))))
     expr
     children))
+
+(defn strip-extra-info [expr]
+  (cond (map? expr)
+        (into {} (sort (reduce (fn [acc [k x]]
+                             (if (some #(= k %) [:env :line :column :info :shadow])
+                               acc
+                               (assoc acc k (strip-extra-info x))))
+                           {} expr)))
+        (vector? expr)
+        (map strip-extra-info expr)
+        :else expr))
