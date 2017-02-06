@@ -340,8 +340,8 @@
   (let/check-let check let-expr expected))
 
 (add-check-method :letfn
-  [{:keys [bindings expr env] :as letfn-expr} & [expected]]
-  (letfn/check-letfn bindings expr letfn-expr expected check))
+  [{:keys [bindings body env] :as expr} & [expected]]
+  (letfn/check-letfn bindings body expr expected check))
 
 (add-check-method :recur
   [{:keys [exprs env] :as recur-expr} & [expected]]
@@ -359,7 +359,7 @@
 ;; adding a bunch of missing methods: 
 
 (defn fail-empty [expr]
-  ;;(println "ERROR ##CLJS## " (with-out-str (clojure.pprint/pprint expr)))
+  (println (with-out-str (clojure.pprint/pprint (ast-u/strip-extra-info expr))))
   (throw (Exception. "Not implemented, yet")))
 
 (add-check-method :binding
@@ -367,8 +367,14 @@
   (fail-empty expr))
 
 (add-check-method :case
-  [expr & [expected]]
-  (fail-empty expr))
+  [{:keys [test nodes default :as expr]} & [expected]]
+  (chk/check
+   {:op :case
+    :test test
+    :default default
+    :tests (mapcat :tests nodes)
+    :thens (map :then nodes)}
+   expected))
 
 (add-check-method :case-node
   [expr & [expected]]

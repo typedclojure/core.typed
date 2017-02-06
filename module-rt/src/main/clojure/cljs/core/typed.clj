@@ -172,8 +172,8 @@
     `(cljs.core/letfn ~(vec inits)
        ;unquoted to allow bindings to resolve with hygiene
        ~init-syn
-       ;preserve letfn empty body
-       nil
+       ;;preserve letfn empty body
+       ;;nil
        ~@body)))
 
 (defmacro 

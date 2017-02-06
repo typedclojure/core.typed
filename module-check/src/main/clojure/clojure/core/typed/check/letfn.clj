@@ -20,14 +20,14 @@
                            (-> body :statements first :keys)
                            (-> body :statements first :vals))]
                   (impl/impl-case
-                    :clojure (do
-                               (assert (#{:local} (:op lb-expr)))
-                               [(-> lb-expr :name)
-                                (binding [prs/*parse-type-in-ns* (cu/expr-ns letfn-expr)]
-                                  (prs/parse-type (ast-u/constant-expr type-syn-expr)))])
-                    :cljs [(-> lb-expr :info :name)
-                           (binding [prs/*parse-type-in-ns* (cu/expr-ns letfn-expr)]
-                             (prs/parse-type (:form type-syn-expr)))]))))]
+                   :clojure (do
+                              (assert (#{:local} (:op lb-expr)))
+                              [(-> lb-expr :name)
+                               (binding [prs/*parse-type-in-ns* (cu/expr-ns letfn-expr)]
+                                 (prs/parse-type (ast-u/constant-expr type-syn-expr)))])
+                   :cljs [(-> lb-expr :info :name)
+                          (binding [prs/*parse-type-in-ns* (cu/expr-ns letfn-expr)]
+                            (prs/parse-type (-> type-syn-expr :expr :form)))]))))]
     (if-not inits-expected
       (err/tc-delayed-error (str "letfn requires annotation, see: "
                                (impl/impl-case :clojure 'clojure :cljs 'cljs) ".core.typed/letfn>")

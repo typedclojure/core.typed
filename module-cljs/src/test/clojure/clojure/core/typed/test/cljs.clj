@@ -89,14 +89,12 @@
 (deftest inst-test
   (is-tc-e (let [f (-> (fn [a] a)
                        (t/ann-form (t/All [x] [x -> x])))]
-             ((t/inst f number) 1))
-           number))
+             ((t/inst f number) 1))))
 
 (deftest letfn-test
   (is-tc-e (t/letfn> [a :- (t/All [x] [x -> x])
-                      (fn [b] b)]
-                     (a 1))
-           number))
+                      (a [b] b)]
+                     (a 1))))
 
 #_(deftest async-test
   (is-cljs (t/check-ns* 'cljs.core.typed.async)))
@@ -170,19 +168,55 @@
 (def nodes #{:binding :case :case-node :case-test :case-then :const :def :defrecord :deftype :do :fn :fn-method :host-call :host-field :if :invoke :js :js-array :js-object :js-var :let :letfn :local :loop :map :new :no-op :ns :ns* :quote :recur :set :set! :the-var :throw :try :var :vector :with-meta
             })
 
+(defmacro log-ast [form]
+  `(binding [*print-level* nil]
+     (spit "ast-log.clj"
+           (with-out-str
+             (clojure.pprint/pprint
+              (cljs (fake-ana-api/analyze (fake-ana-api/empty-env) (quote ~form))))))))
+
+(defn fake-test []
+  (is-tc-e (case :x
+              :y (+ 1 0)
+              (:x :z) 2
+              3))
+
+  #_(log-ast (t/letfn> [a :- (t/All [x] [x -> x])
+                       (a [b] b)]
+                      (a 1))))
+
 (deftest check-case-coverage-test
   (fake-ana-api/reset-found)
 
+  ;;let
+  (tc-e (let [x 0
+              y x]
+          (println y)))
+
+  ;;case
+  (tc-e (case 1
+          0 "zero"
+          "non-zero"))
+
+  ;;def
+  (tc-e (def x 1))
+
+  ;;fn
+  (tc-e (fn [x] x))
+  
+  
   ;;const
   (is-tc-e 1 number)
 
-  
-  (is-tc-e (case "foo"
-               "foo" 1
-               "bar" 2)
-           (U nil number))
+  ;;if
+  (tc-e (if 1 1 0))
+
+  ;;letfn
+  (tc-e (t/letfn> [foo :- [t/Num -> t/Num]
+                 (foo [x] x)]
+                (foo 2)))
 
   (print "MISSING NODES (fake ERROR): ")
-  (doseq [op (clojure.set/difference nodes @fake-ana-api/ops-found)]
+  (doseq [op (sort (clojure.set/difference nodes @fake-ana-api/ops-found))]
     (print (str op " ")))
   (println))
