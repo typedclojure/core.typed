@@ -43,7 +43,8 @@
             [clojure.core.typed.jsnominal-env :as jsnom]
             [clojure.core.typed.filter-ops :as fo]
             [clojure.core.typed.object-rep :a obj]
-            [clojure.core.typed.analyze-cljs :as ana]))
+            [clojure.core.typed.analyze-cljs :as ana]
+            [clojure.string :as c-str]))
 
 (alias 't 'clojure.core.typed)
 
@@ -131,15 +132,15 @@
                                :env env
                                :fn {:op :var
                                     :env env
-                                    :info {:name js-op}}
+                                    :name js-op}
                                :args args}
                               expected))]
     (assoc expr
            expr-type res)))
 
-(defmulti invoke-special (fn [{{:keys [op] :as fexpr} :f :as expr} & expected]
-                                (when (= :var op)
-                                  (-> fexpr :info :name))))
+(defmulti invoke-special (fn [{{:keys [op] :as fexpr} :fn :as expr} & expected]
+                           (when (= :var op)
+                             (:name fexpr))))
 
 (defmethod invoke-special :default [& _] ::not-special)
 
@@ -162,7 +163,7 @@
                   t))
         _ (assert ((some-fn r/Poly? r/PolyDots?) ptype))
         targs (binding [prs/*parse-type-in-ns* (cu/expr-ns expr)]
-                (doall (map prs/parse-type (:form targs-expr))))]
+                (doall (map prs/parse-type (-> targs-expr :expr :form))))]
     (assoc expr
            expr-type (ret (inst/manual-inst ptype targs)))))
 
@@ -185,7 +186,7 @@
     (let [target-expr (first args)
           inst-of-expr (second args)
           varsym (when (#{:var} (:op inst-of-expr))
-                   (-> inst-of-expr :info :name))
+                   (-> inst-of-expr :name))
           _ (when-not varsym
               (err/int-error (str "First argument to instance? must be a datatype var "
                                 (:op inst-of-expr))))
@@ -223,11 +224,17 @@
         (ret t)
         expected))))
 
+(defn jsvar? [vname]
+  {:pre [((every-pred symbol? namespace) vname)]}
+  (let [s (str (namespace vname))]
+    (or (c-str/starts-with? s "js")
+        (c-str/starts-with? s "goog"))))
+
 (add-check-method :var
-  [{{vname :name} :info :as expr} & [expected]]
-  (assoc expr
-         expr-type ((if (namespace vname) js-var-result local-result/local-result)
-                    expr vname expected)))
+  [{vname :name :as expr} & [expected]]
+  (assoc expr expr-type
+         ((if (namespace vname) js-var-result local-result/local-result)
+          expr vname expected)))
 
 ;(ann internal-special-form [Expr (U nil TCResult) -> Expr])
 (u/special-do-op spec/special-form internal-special-form)

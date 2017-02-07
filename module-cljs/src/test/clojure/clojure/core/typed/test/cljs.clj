@@ -89,7 +89,8 @@
 (deftest inst-test
   (is-tc-e (let [f (-> (fn [a] a)
                        (t/ann-form (t/All [x] [x -> x])))]
-             ((t/inst f number) 1))))
+             ((t/inst f t/Number) 1)
+          t/Number)))
 
 (deftest letfn-test
   (is-tc-e (t/letfn> [a :- (t/All [x] [x -> x])
@@ -240,3 +241,4 @@
   (doseq [op (sort (clojure.set/difference nodes @fake-ana-api/ops-found))]
     (print (str op " ")))
   (println))
+

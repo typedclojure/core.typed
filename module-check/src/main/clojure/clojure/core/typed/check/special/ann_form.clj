@@ -34,7 +34,6 @@
   inwards to the inner expression."
   [check {:keys [statements env] frm :ret :as expr} expected]
   {:pre [(#{3} (count statements))]}
-  (clojure.pprint/pprint (ast-u/strip-extra-info expr))
   (let [tsyn (ann-form-annotation expr)
         parsed-t (parse-annotation tsyn expr)
         cret (check frm 
