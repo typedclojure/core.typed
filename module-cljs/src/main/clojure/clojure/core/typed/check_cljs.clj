@@ -224,12 +224,6 @@
         (ret t)
         expected))))
 
-(defn jsvar? [vname]
-  {:pre [((every-pred symbol? namespace) vname)]}
-  (let [s (str (namespace vname))]
-    (or (c-str/starts-with? s "js")
-        (c-str/starts-with? s "goog"))))
-
 (add-check-method :var
   [{vname :name :as expr} & [expected]]
   (assoc expr expr-type
