@@ -168,7 +168,7 @@
            expr-type (ret (inst/manual-inst ptype targs)))))
 
 (defmethod invoke-special 'cljs.core.typed/loop>-ann
-  [{[expr {expected-bnds-syn :form}] :args :as dummy-expr} & [expected]]
+  [{[expr {{expected-bnds-syn :expr} :form}] :args :as dummy-expr} & [expected]]
   (let [expected-bnds (binding [prs/*parse-type-in-ns* (cu/expr-ns dummy-expr)]
                         (mapv prs/parse-type expected-bnds-syn))]
     ;loop may be nested, type the first loop found

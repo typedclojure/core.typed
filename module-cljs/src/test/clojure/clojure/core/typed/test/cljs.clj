@@ -82,7 +82,7 @@
   (is-tc-e (+ 1 1)))
 
 (deftest fn-test
-  ;;(is-tc-e (fn a [b] a))
+  (is-tc-e (fn a [b] a))
   (is-tc-e (fn [a] a)
            (t/All [x] [x -> x])))
 
@@ -97,6 +97,7 @@
                       (a [b] b)]
                      (a 1))))
 
+;;commenting-out this test because just :require -ing cljs.core.async fails with internal error
 #_(deftest async-test
   (is-cljs (t/check-ns* 'cljs.core.typed.async)))
 
@@ -168,23 +169,6 @@
 
 (def nodes #{:binding :case :case-node :case-test :case-then :const :def :defrecord :deftype :do :fn :fn-method :host-call :host-field :if :invoke :js :js-array :js-object :js-var :let :letfn :local :loop :map :new :no-op :ns :ns* :quote :recur :set :set! :the-var :throw :try :var :vector :with-meta
             })
-
-(defmacro log-ast [form]
-  `(binding [*print-level* nil]
-     (spit "ast-log.clj"
-           (with-out-str
-             (clojure.pprint/pprint
-              (cljs (fake-ana-api/analyze (fake-ana-api/empty-env) (quote ~form))))))))
-
-(defn fake-test []
-  (is-tc-e (case :x
-              :y (+ 1 0)
-              (:x :z) 2
-              3))
-
-  #_(log-ast (t/letfn> [a :- (t/All [x] [x -> x])
-                       (a [b] b)]
-                      (a 1))))
 
 (deftest check-case-coverage-test
   (fake-ana-api/reset-found)

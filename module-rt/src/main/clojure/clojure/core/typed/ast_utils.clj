@@ -240,6 +240,6 @@
                                acc
                                (assoc acc k (strip-extra-info x))))
                            {} expr)))
-        (vector? expr)
-        (map strip-extra-info expr)
+        (seqable? expr)
+        (mapv strip-extra-info (seq expr))
         :else expr))

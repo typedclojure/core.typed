@@ -1,5 +1,6 @@
 (ns clojure.core.typed.analyzer-api-intercept
-  (:require [cljs.analyzer.api :as api]))
+  (:require [cljs.analyzer.api :as api]
+            [clojure.core.typed.ast-utils :as ast-u]))
 
 (def ops-found (atom #{}))
 
