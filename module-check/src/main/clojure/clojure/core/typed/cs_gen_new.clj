@@ -994,6 +994,25 @@
                                            (norm2 ti si)))))
       fail-css)))
 
+(defn upcast-to-RClass [S T]
+  (cond
+    (r/RClass? S) (upcast-RClass S T)
+    ;; FIXME
+    :else nil))
+
+(defn upcast-to-Function [S]
+  {:pre [(and (r/Type? S)
+              (not (r/Union? S))
+              (not (r/Top? S))
+              (not (r/F? S))
+              (not (r/Intersection? S))
+              (not (r/FnIntersection? S)))]
+   :post [((some-fn nil? r/Type?) %)]}
+  (cond
+    (r/Function? S) S
+    (c/keyword-value? S) (c/keyword->Fn (:val S))
+    :else nil))
+
 (defn upcast-S [S T]
   {:pre [(r/Type? S)
          (r/Type? T)]
@@ -1985,6 +2004,105 @@
 
         :else fail-css))))
 
+;; returns a set of all the ways the set s
+;; can be divided into n parts.
+(defn all-splits [s n]
+  (let []
+    (assert nil "TODO")))
+
+(defn cs-gen-many-RClasses [no-mention P N M]
+  {:pre [(set? no-mention)
+         (every? r/Type? P)
+         (every? r/RClass? N)
+         (set? M)]
+   :post [(constraint-set-set? %)]}
+  (let [;;FIXME must add the type representing P ^ ~N to M
+        norm #(norm no-mention % M)
+        Ngroups (group-by :the-class N)
+        Ncss (mapv (fn [relevant-Ns]
+                     {:pre [(every? r/RClass? relevant-Ns)
+                            (vector? relevant-Ns)
+                            (seq relevant-Ns)]}
+                     ;; follow rule for pairs. Find a 
+                     (let [N-combs (map set (comb/subsets relevant-Ns))
+                           N (set relevant-Ns)
+                           N-css 
+                           (mapv
+                             (fn [N']
+                               {:pre [(every? r/RClass? N')]}
+                               (let [relevant-Ps (keep #(upcast-to-RClass % (first relevant-Ns)) P)
+                                     _ (assert (every? r/RClass? relevant-Ps) relevant-Ps)
+                                     variances (:variances (first relevant-Ns))
+                                     css (mapv (fn [i]
+                                                 (let [ith-poly (comp #(nth % i) :poly?)
+                                                       norms2 #(norm (apply c/In (concat %1 (map c/-not %2))))
+                                                       pp (map ith-poly relevant-Ps)
+                                                       nn (map ith-poly relevant-Ns)
+                                                       c (case (nth variances i)
+                                                           (:covariant :constant)
+                                                           (norms2 pp nn)
+                                                           :contravariant
+                                                           (norms2 nn pp)
+                                                           :invariant
+                                                           (intersect-css
+                                                             (norms2 pp nn)
+                                                             (norms2 nn pp)))]
+                                                   c))
+                                               (range (:variances (first relevant-Ns))))]
+                                 (apply intersect-css css)))
+                             N-combs)
+                           ]
+                       ))
+                     (vals Ngroups))]
+    (assert nil "TODO use all-splits instead of comb")))
+
+;; upcast the P's to be functions, then generate constraints
+;; that make (^ P) <: (v N)
+(defn cs-gen-many-functions [no-mention P N M]
+  {:pre [(set? no-mention)
+         (every? r/Type? P)
+         (every? r/Function? N)
+         (set? M)]
+   :post [(constraint-set-set? %)]}
+  (let [up-P (vec (keep upcast-to-Function P))
+        _ (assert (every? r/Function? up-P) up-P)
+        P's (map set (comb/subsets (vec P)))
+        P (set P)
+        Ncss (mapv (fn [n]
+                     {:pre [(r/Function? n)]}
+                     (apply intersect-css
+                       (mapv (fn [P']
+                               {:pre [(every? r/Function? P')]}
+                               (cond
+                                 (not-any? (some-fn :rest :drest :kws :prest :pdot) (concat P' [n]))
+                                 (let [relevant-P' (filter (fn [a]
+                                                             (= (count (:dom a))
+                                                                (count (:dom n))))
+                                                           P')
+                                       ;; constraints for arguments
+                                       Sargs_P' (apply intersect-css
+                                                       (map (fn [p]
+                                                              {:pre [(integer? p)]}
+                                                              (let [pth-dom #(nth (:dom %) p)
+                                                                    t1j (pth-dom n)
+                                                                    t1is (map (comp c/-not pth-dom) relevant-P')]
+                                                                (norm no-mention (apply c/In t1j t1is) M)))
+                                                            (range (count (:dom n)))))
+                                       P-without-P' (set/difference P P')
+                                       ;; constraints for range
+                                       Srng_P' (if (= P P-without-P')
+                                                 fail-css
+                                                 ;; TODO filters objects!
+                                                 (let [rng-t (comp :t :rng)]
+                                                   (norm no-mention
+                                                         (apply c/In (c/-not (rng-t n))
+                                                                (map rng-t P-without-P'))
+                                                         M)))]
+                                   (union-css Sargs_P' Srng_P'))))
+                             P's)))
+                   N)]
+    (apply union-css Ncss)))
+
 ;; returns a constraint set that satisfies (I ts ...) <: (U)
 (defn cs-gen-normalized-no-tvar [no-mention ts M]
   {:pre [(set? no-mention)
@@ -2015,36 +2133,23 @@
               ;; are present.
               #_[r/-nothing])
         _ (assert (every? r/Type? N))
-        ;; every P must be under at least one N
-        simple-Ps (mapv (fn [n]
-                          {:pre [(r/Type? n)]}
-                          (mapv #(upcast-S % n) P))
-                        N)
-        _ (assert nil (str "simple-Ps: " simple-Ps))
-        ucss
-        (mapv (fn [p]
-                {:pre [(r/Type? p)]
-                 :post [(constraint-set-set? %)]}
-                ;; not sure if union-css is correct here
-                (prn "inner union" p)
-                (let [css' (mapv (fn [n]
-                                   {:pre [(r/Type? n)]
-                                    :post [(constraint-set-set? %)]}
-                                   (prn "inner union*" p n)
-                                   (cs-gen2 no-mention p n M))
-                                 N)
-                      _ (prn "before inner union-css" "\n")
-                      _ (run! ppcss css')
-                      ret (apply intersect-css css')]
-                  (prn "ret inner union-css" (ppcss-str ret))
-                  ret))
-              P)
-        ;_ (prn "ucss")
-        ;_ (run! ppcss ucss)
-        css (apply
-              ;; not sure if intersect-css is correct here
-              union-css
-              ucss)
+        {:keys [::N-functions ::N-others ::N-RClasses]}
+        (group-by (fn [t]
+                    {:post [(keyword? %)]}
+                    (cond
+                      (r/Function? t) ::N-functions
+                      (r/RClass? t) ::N-RClasses
+                      :else ::N-others))
+                  N)
+        _ (assert (empty? N-others) (mapv class N-others))
+        css-functions (if (seq N-functions)
+                        (cs-gen-many-functions no-mention P N-functions M)
+                        fail-css)
+        css-RClasses (if (seq N-RClasses)
+                        (cs-gen-many-RClasses no-mention P N-functions M)
+                        fail-css)
+        css (union-css css-functions
+                       css-RClasses)
         ]
     css
     ))
