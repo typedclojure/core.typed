@@ -5511,39 +5511,38 @@
                         :else a))
                     (even 1)
                   ))))
-  ;; FIXME choice of intersect-css to combine results of the Union case in norm
-  ;; makes this fail.
   (is-clj (with-new-cs-gen
             (tc-e (do
                     (ann even (All [a]
                                 (IFn #_[Int -> Boolean]
-                                     [(I a (Not Int)) -> (I a (Not Int))])))
+                                     [(I a (Not Long)) -> (I a (Not Long))])))
                     (defn even [a]
                       (cond
-                        (integer? a) (even? a)
+                        (instance? Long a) (even? a)
                         :else a))
                     (even 'a)
                   ))))
   (is-clj (with-new-cs-gen
-            (tc-e (do
+            (tc-err (do
                     (ann even (All [a]
                                 (IFn #_[Int -> Boolean]
-                                     [(I a (Not Int)) -> (I a (Not Int))])))
+                                     [(I a (Not Long)) -> (I a (Not Long))])))
                     (defn even [a]
                       (cond
-                        (integer? a) (even? a)
+                        (instance? Long a) (even? a)
                         :else a))
                     (ann ^:no-check map2 (All [x b] [[x -> b] (t/Seqable x) -> (t/Seqable b)]))
                     (def map2 map)
-                    (map2 (inst even Int) [1])
+                    (map2 (inst even Long) (ann-form [1] (Seqable Long)))
                   ))))
+  ;; FIXME definitely should fail!
   (is-clj (with-new-cs-gen
-            (tc-e (do
+            (tc-err (do
                     (ann nothin [Nothing -> Any])
                     (defn nothin [a] a)
                     (ann ^:no-check map2 (All [x] [[x -> Any] (t/Seqable x) -> Any]))
                     (def map2 map)
-                    (map2 nothin [1])
+                    (map2 nothin (ann-form [1] (t/Seqable Any)))
                   ))))
   (is-clj (with-new-cs-gen
             (tc-e (do
@@ -5583,6 +5582,32 @@
                     (defn nothin [a] a)
                     (nothin 1)
                   ))))
+  (is-clj (with-new-cs-gen
+            (tc-e (do
+                      (ann even (All [a]
+                                     (IFn [Long -> Boolean]
+                                          [(I a (Not Long)) -> (I a (Not Long))])))
+                      (defn even [a]
+                        (cond
+                          (instance? Long a) (even? a)
+                          :else a))
+                      (ann ^:no-check map2 (All [x b] [[x -> b] (t/Seqable x) -> (t/Seqable b)]))
+                      (def map2 map)
+                      (map2 even (ann-form ['a] (Seqable Sym)))
+                      ))))
+  (is-clj (with-new-cs-gen
+            (tc-e (do
+                      (ann even (All [a]
+                                     (IFn [Long -> Boolean]
+                                          [(I a (Not Long)) -> (I a (Not Long))])))
+                      (defn even [a]
+                        (cond
+                          (instance? Long a) (even? a)
+                          :else a))
+                      (ann ^:no-check map2 (All [x b] [[x -> b] (t/Seqable x) -> (t/Seqable b)]))
+                      (def map2 map)
+                      (map2 even (ann-form ['a] (Seqable (U Long Sym))))
+                      ))))
 )
 
 (deftest intersect-not-test
@@ -5674,6 +5699,7 @@
                       []
                       -any)))))
   (is (= -any (-not -nothing)))
+#_
   (is
     (not= (-val 1)
           (clj
@@ -5687,13 +5713,16 @@
            (In (make-F 'a)
                (-not (RClass-of Integer))))))
   (is (clj
-        (In (RClass-of Boolean)
-            (Un (RClass-of Integer)
-                (-not (make-F 'a))))))
-  (is (not= (-val 1)
-            (Un (-val 1)
-                (In (-val 1)
-                    (-not (make-F 'a))))))
+        (= (In (RClass-of java.lang.Boolean)
+               (-not (make-F 'a)))
+           (In (RClass-of Boolean)
+               (Un (RClass-of Integer)
+                   (-not (make-F 'a)))))))
+  (is (clj
+        (= (-val 1)
+           (Un (-val 1)
+               (In (-val 1)
+                   (-not (make-F 'a)))))))
   )
 
 

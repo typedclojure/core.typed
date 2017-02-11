@@ -1630,7 +1630,6 @@
         (r/Intersection? t2)
         (every? #(overlap t1 %) (:types t2))
 
-
         ;; this doesn't seem viable, should it return
         ;; (not (overlap (:type t1) (:type t2))) ?
         ;; isn't overlap too conservative for that?
@@ -1653,6 +1652,14 @@
         (r/NotType? t2)
         ;switch arguments to catch above case
         (overlap t2 t1)
+
+        (and (r/Value? t1)
+             (some? (:val t1)))
+        (overlap (RClass-of (class (:val t1))) t2)
+
+        (and (r/Value? t2)
+             (some? (:val t2)))
+        (overlap t1 (RClass-of (class (:val t2))))
 
         ;if both are Classes, and at least one isn't an interface, then they must be subtypes to have overlap
         ;      (and (r/RClass? t1)
