@@ -1623,7 +1623,12 @@
   (is-tc-e (let [a (ann-form [] (U nil (Coll Any)))]
              (assert (every? number? a))
              a)
-           (U nil (Coll Number))))
+           (U nil (Coll Number)))
+  #_
+  (is-tc-e (fn [as :- (Coll (U nil (Coll Number)))] :- (Coll (Coll Number))
+             (assert (every? (inst seq Number) as))
+             as))
+  )
 
 (deftest keys-vals-update-test
   (is-clj (both-subtype? 
@@ -5460,6 +5465,44 @@
   (is-tc-e (let [x (ann-form 1 (U nil Int))]
              (when (some? x)
                (inc x)))))
+
+(deftest invoke-vector-test
+  (is-tc-e (fn [a :- (Vec Int)] :- Int
+             (a 0)))
+  (is-tc-e (fn [a :- '[Int Int]] :- Int
+             (a 0)))
+  (is-tc-e (fn [a :- '[Int Bool]] :- Bool
+             (a 1)))
+  (is-tc-err (fn [a :- '[Int Bool]] :- Int
+               (a 1)))
+  (is-tc-e (fn [a :- (Vec Bool)] :- (Seqable Bool)
+             (map a [1])))
+  ;; upcast to IFn
+  (is-tc-e (fn [a :- (Vec Bool)] :- [Int -> Bool]
+             a))
+  (is-tc-err (fn [a :- (Vec Bool)] :- [Int -> Int]
+               a))
+)
+
+(deftest invoke-set-test
+  ;; currently sets always return Any, but this checks
+  ;; the expected type checking.
+  (is-tc-err (fn [a :- (Set Int)] :- Int
+               (a 1)))
+  (is-tc-err (fn [a :- (HSet #{Int})] :- Int
+               (a 1)))
+  ;; test expected type checking
+  (is-tc-err (fn [a :- (HSet #{:a})] :- Int
+               (a 1)))
+)
+
+(deftest invoke-intersection-test
+  (is-tc-e (fn [a :- (AVec Int)] :- Int
+             (a 1))))
+
+(deftest apply-concat-test
+  (is-tc-e (apply concat []))
+  (is-tc-e (apply concat [[1]])))
 
 ;    (is-tc-e 
 ;      (let [f (fn [{:keys [a] :as m} :- '{:a (U nil Num)}] :- '{:a Num} 
