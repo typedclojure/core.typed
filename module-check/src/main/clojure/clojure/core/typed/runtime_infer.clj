@@ -2022,10 +2022,10 @@
                                 :ns (ns-name ns)
                                 :name vsym}]))))
 
-(defn track-local-fn [line column end-line end-column ns val]
-  {:pre []}
+(defn track-local-fn [track-kind line column end-line end-column ns val]
+  {:pre [(#{:local-fn :loop-var} track-kind)]}
   (track results-atom val [{:op :var
-                            :local-fn true
+                            ::track-kind track-kind
                             :line line
                             :column column
                             :end-line end-line
@@ -2042,7 +2042,7 @@
                                            end-line
                                            "|"
                                            end-column))
-                                    {:local-fn true
+                                    {::track-kind track-kind
                                      :line line
                                      :column column
                                      :end-line end-line
@@ -2061,6 +2061,23 @@
      clojure.test
      clojure.string})
 
+(defn dummy-do [env statements ret]
+  {:pre [((some-fn nil? vector) statements)]}
+  {:op :do
+   :form '(do)
+   :env env
+   :statements statements
+   :ret ret
+   :children [:statements :ret]})
+
+(defn dummy-let [env bindings body]
+  {:op :let
+   :form '(let)
+   :env env
+   :bindings bindings
+   :body (assoc body :body? true)
+   :children [:bindings :ret]})
+
 ; dummy-sym : Env Sym -> TAExpr
 (defn dummy-sym [env vsym]
   {:op :const
@@ -2068,6 +2085,14 @@
    :form `'~vsym
    :env env
    :val vsym})
+
+(defn dummy-kw [env kw]
+  {:pre [(keyword? kw)]}
+  {:op :const
+   :type :keyword
+   :form kw
+   :env env
+   :val kw})
 
 (defn dummy-num [env n]
   {:op :const
@@ -2124,7 +2149,8 @@
             (dummy-sym (:env expr) (:ns (:env expr)))
             expr]}))
 
-(defn wrap-local-fn [coord expr *ns*]
+(defn wrap-local-fn [track-kind coord expr *ns*]
+  {:pre [(#{:local-fn :loop-var} track-kind)]}
   (do
     (println (str "Instrumenting local fn in " (ns-name *ns*)
                   " "
@@ -2143,7 +2169,8 @@
           :var #'track-local-fn
           :form `track-local-fn
           :env (:env expr)}
-     :args [(dummy-num (:env expr) (:line coord))
+     :args [(dummy-kw (:env expr)  track-kind)
+            (dummy-num (:env expr) (:line coord))
             (dummy-num (:env expr) (:column coord))
             (dummy-num (:env expr) (:end-line coord))
             (dummy-num (:env expr) (:end-column coord))
@@ -2158,7 +2185,7 @@
   ([expr] (check expr nil))
   ([expr expected]
    (let [_ (when-let [load-state vs/*typed-load-atom*]
-             (prn "load-state" (::refreshed? @load-state))
+             ;(prn "load-state" (::refreshed? @load-state))
              (when-not (::refreshed? @load-state)
                ;; delete all local fn info for the current namespace, since it's likely to go out of date
                ;; as soon as the file is edited.
@@ -2177,7 +2204,14 @@
                                         (into #{}
                                               (remove for-current-ns?)
                                               rs)))
-                 (swap! load-state assoc ::refreshed? true))))]
+                 (swap! load-state assoc ::refreshed? true))))
+         skip-track? (fn [coord]
+                       (or
+                         (not (:line coord))
+                         (not (:column coord))
+                         (and (= (:line coord) (:end-line coord))
+                              ;; would these be off by one?
+                              (= (:column coord) (:end-column coord)))))]
      (case (:op expr)
        ;; Wrap def's so we can instrument their usages outside this
        ;; namespace.
@@ -2196,23 +2230,65 @@
                 (wrap-var-deref expr vsym *ns*)
                 expr))
        :fn 
-       ;; this is a top-level function that's already being wrapped
        (if (not *found-fn*)
+         ;; this is a top-level function that's already being wrapped
          (binding [*found-fn* true]
            (ast/walk-children check expr))
          ;; instrument this
          (let [out (ast/walk-children check expr)
                coord (meta (:form out))
-               _ (prn coord)
-                               ;; un-annotatable
-               skip-track? (or
-                             (not (:line coord))
-                             (not (:column coord))
-                             (and (= (:line coord) (:end-line coord))
-                                  (= (:column coord) (:end-column coord))))]
-           (if skip-track?
+               ]
+           (if (or (skip-track? coord)
+                   ;; don't track if there are no arguments
+                   (every? (comp empty? :params) (:methods out)))
              out
-             (wrap-local-fn coord out *ns*))))
+             (wrap-local-fn :local-fn coord out *ns*))))
+
+       :loop
+       ;; track each loop argument
+       (let [expr (ast/walk-children check expr)
+             ;; loops don't have their metadata preserved, so
+             ;; we grab the coordinates of the bindings.
+             coords (map (comp meta :form) (:bindings expr))
+             ]
+         (if (or (every? skip-track? coords)
+                 ;; don't track if there are no loop variables
+                 (empty? (:bindings expr)))
+           expr
+           (let [{:keys [body bindings]} expr]
+             (prn "rewriting")
+             (assoc expr
+                    :body
+                    (assoc
+                      (dummy-do
+                        (:env body)
+                        []
+                        (dummy-let
+                          (:env body)
+                          ;; here, we're rebinding loop variables as let variable.
+                          ;; This means the :local annotations in body will be out
+                          ;; of date, but since we're just immediately evaluating
+                          ;; this AST tree, it shouldn't matter.
+                          (vec
+                            (keep
+                              (fn [b]
+                                ;; only track the loop bindings that have file coordinates.
+                                (let [coord (meta (:form b))]
+                                  (when-not (skip-track? coord)
+                                    (assoc b
+                                           :init 
+                                           (wrap-local-fn
+                                             :loop-var
+                                             coord
+                                             (-> b
+                                                 (assoc :op :local)
+                                                 (dissoc :init :atom))
+                                             *ns*)))))
+                              bindings))
+                          ;; the :env for body is now out of date.
+                          body))
+                      :body? true)))))
+
        (ast/walk-children check expr)))))
 
 (def runtime-infer-expr check)
@@ -2483,7 +2559,10 @@
 ;    ))
 
 (defn local-fn-symbol? [s]
-  (boolean (:local-fn (meta s))))
+  (= :local-fn (::track-kind (meta s))))
+
+(defn loop-var-symbol? [s]
+  (= :loop-var (::track-kind (meta s))))
 
 (defn envs-to-specs [env config]
   ;(prn "envs-to-specs")
@@ -2565,19 +2644,27 @@
 (defn envs-to-annotations [env config]
   (let [full-type-env (type-env env)
         local-fn-env (into {}
-                           (filter (comp local-fn-symbol? key))
+                           (filter (comp (some-fn loop-var-symbol?
+                                                  local-fn-symbol?)
+                                         key))
                            full-type-env)
         _ (prn "local-fn-env" local-fn-env)
         tenv (into {}
                    (remove (fn [[k v]]
                              {:pre [(symbol? k)]}
+                             #_
+                             (prn "metas" k
+                                  (symbol (str (current-ns)) (str (name k)))
+                                  (meta (find-var (symbol (str (current-ns)) (str (name k))))))
                              (or
                                ;; don't annotate macros
-                               (some-> (find-var (symbol (str (current-ns)) (str k)))
+                               (some-> (find-var (symbol (str (current-ns)) (str (name k))))
                                        meta
                                        :macro)
                                ;; don't annotate local functions
-                               (local-fn-symbol? k))))
+                               (local-fn-symbol? k)
+                               ;; or loop variables
+                               (loop-var-symbol? k))))
                    full-type-env)
         tfvs (into #{}
                    (mapcat
@@ -2856,10 +2943,128 @@
 
 (def ^:dynamic *indentation* 2)
 
+(defn insert-local-fn* [{:keys [line column end-line end-column] :as f} ls]
+  (let [_ (prn "current fn" f)
+        [file-slice trailing]
+        (let [_ (prn "ls" (count ls) (dec line) end-line)
+              v (subvec ls (dec line) end-line)
+              last-line (peek v)
+              _ (prn "last-line" last-line (dec end-column))
+              before-end-column (subs last-line 0 (dec end-column))
+              after-end-column (subs last-line (dec end-column))]
+          [(assoc v (dec (count v)) before-end-column)
+           after-end-column])
+
+        first-line (nth file-slice 0)
+        before-first-pos (subs first-line 0 (dec column))
+        after-first-pos (subs first-line (dec column))
+        _ (prn "after-first-pos" after-first-pos)
+        ;; insert (^::t/auto-gen t/ann-form
+        before-line (str
+                      before-first-pos
+                      (binding [*print-length* nil
+                                *print-level* nil]
+                        (with-out-str 
+                          (print "(^")
+                          (print (pprint-str-no-line ::t/auto-gen))
+                          (print " ")
+                          (print (pprint-str-no-line (qualify-typed-symbol 'ann-form))))))
+        indentation *indentation*
+        indentation-spaces (apply str (repeat (+ (dec column) indentation) " "))
+        ;; insert column+indentation spaces
+        the-fn-line (str indentation-spaces after-first-pos)
+
+        rest-slice (if (= 1 (count file-slice))
+                     []
+                     (subvec file-slice 1 (count file-slice)))
+
+        ;; indent each line at column
+        indented-fn (map (fn [a]
+                           {:pre [(string? a)]}
+                           ;; insert indentation at column if there's already whitespace there
+                           (if (= \space (nth a (dec column)))
+                             (let [_ (prn "indenting" a)
+                                   _ (prn "left half " (subs a 0 (dec column)))
+                                   _ (prn "right half" (subs a (dec column)))]
+                               (str (subs a 0 column)
+                                    (apply str (repeat indentation " "))
+                                    (subs a column)))
+                             (do
+                               (prn (str
+                                      "WARNING: Not indenting line " line
+                                      " of " (:ns f) ", found non-whitespace "
+                                      " at column " column "."))
+                               a)))
+                         rest-slice)
+        _ (prn "the type pp" (pprint-str-no-line (unparse-type (:type f))))
+        the-type-line (str indentation-spaces
+                           (pprint-str-no-line (unparse-type (:type f)))
+                           ")")
+        ;; now add any trailing code after end-column
+        ;; eg. (map (fn ...) c) ==> (map (ann-form (fn ...) ...)
+        ;;                               c)
+        trailing-line (when (not= 0 (count trailing))
+                        (str (apply str (repeat (dec column) " "))
+                             ;; TODO compensate for this change in update-column
+                             (if nil #_(= \space (nth trailing 0))
+                               (subs trailing 1)
+                               trailing)))
+
+        final-split (concat
+                      [before-line
+                       the-fn-line]
+                      indented-fn
+                      [the-type-line]
+                      (when trailing-line
+                        [trailing-line]))
+        new-ls (vec (concat
+                      (subvec ls 0 (dec line))
+                      final-split
+                      (subvec ls end-line)))
+        update-line (fn [old-line]
+                      (cond
+                        ;; occurs before the current changes
+                        (< old-line line) old-line
+                        ;; occurs inside the bounds of the current function.
+                        ;; Since we've added an extra line before this function (the beginning ann-form)
+                        ;; we increment the line.
+                        (<= line old-line end-line) (inc old-line)
+                        ;; occurs after the current function.
+                        ;; We've added possibly 2-3 lines: 
+                        ;; - the beginning of the ann-form
+                        ;; - the end of the ann-form
+                        ;; - possibly, the trailing code
+                        :else (if trailing-line
+                                (+ 3 old-line)
+                                (+ 2 old-line))))
+        update-column (fn [old-column old-line]
+                        (cond
+                          ;; occurs before the current changes
+                          (< old-line line) old-column
+                          ;; occurs inside the bounds of the current function.
+                          ;; We indent each of these lines by 2.
+                          ;; WARNING: we might not have indented here
+                          (<= line old-line end-line) (+ 2 old-column)
+                          :else old-column))]
+  {:ls new-ls
+   :update-line update-line
+   :update-column update-column}))
+
 (defn insert-local-fns [local-fns old config]
   {:post [(string? %)]}
   (prn "insert-local-fns" local-fns)
-  (let [;; reverse
+  (let [update-coords
+        (fn [update-line update-column]
+          ;; adjust the coordinates of any functions that have moved.
+          (fn [v]
+            (-> v
+                (update :line update-line)
+                (update :end-line update-line)
+                ;; pass original line
+                (update :column update-column (:line v))
+                ;; pass original end-line
+                (update :end-column update-column (:end-line v)))))
+        ;; reverse
         sorted-fns (sort-by (juxt :line :column) local-fns)
         ls (with-open [pbr (java.io.BufferedReader.
                              (java.io.StringReader. old))]
@@ -2872,123 +3077,18 @@
       (if (empty? fns)
         (str/join "\n" ls)
         (let [;; assume these coordinates are correct
-              {:keys [line column end-line end-column] :as f} (first fns)
-              _ (prn "current fn" f)
-              [file-slice trailing] 
-              (let [_ (prn "ls" (count ls) (dec line) end-line)
-                    v (subvec ls (dec line) end-line)
-                    last-line (peek v)
-                    _ (prn "last-line" last-line (dec end-column))
-                    before-end-column (subs last-line 0 (dec end-column))
-                    after-end-column (subs last-line (dec end-column))]
-                [(assoc v (dec (count v)) before-end-column)
-                 after-end-column])
-
-              first-line (nth file-slice 0)
-              before-first-pos (subs first-line 0 (dec column))
-              after-first-pos (subs first-line (dec column))
-              _ (prn "after-first-pos" after-first-pos)
-              ;; insert (^::t/auto-gen t/ann-form
-              before-line (str
-                            before-first-pos
-                            (binding [*print-length* nil
-                                      *print-level* nil]
-                              (with-out-str 
-                                (print "(^")
-                                (print (pprint-str-no-line ::t/auto-gen))
-                                (print " ")
-                                (print (pprint-str-no-line (qualify-typed-symbol 'ann-form))))))
-              indentation *indentation*
-              indentation-spaces (apply str (repeat (+ (dec column) indentation) " "))
-              ;; insert column+indentation spaces
-              the-fn-line (str indentation-spaces after-first-pos)
-
-              rest-slice (if (= 1 (count file-slice))
-                           []
-                           (subvec file-slice 1 (count file-slice)))
-
-              ;; indent each line at column
-              indented-fn (map (fn [a]
-                                  {:pre [(string? a)]}
-                                  ;; insert indentation at column if there's already whitespace there
-                                  (if (= \space (nth a (dec column)))
-                                    (let [_ (prn "indenting" a)
-                                          _ (prn "left half " (subs a 0 (dec column)))
-                                          _ (prn "right half" (subs a (dec column)))]
-                                      (str (subs a 0 column)
-                                           (apply str (repeat indentation " "))
-                                           (subs a column)))
-                                    (do
-                                      (prn (str
-                                             "WARNING: Not indenting line " line
-                                             " of " (:ns f) ", found non-whitespace "
-                                             " at column " column "."))
-                                      a)))
-                                rest-slice)
-              _ (prn "the type pp" (pprint-str-no-line (unparse-type (:type f))))
-              the-type-line (str indentation-spaces
-                                 (pprint-str-no-line (unparse-type (:type f)))
-                                 ")")
-              ;; now add any trailing code after end-column
-              ;; eg. (map (fn ...) c) ==> (map (ann-form (fn ...) ...)
-              ;;                               c)
-              trailing-line (when (not= 0 (count trailing))
-                              (str (apply str (repeat (dec column) " "))
-                                   ;; TODO compensate for this change in update-column
-                                   (if nil #_(= \space (nth trailing 0))
-                                     (subs trailing 1)
-                                     trailing)))
-
-              final-split (concat
-                            [before-line
-                             the-fn-line]
-                            indented-fn
-                            [the-type-line]
-                            (when trailing-line
-                              [trailing-line]))
-              new-ls (vec (concat
-                            (subvec ls 0 (dec line))
-                            final-split
-                            (subvec ls end-line)))
-              update-line (fn [old-line]
-                            (cond
-                              ;; occurs before the current changes
-                              (< old-line line) old-line
-                              ;; occurs inside the bounds of the current function.
-                              ;; Since we've added an extra line before this function (the beginning ann-form)
-                              ;; we increment the line.
-                              (<= line old-line end-line) (inc old-line)
-                              ;; occurs after the current function.
-                              ;; We've added possibly 2-3 lines: 
-                              ;; - the beginning of the ann-form
-                              ;; - the end of the ann-form
-                              ;; - possibly, the trailing code
-                              :else (if trailing-line
-                                      (+ 3 old-line)
-                                      (+ 2 old-line))))
-              update-column (fn [old-column old-line]
-                              (cond
-                                ;; occurs before the current changes
-                                (< old-line line) old-column
-                                ;; occurs inside the bounds of the current function.
-                                ;; We indent each of these lines by 2.
-                                ;; WARNING: we might not have indented here
-                                (<= line old-line end-line) (+ 2 old-column)
-                                :else old-column))
-              next-fns
-              (map 
-                ;; adjust the coordinates of any functions that have moved.
-                (fn [v]
-                  (-> v
-                      (update :line update-line)
-                      (update :end-line update-line)
-                      ;; pass original line
-                      (update :column update-column (:line v))
-                      ;; pass original end-line
-                      (update :end-column update-column (:end-line v))))
-                (next fns))
-              ]
-          (recur new-ls
+              f (first fns)
+              {:keys [ls update-line update-column]}
+              (case (::track-kind f)
+                :local-fn (insert-local-fn* f ls))
+              _ (assert (vector? ls))
+              _ (assert (fn? update-line))
+              _ (assert (fn? update-column))
+              next-fns (map 
+                         ;; adjust the coordinates of any functions that have moved.
+                         (update-coords update-line update-column)
+                         (next fns))]
+          (recur ls
                  next-fns))))))
 
 (comment
