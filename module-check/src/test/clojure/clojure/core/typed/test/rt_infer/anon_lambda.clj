@@ -9,8 +9,7 @@
 (defn b [coll]
   (->> coll
        (map 
-         (fn [n]
-           (inc n)))
+         (fn [n] (inc n)))  ;; hello
        (filter
          (fn [n]
            (odd? n)))))

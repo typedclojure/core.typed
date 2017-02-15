@@ -10,7 +10,7 @@
    :post [(or (nil? %)
               (and (seq %)
                    (every? r/Type? %)))]}
-  (let [names (map :name (:bindings expr))
+  (let [names (map :form (:bindings expr))
         _ (assert (every? symbol? names))
         maybe-anns (map (comp (fn [m]
                                 (prn "meta" m)
@@ -30,6 +30,7 @@
         inlines (inline-annotations expr)
         _ (when (and loop-bnd-anns inlines)
             (err/int-error "Cannot provide both an annotation with t/loop and inline loop"))
+        _ (prn "inlines" inlines)
         anns (or loop-bnd-anns inlines)]
     (binding [recur-u/*loop-bnd-anns* nil]
       (let/check-let check expr expected 

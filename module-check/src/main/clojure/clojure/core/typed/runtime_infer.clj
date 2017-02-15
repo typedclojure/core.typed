@@ -776,8 +776,8 @@
                                      clojure.lang.Symbol (qualify-typed-symbol 'Sym)
                                      clojure.lang.Keyword (qualify-typed-symbol 'Kw)
                                      clojure.lang.IAtom (qualify-typed-symbol 'Atom1)
-                                     clojure.lang.ISeq (qualify-typed-symbol 'Seqable)
-                                     clojure.lang.IPersistentList (qualify-typed-symbol 'Seqable)
+                                     clojure.lang.ISeq (qualify-typed-symbol 'Coll)
+                                     clojure.lang.IPersistentList (qualify-typed-symbol 'Coll)
                                      clojure.lang.IFn 'AnyFunction
                                      java.lang.String (qualify-typed-symbol 'Str)
                                      (resolve-class c))
@@ -2943,21 +2943,93 @@
 
 (def ^:dynamic *indentation* 2)
 
-(defn insert-local-fn* [{:keys [line column end-line end-column] :as f} ls]
-  (let [_ (prn "current fn" f)
-        [file-slice trailing]
-        (let [_ (prn "ls" (count ls) (dec line) end-line)
-              v (subvec ls (dec line) end-line)
-              last-line (peek v)
-              _ (prn "last-line" last-line (dec end-column))
-              before-end-column (subs last-line 0 (dec end-column))
-              after-end-column (subs last-line (dec end-column))]
-          [(assoc v (dec (count v)) before-end-column)
-           after-end-column])
+(defn split-at-column 
+  ([s column] (split-at-column s column nil))
+  ([s column end-column]
+   (let [before (subs s 0 (dec column))
+         after  (if end-column
+                  (subs s (dec column) (dec end-column))
+                  (subs s (dec column)))]
+     [before after])))
 
-        first-line (nth file-slice 0)
-        before-first-pos (subs first-line 0 (dec column))
-        after-first-pos (subs first-line (dec column))
+;; returns a pair [leading-first-line file-slice trailing-final-line]
+(defn extract-file-slice [ls line column end-line end-column]
+  (let [;_ (prn "ls" (count ls) (dec line) end-line)
+        v (subvec ls (dec line) end-line)
+        first-line (nth v 0)
+        last-line (peek v)
+        ;_ (prn "last-line" last-line (dec end-column))
+        [before-column after-column] (split-at-column first-line column 
+                                                      (when (= line end-line)
+                                                        end-column))
+        [before-end-column after-end-column] (split-at-column last-line end-column)
+        ]
+    [before-column
+     (if (= 1 (count v))
+       (assoc v
+              0 after-column)
+       (assoc v
+              0 after-column
+              (dec (count v)) before-end-column))
+     after-end-column]))
+
+(defn restitch-ls [ls line end-line split]
+  (vec (concat
+         (subvec ls 0 (dec line))
+         split
+         (subvec ls end-line))))
+
+(defn insert-loop-var [{:keys [line column end-line end-column] :as f} ls]
+  {:pre [(#{:loop-var} (::track-kind f))
+         (= line end-line)
+         (< column end-column)]}
+  (let [[leading file-slice trailing] (extract-file-slice ls line column end-line column)
+        ;_ (prn "leading" leading) 
+        ;_ (prn "file-slice" file-slice) 
+        ;_ (prn "trailing" trailing)
+        the-ann (binding [*print-length* nil
+                          *print-level* nil]
+                  (with-out-str 
+                    (print " ^{")
+                    (print (pprint-str-no-line ::t/ann))
+                    (print " ")
+                    (print (pprint-str-no-line (unparse-type (:type f))))
+                    (print "}")))
+        final-split (concat [(str leading the-ann)]
+                            ;file-slice  ; FIXME this should always be [""], but it adds a useless new line
+                            [(str
+                               ;; reindent
+                               (apply str (repeat (dec column) " "))
+                               trailing)])
+        new-ls (restitch-ls ls line end-line final-split)
+        update-line (fn [old-line]
+                      (cond
+                        ;; occurs before the current changes
+                        (< old-line line) old-line
+                        ;; occurs inside the bounds of the current function.
+                        ;; Since we've added an extra line before this function (the beginning ann-form)
+                        ;; we increment the line.
+                        (<= line old-line end-line) (inc old-line)
+                        ;; occurs after the current loop variable
+                        ;; we've just incremented all these lines.
+                        :else (inc old-line)))
+        update-column (fn [old-column old-line]
+                        ;; we preserve columns since we don't add
+                        ;; extra indentation.
+                        old-column)]
+    {:ls new-ls
+     :update-line update-line
+     :update-column update-column}))
+
+
+(defn insert-local-fn* [{:keys [line column end-line end-column] :as f} ls]
+  {:pre [(#{:local-fn} (::track-kind f))]}
+  (let [_ (prn "current fn" f)
+        [before-first-pos file-slice trailing] (extract-file-slice ls line column end-line end-column)
+        _ (prn "before-first-pos" before-first-pos) 
+        _ (prn "file-slice" file-slice) 
+        _ (prn "trailing" trailing)
+        after-first-pos (nth file-slice 0)
         _ (prn "after-first-pos" after-first-pos)
         ;; insert (^::t/auto-gen t/ann-form
         before-line (str
@@ -3017,10 +3089,7 @@
                       [the-type-line]
                       (when trailing-line
                         [trailing-line]))
-        new-ls (vec (concat
-                      (subvec ls 0 (dec line))
-                      final-split
-                      (subvec ls end-line)))
+        new-ls (restitch-ls ls line end-line final-split)
         update-line (fn [old-line]
                       (cond
                         ;; occurs before the current changes
@@ -3080,7 +3149,8 @@
               f (first fns)
               {:keys [ls update-line update-column]}
               (case (::track-kind f)
-                :local-fn (insert-local-fn* f ls))
+                :local-fn (insert-local-fn* f ls)
+                :loop-var (insert-loop-var f ls))
               _ (assert (vector? ls))
               _ (assert (fn? update-line))
               _ (assert (fn? update-column))
@@ -3162,7 +3232,10 @@
 
 (defn delete-generated-annotations [ns config]
   (impl/with-clojure-impl
-    (update-file (ns-file-name (ns-name ns)) delete-generated-annotations-in-str)))
+    (update-file (ns-file-name (if (symbol? ns)
+                                 ns ;; avoid `the-ns` call in case ns does not exist yet.
+                                 (ns-name ns)))
+                 delete-generated-annotations-in-str)))
 
 (declare infer-anns)
 
