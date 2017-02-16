@@ -117,6 +117,8 @@
 
 (declare current-ns)
 
+(def list*-force (comp doall list*))
+
 (defn get-env [env] 
   {:pre [(map? env)]}
   (get env (current-ns)))
@@ -535,7 +537,7 @@
                     (set alts))]
     (if (= 1 (count specs))
       (unparse-spec (simplify-spec-alias (val (first specs))))
-      (list* (qualify-spec-symbol 'alt)
+      (list*-force (qualify-spec-symbol 'alt)
              (mapcat (fn [[s alt]]
                        (let [alt (if (alias? alt)
                                    (simplify-spec-alias alt)
@@ -669,7 +671,7 @@
                            arities)
                  doms (cond
                         macro?
-                        [(list* (qualify-spec-symbol 'cat)
+                        [(list*-force (qualify-spec-symbol 'cat)
                                 (concat
                                   ;; macros are very likely to having binding
                                   ;; forms as the first argument if it's always
@@ -696,7 +698,7 @@
                           (fn [{:keys [dom]}]
                             {:pre [dom]}
                             ;(prn "doms" (count dom) (get fixed-name-lookup (count dom)))
-                            (list* (qualify-spec-symbol 'cat)
+                            (list*-force (qualify-spec-symbol 'cat)
                                    (mapcat (fn [n k d]
                                              (let [spec 
                                                    (cond
@@ -728,7 +730,7 @@
                                       [u]))))
                  dom-specs (if (= 1 (count doms))
                              (first doms)
-                             (list* (qualify-spec-symbol 'alt)
+                             (list*-force (qualify-spec-symbol 'alt)
                                     (mapcat (fn [alt]
                                               (let [kw (keyword (str (/ (dec (count alt)) 2)
                                                                      "-args"))]
@@ -741,7 +743,7 @@
            (let [as (map unparse-type (:arities m))]
              (if (== 1 (count as))
                (first as)
-               (list* (qualify-typed-symbol 'IFn) as))))
+               (list*-force (qualify-typed-symbol 'IFn) as))))
     :class (cond
              *unparse-spec* (let [^Class cls (:class m)]
                               (cond
@@ -783,7 +785,7 @@
                                      (resolve-class c))
                                _ (assert (symbol? cls))]
                            (if (seq args)
-                             (list* cls (map unparse-type args))
+                             (list*-force cls (map unparse-type args))
                              cls))))]
                (unparse-class (:class m) (:args m))))
     :Top (cond 
@@ -1704,6 +1706,8 @@
 
 (def ^:dynamic *should-track* true)
 
+(def ^:const apply-realize-limit 20)
+
 ; track : (Atom InferResultEnv) Value Path -> Value
 (defn track 
   ([results-atom v path]
@@ -1718,8 +1722,7 @@
                      _ (add-infer-result! results-atom ir)]
                  (with-meta
                    (fn [& args]
-                     (let [limit 20
-                           blen (impl/bounded-length args limit) ;; apply only realises 20 places
+                     (let [blen (bounded-count apply-realize-limit args) ;; apply only realises 20 places
                            args (map-indexed
                                   (fn [n v]
                                     (if (< n blen)
@@ -2256,7 +2259,7 @@
                  (empty? (:bindings expr)))
            expr
            (let [{:keys [body bindings]} expr]
-             (prn "rewriting")
+             ;(prn "rewriting")
              (assoc expr
                     :body
                     (assoc
@@ -2288,6 +2291,35 @@
                           ;; the :env for body is now out of date.
                           body))
                       :body? true)))))
+
+       :let
+       ;; track rhs's depending on metadata.
+       (let [expr (ast/walk-children check expr)
+             bindings
+             (mapv (fn [b]
+                     (let [m (-> b :form meta)]
+                       ;(prn "let binding" m)
+                       (or
+                         (when-let [coord (::t/auto-ann m)]
+                           ;(prn ":let coord" coord
+                           ;     (skip-track? coord)
+                           ;     (::t/track-kind m))
+                           (when-not (skip-track? coord)
+                             (case (::t/track-kind m)
+                               (::t/for-return ::t/for-param)
+                               (assoc b
+                                      :init
+                                      (wrap-local-fn
+                                        ;; loop-var has identical behaviour as what we
+                                        ;; want for inserting `for` annotations
+                                        :loop-var
+                                        coord
+                                        (:init b)
+                                        *ns*)))))
+                         b)))
+                   (:bindings expr))]
+         (assoc expr
+                :bindings bindings))
 
        (ast/walk-children check expr)))))
 
@@ -2625,7 +2657,7 @@
                             def-spec
                             (if (and (seq? s)
                                      (= (first s) (qualify-spec-symbol 'fspec)))
-                              (list* (qualify-spec-symbol 'fdef)
+                              (list*-force (qualify-spec-symbol 'fdef)
                                      sym
                                      (next s))
                               (list (qualify-spec-symbol 'def)
@@ -2981,42 +3013,54 @@
 
 (defn insert-loop-var [{:keys [line column end-line end-column] :as f} ls]
   {:pre [(#{:loop-var} (::track-kind f))
-         (= line end-line)
-         (< column end-column)]}
-  (let [[leading file-slice trailing] (extract-file-slice ls line column end-line column)
-        ;_ (prn "leading" leading) 
-        ;_ (prn "file-slice" file-slice) 
-        ;_ (prn "trailing" trailing)
+         #_(= line end-line)
+         #_(< column end-column)
+         ]}
+  (let [end-line line
+        end-column column
+        [leading file-slice trailing] (extract-file-slice ls line column end-line end-column)
+        _ (prn "leading" leading) 
+        _ (prn "file-slice" file-slice) 
+        _ (prn "trailing" trailing)
         the-ann (binding [*print-length* nil
                           *print-level* nil]
                   (with-out-str 
-                    (print " ^{")
+                    (print "^{")
                     (print (pprint-str-no-line ::t/ann))
                     (print " ")
                     (print (pprint-str-no-line (unparse-type (:type f))))
-                    (print "}")))
-        final-split (concat [(str leading the-ann)]
-                            ;file-slice  ; FIXME this should always be [""], but it adds a useless new line
-                            [(str
-                               ;; reindent
-                               (apply str (repeat (dec column) " "))
-                               trailing)])
+                    (print "} ")))
+        [full-first-line
+         offset-first-line]
+        (if (> (count leading) 0)
+          (let [extra-columns (atom 0)
+                last-char (nth leading (dec (count leading)))]
+            [(str leading 
+                  (when-not (#{\[ \space} last-char)
+                    (swap! extra-columns inc)
+                    " ")
+                  the-ann)
+             (+ @extra-columns (count the-ann))])
+          [the-ann (count the-ann)])
+        ; FIXME this should always be [""], but it adds a useless new line
+        ;file-slice
+        _ (assert (every? #{""} file-slice)
+                  file-slice)
+        final-split [(str full-first-line trailing)]
         new-ls (restitch-ls ls line end-line final-split)
         update-line (fn [old-line]
-                      (cond
-                        ;; occurs before the current changes
-                        (< old-line line) old-line
-                        ;; occurs inside the bounds of the current function.
-                        ;; Since we've added an extra line before this function (the beginning ann-form)
-                        ;; we increment the line.
-                        (<= line old-line end-line) (inc old-line)
-                        ;; occurs after the current loop variable
-                        ;; we've just incremented all these lines.
-                        :else (inc old-line)))
+                      ;; we never add a new line
+                      old-line)
         update-column (fn [old-column old-line]
-                        ;; we preserve columns since we don't add
-                        ;; extra indentation.
-                        old-column)]
+                        (cond
+                          ;; changes in the current line. Compensate
+                          ;; for the type annotation.
+                          (and (= old-line line)
+                               (< column old-column))
+                          (+ old-column offset-first-line)
+                          ;; we preserve columns since we don't add
+                          ;; extra indentation.
+                          :else old-column))]
     {:ls new-ls
      :update-line update-line
      :update-column update-column}))
@@ -3037,9 +3081,8 @@
                       (binding [*print-length* nil
                                 *print-level* nil]
                         (with-out-str 
-                          (print "(^")
-                          (print (pprint-str-no-line ::t/auto-gen))
-                          (print " ")
+                          (print "(")
+                          ;(print (str "^" (pprint-str-no-line ::t/auto-gen) " "))
                           (print (pprint-str-no-line (qualify-typed-symbol 'ann-form))))))
         indentation *indentation*
         indentation-spaces (apply str (repeat (+ (dec column) indentation) " "))
@@ -3147,6 +3190,7 @@
         (str/join "\n" ls)
         (let [;; assume these coordinates are correct
               f (first fns)
+              _ (prn "current f" f)
               {:keys [ls update-line update-column]}
               (case (::track-kind f)
                 :local-fn (insert-local-fn* f ls)
@@ -3203,30 +3247,31 @@
   {:pre [(string? old)]
    :post [(string? %)]}
   ;(prn "insert" ann-str)
-  (let [{:keys [top-level local-fns] :as as} (infer-anns ns config)
-        ann-str (prepare-ann top-level config)
-        _ (assert (string? ann-str))
-        old (insert-local-fns local-fns old config)
-        old (delete-generated-annotations-in-str old)
-        insert-after (ns-end-line old)]
-    (with-open [pbr (java.io.BufferedReader.
-                      (java.io.StringReader. old))]
-      (loop [ls (line-seq pbr)
-             current-line 0
-             out []]
-        (if (= current-line insert-after)
-          (str/join "\n" (concat out 
-                                 [(first ls)
-                                  ;""
-                                  ann-str]
-                                 (rest ls)))
-          (if (seq ls)
-            (recur (next ls)
-                   (inc current-line)
-                   (conj out (first ls)))
+  (binding [*ns* (the-ns ns)]
+    (let [{:keys [top-level local-fns] :as as} (infer-anns ns config)
+          ann-str (prepare-ann top-level config)
+          _ (assert (string? ann-str))
+          old (insert-local-fns local-fns old config)
+          old (delete-generated-annotations-in-str old)
+          insert-after (ns-end-line old)]
+      (with-open [pbr (java.io.BufferedReader.
+                        (java.io.StringReader. old))]
+        (loop [ls (line-seq pbr)
+               current-line 0
+               out []]
+          (if (= current-line insert-after)
             (str/join "\n" (concat out 
-                                   [""
-                                    ann-str]))))))))
+                                   [(first ls)
+                                    ;""
+                                    ann-str]
+                                   (rest ls)))
+            (if (seq ls)
+              (recur (next ls)
+                     (inc current-line)
+                     (conj out (first ls)))
+              (str/join "\n" (concat out 
+                                     [""
+                                      ann-str])))))))))
     
 
 
