@@ -219,6 +219,12 @@
   {:op :fn-range
    :arity arity})
 
+(defn map-keys []
+  {:op :map-keys})
+
+(defn map-vals []
+  {:op :map-vals})
+
 (defn key-path [keys key]
   {:op :key
    :keys keys
@@ -297,6 +303,8 @@
     :var (list 'var (:name p))
     :index (list 'index (:count p) (:nth p))
     :set-entry (list 'set-entry)
+    :map-keys (list 'map-keys)
+    :map-vals (list 'map-vals)
     :seq-entry (list 'seq-entry)
     :transient-vector-entry (list 'transient-vector-entry)
     :atom-contents (list 'atom-contents)))
@@ -1151,6 +1159,8 @@
                                    key type)}))
         :set-entry (recur env config nxt-pth (-class clojure.lang.IPersistentSet [type]))
         :seq-entry (recur env config nxt-pth (-class clojure.lang.ISeq [type]))
+        :map-keys (recur env config nxt-pth (-class clojure.lang.IPersistentMap [type {:op :unknown}]))
+        :map-vals (recur env config nxt-pth (-class clojure.lang.IPersistentMap [{:op :unknown} type]))
         :transient-vector-entry (recur env config nxt-pth (-class clojure.lang.ITransientVector [type]))
         :atom-contents (recur env config nxt-pth (-class clojure.lang.IAtom [type]))
         :index (recur env config nxt-pth (-class clojure.lang.IPersistentVector [type]))
@@ -1785,6 +1795,13 @@
            v
            (range cnt)))
 
+       ;; cover map entries
+       (and (vector? v) 
+            (= 2 (count v)))
+       (let [k  (track results-atom (nth v 0) (conj path (index-path 2 0)))
+             vl (track results-atom (nth v 1) (conj path (index-path 2 1)))]
+         (assoc v 0 k 1 vl))
+
        (and (vector? v) 
             (satisfies? clojure.core.protocols/IKVReduce v)) ; MapEntry's are not IKVReduce
        (let [len (count v)]
@@ -1816,11 +1833,10 @@
                           (track results-atom e (conj path (set-entry))))))
                  v)))
 
-       ;; maps with keyword keys
-       (and (or (instance? clojure.lang.PersistentHashMap v)
-                (instance? clojure.lang.PersistentArrayMap v))
-            (every? keyword? (keys v)))
-       (let [ks (set (keys v))]
+       (or (instance? clojure.lang.PersistentHashMap v)
+           (instance? clojure.lang.PersistentArrayMap v)
+           (instance? clojure.lang.PersistentTreeMap v))
+       (let [ks (delay (set (keys v)))]
          (when (empty? v)
            (add-infer-result!
              results-atom
@@ -1831,15 +1847,36 @@
          (reduce
            (fn [m k]
              (let [orig-v (get m k)
-                   v (track results-atom orig-v
-                            (conj path (key-path ks k)))]
-               ;; only assoc if needed
-               (if (identical? v orig-v)
-                 m
+                   [new-k v] 
+                   (cond
+                     (keyword? orig-v)
+                     [k (track results-atom orig-v
+                               (binding [*should-track* false]
+                                 (conj path (key-path @ks k))))]
+
+                     :else 
+                     [(track results-atom k
+                             (binding [*should-track* false]
+                               (conj path (map-keys))))
+                      (track results-atom orig-v
+                             (binding [*should-track* false]
+                               (conj path (map-vals))))])]
+               (cond
+                 ;; only assoc if needed
+                 (identical? v orig-v) m
+
+                 ;; make sure we replace the key
+                 (not (identical? new-k k))
                  (binding [*should-track* false]
-                   (assoc m k v)))))
+                   (-> m
+                       (dissoc k)
+                       (assoc m new-k v)))
+
+                 :else
+                 (binding [*should-track* false]
+                   (assoc m new-k v)))))
            v
-           ks))
+           (keys v)))
 
         (instance? clojure.lang.IAtom v)
         (let [new-path (conj path (atom-contents))
@@ -3075,7 +3112,6 @@
         _ (prn "trailing" trailing)
         after-first-pos (nth file-slice 0)
         _ (prn "after-first-pos" after-first-pos)
-        ;; insert (^::t/auto-gen t/ann-form
         before-line (str
                       before-first-pos
                       (binding [*print-length* nil
