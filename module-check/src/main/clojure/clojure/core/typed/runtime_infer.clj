@@ -12,7 +12,8 @@
             [clojure.tools.reader.reader-types :as rdrt]
             [clojure.tools.namespace.parse :as nprs]
             [clojure.math.combinatorics :as comb]
-            [clojure.core.typed.coerce-utils :as coerce]))
+            [clojure.core.typed.coerce-utils :as coerce]
+            [clojure.core.typed.contract-utils :as con]))
 
 ;; https://github.com/r0man/inflections-clj/blob/master/src/inflections/core.cljc
 (defn str-name
@@ -546,6 +547,22 @@
                          c)
                 c))))
 
+(defn rename-alias [env old new]
+  {:pre [(symbol? old)
+         (symbol? new)]}
+  (let [tenv (into {}
+                   (map (fn [[k t]]
+                          [k (subst-alias t (-alias old) (-alias new))]))
+                   (type-env env))
+        aenv (into {}
+                   (map (fn [[a t]]
+                          [(if (= old a) new a)
+                           (subst-alias t (-alias old) (-alias new))]))
+                   (alias-env env))]
+    (-> env
+        (update-type-env (constantly tenv))
+        (update-alias-env (constantly aenv)))))
+
 (defn parse-type [m]
   (cond
     (= 'Any m) -any
@@ -763,6 +780,9 @@
 (declare fully-resolve-alias HMap-likely-tag-key
          kw-val? register-just-in-time-alias)
 
+(defn HMap-has-tag-key? [m k]
+  (kw-val? (get (::HMap-req m) k)))
+
 ; [Node :-> Any]
 (defn unparse-type' [{:as m}]
   (assert (type? m) m)
@@ -831,11 +851,29 @@
                          tag))
                  (alt-spec (:types m))))
              :else
-             (if (empty? (:types m))
+             ;; core.typed
+             (cond
+               (empty? (:types m))
                (qualify-typed-symbol 'Nothing)
-               (list* (qualify-typed-symbol 'U) (into #{} 
-                                                      (map unparse-type) 
-                                                      (:types m)))))
+
+               ;; deterministic print order based on dispatch key
+               (every? HMap? (:types m))
+               (let [ts (:types m)
+                     k (HMap-likely-tag-key ts)
+                     ts (if (and k (every? #(HMap-has-tag-key? % k) ts))
+                          (sort-by (fn [m]
+                                     {:post [(keyword? %)]}
+                                     (:val (get (::HMap-req m) k)))
+                                   ts)
+                          ts)]
+                 (list* (qualify-typed-symbol 'U) 
+                        (distinct (mapv unparse-type ts))))
+
+               :else
+               (list* (qualify-typed-symbol 'U) 
+                      (into #{}
+                            (map unparse-type) 
+                            (:types m)))))
     :HVec (cond
             *unparse-spec* (list* (qualify-spec-symbol 'tuple)
                                   (mapv unparse-type (:vec m)))
@@ -1472,9 +1510,9 @@
          ;(should-join-HMaps? t1 t2)
          ]
    :post [(HMap? %)]}
-  (prn "joining HMaps"
-       (unparse-type t1)
-       (unparse-type t2))
+  ;(prn "joining HMaps"
+  ;     (unparse-type t1)
+  ;     (unparse-type t2))
   (let [t1-req (::HMap-req t1)
         t2-req (::HMap-req t2)
         t1-opt (::HMap-opt t1)
@@ -1870,12 +1908,14 @@
 (defn register-alias [env config name t]
   {:pre [(map? env)
          (symbol? name)
+         (not (namespace name))
          (type? t)]
    :post [(map? %)]}
   ;(prn "register" name)
   (update-alias-env env assoc name t))
 
 (defn register-just-in-time-alias [sym t]
+  {:pre [(not (namespace sym))]}
   (assert *new-aliases*)
   (let [sym (if (or (contains? (alias-env @*envs*) sym)
                     (contains? (alias-env @*new-aliases*) sym))
@@ -1885,11 +1925,15 @@
         ]
     sym))
 
+(defn gen-unique-alias-name [env config sym]
+  (if (contains? (alias-env env) sym)
+    (gensym (str (name sym) "__"))
+    sym))
+
 (defn register-unique-alias [env config sym t]
+  {:pre [(not (namespace sym))]}
   ;(debug (println "register-unique-alias:" sym (unp-str t))
-  (let [sym (if (contains? (alias-env env) sym)
-              (gensym (str (name sym) "__"))
-              sym)]
+  (let [sym (gen-unique-alias-name env config sym)]
     [sym (register-alias env config sym t)])
   ;)
 )
@@ -1965,7 +2009,7 @@
   [env config]
   (letfn [(do-alias [env-atom t prefix]
             {:pre [((some-fn string? nil?) prefix)]}
-            (let [n (symbol (-> (current-ns) str) (str prefix #_"-alias"))
+            (let [n (symbol #_(-> (current-ns) str) (str prefix #_"-alias"))
                   a-atom (atom nil)
                   _ (swap! env-atom 
                            (fn [env]
@@ -2088,7 +2132,7 @@
                                                 m)))
                                 t)
                         t)
-                    n (symbol (-> (current-ns) str) (or
+                    n (symbol #_(-> (current-ns) str) (or
                                                       (let [ts (if (union? t)
                                                                  (map #(fully-resolve-alias @env-atom %) 
                                                                       (:types t))
@@ -2380,6 +2424,24 @@
   [o]
   (pp/code-dispatch o))
 
+;; deterministic printing of HMaps
+(defmethod wrap-dispatch clojure.lang.IPersistentMap
+  [o]
+  (let [{tagged true untagged false}
+        (group-by (fn [[k v]]
+                    (and (seq? v)
+                         (= 'quote (first v))
+                         (keyword? (second v))))
+                  o)
+        tagged   (sort-by first tagged)
+        untagged (sort-by first untagged)
+        ordered
+        (apply array-map
+               (concat
+                 (mapcat identity tagged)
+                 (mapcat identity untagged)))]
+    (pp/code-dispatch ordered)))
+
 (defmethod wrap-dispatch clojure.lang.Keyword
   [kw]
   (let [aliases (ns-aliases (current-ns))
@@ -2602,7 +2664,18 @@
                        (map (fn [[k v]]
                               {:pre [(keyword? v)]}
                               [k (-val v)]))
-                       with-kw-val)]
+                       with-kw-val)
+                 ;; we rely on the no-kw-val map to
+                 ;; track the simple keyword entries -- if there
+                 ;; are none, just pick one of the kw-entries-types
+                 ;; and track it.
+                 _ (when (and (empty? no-kw-val)
+                              (seq kw-entries-types))
+                     (let [k (key (first kw-entries-types))]
+                       (track results-atom (get v k)
+                              (binding [*should-track* false]
+                                (conj path (key-path kw-entries-types ks k))))))
+                 ]
              (reduce
                (fn [m [k orig-v]]
                  (let [v (track results-atom orig-v
@@ -3383,19 +3456,81 @@
       asym)))
 
 (defn merge-aliases 
-  "Merge aliases based on their keysets.
+  "Join all the aliases `as`, then reuse a name in `as`
+  to call this new type and add to alias env.
+  
+  Finally, point every `as` to this new alias name,
+  in effect rewriting each `as`. This extra indirection
+  is cleaned up in `follow-aliases`.
+  
+  This never adds a new alias name, only reuses
+  ones in `as`."
+  [env as]
+  (letfn [(join*-aliases [env anew as]
+            {:pre [(symbol? anew)
+                   (every? symbol? as)]
+             :post [(type? %)]}
+            ;(prn "join*-aliases" anew as)
+            (let [as (set as)
+                  ts (map #(resolve-alias env (-alias %)) as)
+                  ;_ (prn "ts with anew" (mapv unp ts))
+                  ;; remove all top-level aliase refs to as, otherwise
+                  ;; we'll create infinite aliases.
+                  ts (map (fn remove-top-level-alias [t]
+                            {:pre [(type? t)]
+                             :post [(type? %)]}
+                            (case (:op t)
+                              :alias (if (and (alias? t)
+                                              (contains? as (:name t)))
+                                       -nothing
+                                       t)
+                              :union (make-Union
+                                       (map remove-top-level-alias (:types t)))
+                              t))
+                          ts)
+                  ]
+              ;(prn "before merge" (mapv unp ts))
+              (apply join* ts)))
+          ;; returns a pair
+          ;; [<name to rewrite to> <all other aliases>]
+          (rewrite-to [as]
+            [(first as) (rest as)])
+          ; returns env
+          (point-old-aliases-to-new
+            [env anew aolds]
+            (reduce (fn [env aold]
+                      (update-alias-env env assoc aold (-alias anew)))
+                    env
+                    aolds))]
+    (let []
+      ;; Are there any aliases left to merge?
+      (if (>= 1 (count as))
+        env
+        (let [;; important invariant: we don't create new aliases,
+              ;; only reuse ones in `as`
+              [anew aolds] (rewrite-to as)
+              newtyp (join*-aliases env anew as)
+              ;; update new alias
+              env (update-alias-env env assoc anew newtyp)
+              ;; point old aliases to the new alias
+              env (point-old-aliases-to-new env anew aolds)]
+          env)))))
 
-  Takes in a list of aliases `as` which all have
-  identical keysets `kset`. Then we combine all `as` that
-  have similar tags.
+; Env (Coll Alias) -> (Map (Set Kw) (Set Alias))
+(defn group-HMap-aliases-by-req-keyset [env as]
+  (let [as (set as)]
+    (apply merge-with into
+           (->> (alias-env env)
+                (filter (fn [[k t]]
+                          (and (contains? as k)
+                               (HMap? t))))
+                (map (fn [[a t]]
+                       {:pre [(HMap? t)]}
+                       {(HMap-req-keyset t) #{a}}))))))
 
-  Then we search for subsets of of `kset` in `ksets`, which
-  is a map from keysets to sets of aliases with that keyset.
-
-  Finally we merge all found aliases with related
-  keysets.
-  "
-  [env kset as ksets]
+;; group HMap aliases by req keysets, but allow some differences
+;; for optional entries
+(defn group-similar-HMap-aliases-by-req-keysets [env as]
   (letfn [(remove-differently-tagged-aliases
             [env as]
             {:post [(vector? %)
@@ -3410,24 +3545,6 @@
                     (keep (fn [[a relevant-entries]]
                             (relevant-alias a relevant-entries kw-reqs)))
                     kw-reqs)))
-          ;(remove-recursive-aliases [env as]
-          ;  (remove #(recursive-alias? env %) as))
-          (join*-aliases [env as]
-            {:post [(type? %)]}
-            (let [ts (map #(resolve-alias env (-alias %)) as)]
-              ;(prn "before merge" (mapv unp ts))
-              (apply join* ts)))
-          ;; returns a pair
-          ;; [<name to rewrite to> <all other aliases]
-          (rewrite-to [as]
-            [(first as) (rest as)])
-          ; returns env
-          (point-old-aliases-to-new
-            [env anew aolds]
-            (reduce (fn [env aold]
-                      (update-alias-env env assoc aold (-alias anew)))
-                    env
-                    aolds))
           ;; return all aliases that differ by one or
           ;; two entries.
           (find-similar-aliases
@@ -3467,40 +3584,172 @@
                         (into res (get ksets kset)))
                       #{}
                       possible-ksets)))]
-    (let [as (into as (find-similar-aliases kset ksets))
-          as (->> as
-                  ;(remove-recursive-aliases env)
-                  (remove-differently-tagged-aliases env))]
-      ;; Are there any aliases left to merge?
-      (if-not (< 1 (count as))
-        env
-        (let [newtyp (join*-aliases env as)
-              [anew aolds] (rewrite-to as)
-              ;; update new alias
-              env (update-alias-env env assoc anew newtyp)
-              ;; point old aliases to the new alias
-              env (point-old-aliases-to-new env anew aolds)]
-          env)))))
+  (let [ksets (group-HMap-aliases-by-req-keyset env as)
+        alias-groups (into []
+                           (comp
+                             (map (fn [[kset as]]
+                                    (into as (find-similar-aliases kset ksets))))
+                             (map #(remove-differently-tagged-aliases env %)))
+                           ksets)
+        ;_ (prn "similar aliases" as)
+        ]
+    alias-groups)))
 
-; Env (Coll Alias) -> (Map (Set Kw) (Set Alias))
-(defn group-HMap-aliases-by-req-keyset [env as]
-  (let [as (set as)]
-    (apply merge-with into
-           (->> (alias-env env)
-                (filter (fn [[k t]]
-                          (and (contains? as k)
-                               (HMap? t))))
+(defn group-HMap-aliases-by-likely-tag* [env as]
+  {:post [((con/hash-c?
+             keyword? ; tag key
+             (con/hash-c?
+               keyword? ; tag value
+               (con/set-c? symbol?) ; aliases
+               ))
+           %)]}
+  (let [as (set as)
+        hmap-aliases (->> (select-keys (alias-env env) as)
+                          (filter (fn [[k t]]
+                                    (HMap? t))))
+        ;; map of aliases to sets of possible tag key/val pairs
+        possible-tag-keys
+        (into {}
+              (comp
                 (map (fn [[a t]]
-                       {:pre [(HMap? t)]}
-                       {(HMap-req-keyset t) #{a}}))))))
+                       {:pre [(HMap? t)]
+                        :post [((con/hvector-c?
+                                  symbol?
+                                  (con/set-c?
+                                    (con/hvector-c? keyword? keyword?)))
+                                %)]}
+                       [a (set (keep (fn [[k t]]
+                                       {:post [((some-fn nil? (con/hvector-c? keyword? keyword?))
+                                                %)]}
+                                       (when (kw-val? t)
+                                         [k (:val t)]))
+                                     (::HMap-req t)))]))
+                (filter (comp seq second)))
+              hmap-aliases)
+        ;; frequency of tag keys
+        tag-key-frequencies (frequencies (apply concat (map first (vals possible-tag-keys))))
+        _ (assert ((con/hash-c? keyword? integer?) tag-key-frequencies))
+        ;; map from tag keys to maps of aliases mapped to their associated tag values
+        tag-keys-to-aliases
+        (apply merge-with #(merge-with into %1 %2)
+               {}
+               (map (fn [[a ks-and-tags :as orig]]
+                      {:pre [(symbol? a)
+                             ((con/set-c?
+                                (con/hvector-c? keyword? keyword?))
+                              ks-and-tags)
+                             (seq ks-and-tags)]
+                       :post [((con/hash-c?
+                                 keyword? ; tag key
+                                 (con/hash-c?
+                                   keyword? ; tag value
+                                   (con/set-c? symbol?) ; aliases
+                                   ))
+                               %)]}
+                      (let [[freqk tag] (apply max-key (comp tag-key-frequencies first) ks-and-tags)]
+                        (assert (keyword? freqk))
+                        (assert (keyword? tag))
+                        {freqk {tag #{a}}}))
+                    possible-tag-keys))]
+    tag-keys-to-aliases))
+
+(defn group-HMap-aliases-by-likely-tag [env as]
+  {:post [((con/vec-c? (con/set-c? symbol?))
+           %)]}
+  (let [tagk->tagv->HMap-as (group-HMap-aliases-by-likely-tag* env as)
+        ;_ (prn "tagk->tagv->HMap-as" tagk->tagv->HMap-as)
+        coll-of-tagv->HMap-as (vals (group-HMap-aliases-by-likely-tag* env as))
+        ;_ (prn "coll-of-tagv->HMap-as" coll-of-tagv->HMap-as)
+        HMap-as (mapcat vals coll-of-tagv->HMap-as)]
+    ;(prn "HMap-as" HMap-as)
+    (vec HMap-as)))
+
+;; group all aliases by their probably tag key.
+(defn group-aliases-by-likely-tag-key [env as]
+  (let [tagk->tagv->HMap-as (group-HMap-aliases-by-likely-tag* env as)
+        HMap-a->tagk (into {}
+                           (mapcat 
+                             (fn [[tagk tagv->HMap-as]]
+                               (map (fn [HMap-a]
+                                      {:pre [(symbol? HMap-a)]}
+                                      [HMap-a tagk])
+                                    (apply set/union (vals tagv->HMap-as)))))
+                           tagk->tagv->HMap-as)
+        find-alias-tag-keys (fn find-alias-tag-keys [t]
+                              {:pre [(type? t)]
+                               :post [((con/set-c? keyword?) %)]}
+                              (let [;; we've already separated all HMap aliases.
+                                   ; _ (assert (not (HMap? t)))
+                                    ]
+                                (case (:op t)
+                                  :union (apply set/union 
+                                                (map find-alias-tag-keys (:types t)))
+                                  :alias (if-let [tagk (HMap-a->tagk (:name t))]
+                                           #{tagk}
+                                           (find-alias-tag-keys (resolve-alias env t)))
+                                  #{})))
+        tagk->HMap-as (apply merge-with into {}
+                             (map (fn [[HMap-a tagk]]
+                                    {tagk #{HMap-a}})
+                                  HMap-a->tagk))
+        ;; assign a tag key to every alias
+        tagk->as (apply merge-with into {}
+                        tagk->HMap-as
+                        (keep (fn [a]
+                                {:pre [(symbol? a)]
+                                 :post [((some-fn
+                                           nil?
+                                           (con/hash-c? 
+                                             keyword? ; tag key
+                                             (con/set-c? symbol?) ; aliases with given tag key
+                                             ))
+                                         %)]}
+                                (let [tagks (find-alias-tag-keys (-alias a))]
+                                  (when (= 1 (count tagks))
+                                    {(first tagks) #{a}})))
+                              (apply disj as (keys HMap-a->tagk))))
+        ]
+    (vals tagk->as)))
+
+(defn rename-HMap-aliases [env config]
+  (reduce (fn [env a]
+            (let [t (get (alias-env env) a)]
+              ;(prn "renaming" a (unp t) (:op t))
+              (assert (type? t))
+              (case (:op t)
+                :union (let [ts (:types t)
+                             every-hmap? (every? HMap? ts)]
+                         (if every-hmap?
+                           (let [k (HMap-likely-tag-key ts)]
+                             (if (every? #(HMap-has-tag-key? % k) ts)
+                               (let [new-a (gen-unique-alias-name env config (symbol (name k)))]
+                                 (rename-alias env a new-a))
+                               env))
+                           env))
+                ;; this is not a tagged map
+                :HMap (let [relevant-names (map
+                                             camel-case
+                                             (concat
+                                               (sort
+                                                 (map name (keys (::HMap-req t))))
+                                               (sort
+                                                 (map name (keys (::HMap-opt t))))))
+                            name (if (empty? relevant-names)
+                                   "EmptyMap"
+                                   (apply str (concat (take 3 relevant-names) ["Map"])))]
+                        (rename-alias env a (symbol name)))
+                env)))
+          env
+          (keys (alias-env env))))
 
 ; Env Config -> Env
 (defn squash-horizonally
   "Join aliases that refer to exactly
   one HMap with overlapping req keys.
 
-  Don't merge 'tagged' maps with different
-  tags.
+  First we merge HMaps that have similar keysets.
+  In this first stage, we are careful to not
+  merge 'tagged' maps with different tags.
   
   eg. {a1 '{:a Int}
        a2 '{:a Bool}}
@@ -3513,15 +3762,47 @@
       => 
       {a1 '{:a a2}
        a2 '{:a (U nil a1)}}
+
+  Then we merge map aliases based on their
+  likely tag. When multiple tag keys are possible,
+  we choose the most frequent tag key from the alias env
+  as a tie-breaker.
+
+  Finally, we combine aliases with the same dispatch keys.
   "
   [env config]
   (let [as (reachable-aliases env)
         ;; remove unreachable aliases
         env (update-alias-env env select-keys as)
-        ksets (group-HMap-aliases-by-req-keyset env as)
-        env (reduce (fn [env [kset as]]
-                      (merge-aliases env kset as ksets))
-                    env ksets)]
+
+        ;; merge HMaps with similar keysets, excluding differently-tagged maps.
+        asets (group-similar-HMap-aliases-by-req-keysets env as)
+        ;; merge-aliases does not introduce new aliases, so `as`
+        ;; is still the set of reachable aliases after this line.
+        env (reduce merge-aliases env asets)
+
+        ;; merge HMaps on their tags key/val pairs.
+        asets (group-HMap-aliases-by-likely-tag env as)
+        env (reduce merge-aliases env asets)
+
+        ;; collect and group all HMaps with the
+        ;; same tag key. This is pretty aggressive ---
+        ;; it effectively upcasts any specific tagged
+        ;; HMap to its "parent" (the union of all maps
+        ;; with the same tag key).
+        asets (group-aliases-by-likely-tag-key env as)
+        env (reduce merge-aliases env asets)
+
+        as (reachable-aliases env)
+        ;; remove unreachable aliases
+        env (update-alias-env env select-keys as)
+
+        ;; delete intermediate aliases
+        env (follow-all env (assoc config :simplify? false))
+
+        ;; rename aliases pointing to HMaps
+        env (rename-HMap-aliases env config)
+        ]
     env))
 
 (declare envs-to-annotations
@@ -3760,13 +4041,13 @@
                         (list (qualify-typed-symbol 'defalias)
                               (symbol (name k))
                               (unparse-type v)))
-                      as))
+                      (sort-by (comp name first) as)))
               (declares-for-aliases [as]
                 (list* (if (= (ns-resolve (current-ns) 'declare)
                               #'clojure.core/declare)
                          'declare
                          'clojure.core/declare)
-                       (map (comp symbol name key) as)))
+                       (sort (map (comp symbol name key) as))))
               (unp-anns [tenv]
                 (mapv (fn [[k v]]
                         (list (qualify-typed-symbol 'ann)
@@ -3777,7 +4058,7 @@
                                 ;; imports
                                 k)
                               (unparse-type (assoc v :top-level-def k))))
-                      tenv))
+                      (sort-by first tenv)))
               ]
         (let [declares (declares-for-aliases as)
               defaliases (unp-defalias-env as)
