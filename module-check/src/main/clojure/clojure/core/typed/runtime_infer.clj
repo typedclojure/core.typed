@@ -316,8 +316,7 @@
   {:op :alias
    :name name})
 
-(defn -unknown []
-  {:op :unknown})
+(def -unknown {:op :unknown})
 
 (defn unknown? [m]
   (= :unknown
@@ -865,15 +864,22 @@
                                      {:post [(keyword? %)]}
                                      (:val (get (::HMap-req m) k)))
                                    ts)
-                          ts)]
-                 (list* (qualify-typed-symbol 'U) 
-                        (distinct (mapv unparse-type ts))))
+                          ts)
+                     ts (distinct (mapv unparse-type ts))]
+                 (cond
+                   (= (count ts) 1) (first ts)
+                   :else (list* (qualify-typed-symbol 'U) 
+                                ts)))
 
                :else
-               (list* (qualify-typed-symbol 'U) 
-                      (into #{}
-                            (map unparse-type) 
-                            (:types m)))))
+               (let [ts (into #{}
+                              (map unparse-type) 
+                              (:types m))]
+                 (cond
+                   (= 1 (count ts)) (first ts)
+                   :else
+                   (list* (qualify-typed-symbol 'U) 
+                          ts)))))
     :HVec (cond
             *unparse-spec* (list* (qualify-spec-symbol 'tuple)
                                   (mapv unparse-type (:vec m)))
@@ -1129,7 +1135,10 @@
                                      clojure.lang.IAtom (qualify-typed-symbol 'Atom1)
                                      clojure.lang.ISeq (qualify-typed-symbol 'Coll)
                                      clojure.lang.IPersistentList (qualify-typed-symbol 'Coll)
-                                     Number (qualify-typed-symbol 'Num)
+                                     clojure.lang.IPersistentCollection (qualify-typed-symbol 'Coll)
+                                     Number  (qualify-typed-symbol 'Num)
+                                     Long    (qualify-typed-symbol 'Int)
+                                     Integer (qualify-typed-symbol 'Int)
                                      clojure.lang.IFn 'AnyFunction
                                      java.lang.String (qualify-typed-symbol 'Str)
                                      (resolve-class c))
@@ -1347,15 +1356,36 @@
         ;_ (prn "hmaps-merged" (map unparse-type hmaps-merged))
         ;; join all common classes by their arguments, regardless of their variance
         non-hmaps (let [{classes true non-classes false} (group-by -class? non-hmaps)
-                        classes (group-by :class classes)
+                        seqables #{clojure.lang.ISeq
+                                   clojure.lang.IPersistentCollection
+                                   clojure.lang.IPersistentList
+                                   clojure.lang.IPersistentVector}
+                        {:keys [seqable] :as classes}
+                        (group-by (fn [{:keys [class]}]
+                                    (cond
+                                      (seqables class) :seqable
+                                      :else class))
+                                  classes)
+
+                        merged-seqables
+                        (when
+                          ;; upcast all to Coll
+                          (some (comp #{clojure.lang.IPersistentList clojure.lang.ISeq
+                                        clojure.lang.IPersistentCollection}
+                                      :class)
+                                seqable)
+                          (-class clojure.lang.IPersistentCollection [(apply join* (map (comp first :args) seqable))]))
+
                         classes (map (fn [cs]
                                        {:pre [(seq cs)
                                               (every? -class? cs)
                                               (apply = (map (comp count :args) cs))]}
                                        (-class (-> cs first :class)
                                                (apply mapv join* (map :args cs))))
-                                     (vals classes))]
-                    (into (set classes) non-classes))
+                                     (concat (vals (dissoc classes :seqable))
+                                             (when-not merged-seqables
+                                               (vals (group-by :class seqable)))))]
+                    (into (set classes) (concat non-classes (when merged-seqables [merged-seqables]))))
 
         ;; delete HMaps if there's already a Map in this union,
         ;; unless it's a (Map Nothing Nothing)
@@ -1386,6 +1416,36 @@
                  (conj (-class Number [])))
 
              :else ts)
+
+        ;; simplify HVec's
+        ts (let [{HVecs true non-HVecs false} (group-by (comp boolean #{:HVec} :op) ts)
+                 by-count (group-by (comp count :vec) HVecs)
+                 merged-HVecs (mapv (fn [hvs]
+                                      {:pre [(apply = (map (comp count :vec) hvs))]}
+                                      {:op :HVec
+                                       :vec (apply mapv join* (map :vec hvs))})
+                                    (vals by-count))
+                 ;; at this point, collection classes are normalized to either IPC or IPV.
+                 {vec-classes true non-HVecs false}
+                 (group-by
+                   (every-pred
+                     -class?
+                     (comp boolean #{clojure.lang.IPersistentVector
+                                     clojure.lang.IPersistentCollection} :class))
+                   non-HVecs)
+                 final-merged (if (seq vec-classes)
+                                [(-class (if (every? (comp boolean #{clojure.lang.IPersistentVector} :class)
+                                                     vec-classes)
+                                           clojure.lang.IPersistentVector
+                                           clojure.lang.IPersistentCollection)
+                                         [(apply join*
+                                                 (concat
+                                                   (map (comp first :args) vec-classes)
+                                                   (apply concat (map :vec merged-HVecs))))])]
+                                merged-HVecs)
+                 ]
+             (into (set non-HVecs) final-merged))
+
         
         ;; simplify multiple keywords to Kw if
         ;ts (let [{kws true non-kws false} (group-by kw-val? ts)]
@@ -1664,6 +1724,12 @@
                    (#{:IFn} (:op t2)))
               (join-IFn t1 t2)
 
+              (and (#{:HVec} (:op t1))
+                   (#{:HVec} (:op t2))
+                   (= (count (:vec t1)) (count (:vec t2))))
+              {:op :HVec
+               :vec (mapv join (:vec t1) (:vec t2))}
+
               :else 
               (let []
                 ;(prn "join union fall through")
@@ -1820,7 +1886,11 @@
         :map-vals (recur env config nxt-pth (-class clojure.lang.IPersistentMap [{:op :unknown} type]))
         :transient-vector-entry (recur env config nxt-pth (-class clojure.lang.ITransientVector [type]))
         :atom-contents (recur env config nxt-pth (-class clojure.lang.IAtom [type]))
-        :index (recur env config nxt-pth (-class clojure.lang.IPersistentVector [type]))
+        :index (recur env config nxt-pth
+                      (if (= 2 (:count cur-pth))
+                        {:op :HVec
+                         :vec (assoc [-unknown -unknown] (:nth cur-pth) type)}
+                        (-class clojure.lang.IPersistentVector [type])))
         :fn-domain (let [{:keys [arity position]} cur-pth]
                      (recur env config nxt-pth
                             {:op :IFn
@@ -1859,11 +1929,9 @@
                                []
                                m)))
     :HVec (update v :vec (fn [m]
-                           (reduce-kv
-                             (fn [m k v]
-                               (assoc m k (f v)))
-                             []
-                             m)))
+                           (into []
+                                 (map f)
+                                 m)))
     :union (apply join* (into #{}
                               (map f)
                               (:types v)))
@@ -4370,9 +4438,9 @@
         the-ann (binding [*print-length* nil
                           *print-level* nil]
                   (with-out-str 
-                    (print "^")
-                    (print (pprint-str-no-line ::t/rt-gen))
-                    (print " ")
+                    ;(print "^")
+                    ;(print (pprint-str-no-line ::t/rt-gen))
+                    ;(print " ")
                     (print "^{")
                     (print (pprint-str-no-line ::t/ann))
                     (print " ")

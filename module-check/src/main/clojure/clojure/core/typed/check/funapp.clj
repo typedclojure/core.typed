@@ -4,6 +4,7 @@
             [clojure.core.typed.subtype :as sub]
             [clojure.core.typed.coerce-utils :as coerce]
             [clojure.core.typed.type-ctors :as c]
+            [clojure.core.typed.check.nth :as nth]
             [clojure.core.typed.parse-unparse :as prs]
             [clojure.core.typed.check.utils :as cu]
             [clojure.core.typed.errors :as err]
@@ -106,6 +107,15 @@
       (let [mapfn (prs/parse-type `(t/All [x#] [(t/Map t/Any x#) t/Any :-> (t/U nil x#)]))]
         (check-funapp fexpr args (r/ret mapfn) (concat [fexpr-ret-type] arg-ret-types) expected))
 
+      ;FIXME same as IPersistentSet case
+      (and (r/RClass? fexpr-type)
+           (isa? (coerce/symbol->Class (:the-class fexpr-type)) clojure.lang.IPersistentVector))
+      ;rewrite ({..} x) as (f {..} x), where f is some dummy fn
+      (let [mapfn (prs/parse-type `(t/All [x# y#]
+                                          (t/IFn [(t/Vec x#) t/Int :-> x#]
+                                                 [(t/Vec x#) t/Int y# :-> (t/U y# x#)])))]
+        (check-funapp fexpr args (r/ret mapfn) (concat [fexpr-ret-type] arg-ret-types) expected))
+
       ;Symbol function
       (and (r/RClass? fexpr-type)
            ('#{clojure.lang.Symbol} (:the-class fexpr-type)))
@@ -140,6 +150,11 @@
                 r/-any))))
         (or expected
             (r/ret (r/-unchecked nil))))
+
+;      (r/HeterogeneousVector? fexpr-type)
+;      (let [symfn (prs/parse-type `(t/All [x#] [(t/U (t/Map t/Any x#) t/Any) :-> (t/U x# nil)]))]
+;        (nth/invoke-nth check expr expected :cargs cargs)
+;        (check-funapp fexpr args (r/ret symfn) arg-ret-types expected))
 
       (r/HSet? fexpr-type)
       (let [fixed (:fixed fexpr-type)]

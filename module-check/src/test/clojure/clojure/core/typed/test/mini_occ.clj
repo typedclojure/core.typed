@@ -1,6 +1,6 @@
 (ns clojure.core.typed.test.mini-occ
   {:lang :core.typed
-   :core.typed {:features #{:runtime-infer}
+   :core.typed {:features #{#_:runtime-infer}
                 :runtime-infer {:collapse #{:E}}}
    }
   (:require [clojure.test :refer [deftest is]]
@@ -38,8 +38,8 @@
 (ann id-test AnyFunction)
 (ann parse-exp [t/Any :-> E])
 (ann parse-exp-test AnyFunction)
-(ann parse-prop [(t/Coll t/Any) :-> P])
-(ann parse-prop-test AnyFunction)
+(ann parse-prop [t/Any #_(t/Coll t/Any) :-> P])
+(ann ^:no-check parse-prop-test AnyFunction)
 (ann parse-roundtrip [(t/Coll t/Any) :-> Boolean])
 (ann parse-type [t/Any :-> T])
 (ann parse-types-test AnyFunction)
