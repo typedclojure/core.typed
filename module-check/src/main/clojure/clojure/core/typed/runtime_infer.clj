@@ -1249,6 +1249,13 @@
                ~@body))
           `(do ~@body)))))
 
+(defn upcast-HVec [h]
+  {:pre [(#{:HVec} (:op h))]
+   :post [(type? %)]}
+  (-class clojure.lang.IPersistentVector 
+          [(apply join* (:vec h))]))
+
+
 (defn make-Union [args]
   ;(debug (println "make-Union")
   (let [ts (flatten-unions args)
@@ -1420,11 +1427,14 @@
         ;; simplify HVec's
         ts (let [{HVecs true non-HVecs false} (group-by (comp boolean #{:HVec} :op) ts)
                  by-count (group-by (comp count :vec) HVecs)
-                 merged-HVecs (mapv (fn [hvs]
-                                      {:pre [(apply = (map (comp count :vec) hvs))]}
-                                      {:op :HVec
-                                       :vec (apply mapv join* (map :vec hvs))})
-                                    (vals by-count))
+                 ;; erase HVec's if we have two different length HVec's
+                 should-collapse-HVecs? (< 1 (count by-count))
+                 merged-HVecs (when-not should-collapse-HVecs?
+                                (mapv (fn [hvs]
+                                        {:pre [(apply = (map (comp count :vec) hvs))]}
+                                        {:op :HVec
+                                         :vec (apply mapv join* (map :vec hvs))})
+                                      (vals by-count)))
                  ;; at this point, collection classes are normalized to either IPC or IPV.
                  {vec-classes true non-HVecs false}
                  (group-by
@@ -1433,7 +1443,12 @@
                      (comp boolean #{clojure.lang.IPersistentVector
                                      clojure.lang.IPersistentCollection} :class))
                    non-HVecs)
-                 final-merged (if (seq vec-classes)
+                 vec-classes (if should-collapse-HVecs?
+                               (concat vec-classes (map upcast-HVec merged-HVecs))
+                               vec-classes)
+                 ;; erase HVec's if we have a IPV class
+                 final-merged (if (or (seq vec-classes)
+                                      should-collapse-HVecs?)
                                 [(-class (if (every? (comp boolean #{clojure.lang.IPersistentVector} :class)
                                                      vec-classes)
                                            clojure.lang.IPersistentVector
@@ -1887,10 +1902,10 @@
         :transient-vector-entry (recur env config nxt-pth (-class clojure.lang.ITransientVector [type]))
         :atom-contents (recur env config nxt-pth (-class clojure.lang.IAtom [type]))
         :index (recur env config nxt-pth
-                      (if (= 2 (:count cur-pth))
+                      (if true #_(= 2 (:count cur-pth))
                         {:op :HVec
-                         :vec (assoc [-unknown -unknown] (:nth cur-pth) type)}
-                        (-class clojure.lang.IPersistentVector [type])))
+                         :vec (assoc (vec (repeat (:count cur-pth) -unknown)) (:nth cur-pth) type)}
+                        #_(-class clojure.lang.IPersistentVector [type])))
         :fn-domain (let [{:keys [arity position]} cur-pth]
                      (recur env config nxt-pth
                             {:op :IFn

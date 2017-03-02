@@ -2213,6 +2213,21 @@
 
 ; utility functions
 
+(defn ifn-ancestor 
+  "If this type can be treated like a function, return one of its
+  possibly polymorphic function ancestors.
+  
+  Assumes the type is not a union"
+  [t]
+  {:pre [(r/Type? t)]
+   :post [((some-fn nil? r/Type?) %)]}
+  (let [t (fully-resolve-type t)]
+    (cond
+      (r/RClass? t)
+      (first (filter (some-fn r/Poly? r/FnIntersection?) (RClass-supers* t)))
+      ;handle other types here
+      )))
+
 (t/tc-ignore
 (defn type-into-vector [x] (if (r/Union? x) (:types x) [x]))
 

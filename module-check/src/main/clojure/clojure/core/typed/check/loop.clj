@@ -13,7 +13,7 @@
   (let [names (map :form (:bindings expr))
         _ (assert (every? symbol? names))
         maybe-anns (map (comp (fn [m]
-                                (prn "meta" m)
+                                ;(prn "meta" m)
                                 (when-let [[_ tsyn] (find m :clojure.core.typed/ann)]
                                   (ann-form/parse-annotation tsyn expr)))
                               meta)
@@ -30,7 +30,7 @@
         inlines (inline-annotations expr)
         _ (when (and loop-bnd-anns inlines)
             (err/int-error "Cannot provide both an annotation with t/loop and inline loop"))
-        _ (prn "inlines" inlines)
+        ;_ (prn "inlines" inlines)
         anns (or loop-bnd-anns inlines)]
     (binding [recur-u/*loop-bnd-anns* nil]
       (let/check-let check expr expected 
