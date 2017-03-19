@@ -976,13 +976,10 @@
                top-level-var (when (and (symbol? top-level-def)
                                         (namespace top-level-def)) ;; testing purposes
                                (some-> top-level-def find-var))
-               ;_ (prn "top-level-var" top-level-var)
-               arglists (some-> top-level-var
-                                meta
-                                :arglists)
-               macro? (some-> top-level-var
-                              meta
-                              :macro)
+               ;_ (prn "top-level-var" top-level-def top-level-var)
+               arglists (some-> top-level-var meta :arglists)
+               ;_ (prn "arglists" arglists)
+               macro? (some-> top-level-var meta :macro)
                {fixed-arglists :fixed [rest-arglist] :rest}
                (group-by (fn [v]
                            (if (and (<= 2 (count v))
@@ -990,6 +987,7 @@
                              :rest
                              :fixed))
                          arglists)
+               ;_ (prn "fixed-arglists" fixed-arglists)
                ;; map from arity length to vector of fixed arguments
                fixed-name-lookup (into {}
                                        (map (fn [v]
@@ -1050,17 +1048,23 @@
 
                                                   :else
                                                   (unparse-spec d))
-                                                k (or (when (keyword? spec)
+                                                k (or #_(when (keyword? spec)
                                                         (keyword (str (name spec) "-" n)))
                                                       k)]
                                             [k spec]))
                                         (range)
                                         (or
-                                          (keyword (get fixed-name-lookup (count dom)))
+                                          (when-let [ss (get fixed-name-lookup (count dom))]
+                                            (when (every? (every-pred symbol? (complement namespace))
+                                                          ss)
+                                              (when (= (count ss) (count (distinct ss)))
+                                                (map keyword ss))))
                                           ;; TODO use rest-arglist here
-                                          (repeatedly #(keyword (name (apply gensym
-                                                                             (when (symbol? top-level-def)
-                                                                               [(str top-level-def "-")]))))))
+                                          (map (fn [n]
+                                                 (let [s (or (some-> top-level-def name)
+                                                             "arg")]
+                                                   (keyword (str s  "-" n))))
+                                               (range #_(count dom))))
                                         dom)))
                             arities))
                    rngs (if macro?
@@ -1093,29 +1097,29 @@
     :class (cond
              *unparse-spec* (let [^Class cls (:class m)]
                               (cond
-                                (#{Long Integer BigInteger} cls) (qualify-core-symbol 'int?)
+                                (#{Long Integer Short Byte} cls) (qualify-core-symbol 'int?)
+                                (#{BigInteger} cls) (qualify-core-symbol 'integer?)
                                 (.isAssignableFrom Number cls) (qualify-core-symbol 'number?)
+                                (#{Character} cls) (qualify-core-symbol 'char?)
                                 (#{clojure.lang.Symbol} cls) (qualify-core-symbol 'symbol?)
                                 (#{clojure.lang.Keyword} cls) (qualify-core-symbol 'keyword?)
                                 (#{String} cls) (qualify-core-symbol 'string?)
-                                (#{clojure.lang.ISeq} cls) (list (qualify-spec-symbol 'spec)
-                                                                 (list (qualify-spec-symbol '*)
-                                                                       (unparse-spec
-                                                                         (first (:args m)))))
+                                (#{clojure.lang.ISeq} cls) (list (qualify-spec-symbol 'coll-of)
+                                                                 (unparse-spec
+                                                                   (first (:args m))))
                                 (#{clojure.lang.IFn} cls) (qualify-core-symbol 'ifn?)
                                 (#{Boolean} cls) (qualify-core-symbol 'boolean?)
+                                ;; TODO check set elements
                                 (#{clojure.lang.IPersistentSet} cls) (qualify-core-symbol 'set?)
                                 (#{clojure.lang.IPersistentMap} cls)
-                                (list (qualify-spec-symbol 'spec)
-                                      (let [[k v] (:args m)]
-                                        (list (qualify-spec-symbol 'map-of)
-                                              (unparse-spec k)
-                                              (unparse-spec v))))
-                                (#{clojure.lang.IPersistentVector} cls) 
-                                (list (qualify-spec-symbol 'spec)
-                                      (list (qualify-spec-symbol 'coll-of)
-                                            (unparse-spec
-                                              (first (:args m)))))
+                                (let [[k v] (:args m)]
+                                  (list (qualify-spec-symbol 'map-of)
+                                        (unparse-spec k)
+                                        (unparse-spec v)))
+                                (#{clojure.lang.IPersistentVector clojure.lang.IPersistentCollection} cls) 
+                                (list (qualify-spec-symbol 'coll-of)
+                                      (unparse-spec
+                                        (first (:args m))))
 
                                 :else (list (qualify-core-symbol 'partial)
                                             (qualify-core-symbol 'instance?)
@@ -3985,12 +3989,28 @@
 (defn loop-var-symbol? [s]
   (= :loop-var (::track-kind (meta s))))
 
+(defn macro-symbol? [s]
+  {:pre [(symbol? s)]}
+  (boolean
+    (when (namespace s)
+      (when-let [v (find-var s)]
+        (:macro (meta v))))))
+
+(defn imported-symbol? [s]
+  {:pre [(symbol? s)]}
+  (not= (str (ns-name (current-ns)))
+        (namespace s)))
+
 (defn envs-to-specs [env config]
   ;(prn "envs-to-specs")
   (binding [*envs* (atom env)]
     (let [tenv (into {}
                      ;; don't spec local functions
-                     (remove (comp local-fn-symbol? key))
+                     (comp (remove (comp local-fn-symbol? key))
+                           ;; don't spec macros
+                           (remove (comp macro-symbol? key))
+                           ;; don't spec external functions
+                           (remove (comp imported-symbol? key)))
                      (type-env env))
           ;_ (prn (keys tenv))
           aliases-generated (atom #{})
