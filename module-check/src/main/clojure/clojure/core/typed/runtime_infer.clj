@@ -739,7 +739,7 @@
                     (set alts))]
     (if (= 1 (count specs))
       (unparse-spec (simplify-spec-alias (val (first specs))))
-      (list*-force (qualify-spec-symbol 'alt)
+      (list*-force (qualify-spec-symbol 'or)
              (mapcat (fn [[s alt]]
                        (let [alt (if (alias? alt)
                                    (simplify-spec-alias alt)
@@ -1075,7 +1075,7 @@
                                         [u]))))
                    dom-specs (if (= 1 (count doms))
                                (first doms)
-                               (list* (qualify-spec-symbol 'alt)
+                               (list* (qualify-spec-symbol 'alt) ;; use alt to treat args as flat sequences
                                       (doall
                                         (mapcat (fn [alt]
                                                   (let [kw (keyword (str (/ (dec (count alt)) 2)
@@ -3923,7 +3923,8 @@
                      (or (= (first s) (qualify-spec-symbol 'and))
                          (= (first s) (qualify-spec-symbol 'keys))
                          (= (first s) (qualify-spec-symbol 'cat))
-                         (= (first s) (qualify-spec-symbol 'alt)))))
+                         (= (first s) (qualify-spec-symbol 'alt))
+                         (= (first s) (qualify-spec-symbol 'or)))))
           s
           (list (qualify-spec-symbol 'and)
                 s))))
