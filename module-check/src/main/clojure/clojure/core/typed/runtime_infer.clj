@@ -167,6 +167,7 @@
        :kw-entries (Map Kw Type)
        :keys (Set Kw)
        :key Kw}
+     '{:op :vec-entry}
      '{:op :index
        :count Int
        :nth Int}))
@@ -352,6 +353,9 @@
    :count count
    :nth nth})
 
+(defn vec-entry-path []
+  {:op :vec-entry})
+
 (defn seq-entry []
   {:op :seq-entry})
 
@@ -422,6 +426,7 @@
     :fn-domain (list 'dom (:arity p) (:position p))
     :var (list 'var (:name p))
     :index (list 'index (:count p) (:nth p))
+    :vec-entry (list 'vec-entry)
     :set-entry (list 'set-entry)
     :map-keys (list 'map-keys)
     :map-vals (list 'map-vals)
@@ -1154,7 +1159,9 @@
     :Top (cond 
            *unparse-spec* (qualify-core-symbol 'any?)
            :else (qualify-typed-symbol 'Any))
-    :unknown '?
+    :unknown (cond 
+               *unparse-spec* (qualify-core-symbol 'any?)
+               :else '? #_(qualify-typed-symbol 'Any))
     :free (cond
             *unparse-spec* (alias->spec-kw (:name m))
             :else (:name m))
@@ -1901,6 +1908,7 @@
                                          {key type})}))
         :set-entry (recur env config nxt-pth (-class clojure.lang.IPersistentSet [type]))
         :seq-entry (recur env config nxt-pth (-class clojure.lang.ISeq [type]))
+        :vec-entry (recur env config nxt-pth (-class clojure.lang.IPersistentVector [type]))
         :map-keys (recur env config nxt-pth (-class clojure.lang.IPersistentMap [type {:op :unknown}]))
         :map-vals (recur env config nxt-pth (-class clojure.lang.IPersistentMap [{:op :unknown} type]))
         :transient-vector-entry (recur env config nxt-pth (-class clojure.lang.ITransientVector [type]))
@@ -2698,12 +2706,15 @@
 
        (and (vector? v) 
             (satisfies? clojure.core.protocols/IKVReduce v)) ; MapEntry's are not IKVReduce
-       (let [len (count v)]
+       (let [heterogeneous? (<= (count v) 4)
+             len (count v)]
          (when (= 0 len)
            (add-infer-result! results-atom (infer-result path (-class clojure.lang.IPersistentVector [{:op :union :types #{}}]))))
          (reduce-kv
            (fn [e k v]
-             (let [v' (track results-atom v (conj path (index-path len k)))]
+             (let [v' (track results-atom v (conj path (if heterogeneous?
+                                                         (index-path len k)
+                                                         (vec-entry-path))))]
                (if (identical? v v')
                  e
                  (binding [*should-track* false]
@@ -3311,9 +3322,8 @@
 (defn generate-tenv
   "Reset and populate global type environment."
   [env config {:keys [infer-results equivs] :as is}]
-  ;(debug (println "generate-tenv:"
-  ;                (str (count infer-results)
-  ;                     " infer-results"))
+  (println "generate-tenv:"
+                  (str (count infer-results) " infer-results"))
   (as-> (init-env) env 
     (reduce 
       (fn [env i] 
@@ -3325,9 +3335,7 @@
       (fn [env i]
         (update-equiv env config (:= i) (:type i)))
       env
-      equivs))
-; )
-)
+      equivs)))
 
 (defn gen-current1
   "Print the currently inferred type environment"
@@ -4080,18 +4088,24 @@
                               (list*-force (qualify-spec-symbol 'fdef)
                                      sym
                                      (next s))
-                              (def-spec
+                              ;; only output fdef's. spec seems to assume all
+                              ;; top level def's are functions and wraps things
+                              ;; as such. We work around this behaviour by simply
+                              ;; omitting non-function specs.
+                              #_(def-spec
                                 sym
                                 ;; handle recursive specs
-                                (unparse-spec v)))]
-                        (conj (vec
-                                (concat
-                                  (apply concat @multispecs-needed)
-                                  (gen-aliases
-                                    (prep-alias-map
-                                      @aliases-needed
-                                      @used-aliases))))
-                              def-spec))))
+                                (unparse-spec v)))
+                            prefix (vec
+                                     (concat
+                                       (apply concat @multispecs-needed)
+                                       (gen-aliases
+                                         (prep-alias-map
+                                           @aliases-needed
+                                           @used-aliases))))]
+                        (if def-spec
+                          (conj prefix def-spec)
+                          prefix))))
             tenv)
           ]
       {:top-level 
