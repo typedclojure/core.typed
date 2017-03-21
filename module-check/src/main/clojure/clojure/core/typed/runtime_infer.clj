@@ -836,17 +836,21 @@
                        nme (gensym (str (when-let [nstr (namespace tag)]
                                           (str nstr "-"))
                                         (name tag) "-multi-spec"))
-                       dmulti `(defmulti ~(with-meta nme
-                                                    {::generated true})
-                                 ~tag)
+                       dmulti (list
+                                (qualify-core-symbol 'defmulti)
+                                (with-meta nme
+                                           {::generated true})
+                                tag)
                        dmethods (mapv (fn [t]
                                         {:pre [(HMap? t)]}
                                         (let [this-tag (get (::HMap-req t) tag)
                                               _ (assert (kw-val? this-tag)
                                                         (unparse-type this-tag))]
-                                          `(defmethod ~nme ~(:val this-tag)
-                                             [~'_]
-                                             ~(unparse-type t))))
+                                          (list (qualify-core-symbol 'defmethod) 
+                                                nme 
+                                                (:val this-tag)
+                                                ['_]
+                                                (unparse-type t))))
                                       ts)
                        _ (when multispecs
                            (swap! multispecs conj (vec (cons dmulti dmethods))))]
@@ -1128,7 +1132,9 @@
 
                                 :else (list (qualify-core-symbol 'partial)
                                             (qualify-core-symbol 'instance?)
-                                            (symbol (.getName cls)))))
+                                            (if (.isArray cls)
+                                              (list 'Class/forName (.getName cls))
+                                              (symbol (.getName cls))))))
              :else
              (letfn [(unparse-class [^Class c args]
                        {:pre [(class? c)]}
