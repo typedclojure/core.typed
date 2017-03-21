@@ -744,9 +744,19 @@
   (let [specs (into {} 
                     (map (fn [alt]
                            [(unparse-spec alt) alt]))
-                    (set alts))]
+                    (set alts))
+        ;; put instance comparisons at the front of the disjunction.
+        ;; avoid errors in checking specs that have both records
+        ;; and collections, since records do not implement `empty`.
+        {inst? true other false}
+        (group-by (fn [[s _]]
+                    (boolean
+                      (when (or (seq? s) (list? s))
+                        (some #{(qualify-core-symbol 'instance?)} s))))
+                  specs)
+        specs (vec (concat inst? other))]
     (if (= 1 (count specs))
-      (unparse-spec (simplify-spec-alias (val (first specs))))
+      (unparse-spec (simplify-spec-alias (second (first specs))))
       (list*-force (qualify-spec-symbol 'or)
              (mapcat (fn [[s alt]]
                        (let [alt (if (alias? alt)
