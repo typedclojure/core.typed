@@ -486,7 +486,10 @@
   {:pre [(HMap? t)]
    :post [(set? %)
           (every? keyword? %)]}
-  (map-key-set (::HMap-req t)))
+  (let [m (map-key-set (::HMap-req t))]
+    ;(when (not (every? keyword? m))
+    ;  (prn "bad HMap-req-keyset" m))
+    m))
 
 (defn HMap-req-opt-keysets [t]
   {:pre [(HMap? t)]
@@ -1091,9 +1094,12 @@
                                                                          "-args"))]
                                                     [kw alt]))
                                                 doms))))]
-               (list* (qualify-spec-symbol 'fspec)
-                      [:args dom-specs
-                       :ret rngs]))
+               ;; erase higher-order function arguments
+               (if top-level-var
+                 (list* (qualify-spec-symbol 'fspec)
+                        [:args dom-specs
+                         :ret rngs])
+                 (qualify-core-symbol 'ifn?)))
              :else
              (let [as (mapv (fn [a]
                              (unparse-type
@@ -2801,10 +2807,12 @@
                (let [orig-v (get m k)
                      [new-k v] 
                      (cond
-                       (keyword? k)
-                       [k (track results-atom orig-v
-                                 (binding [*should-track* false]
-                                   (conj path (key-path {} ks k))))]
+                       ;; We don't want to pollute the HMap-req-ks with
+                       ;; non keywords (yet), disable.
+                       ;(keyword? k)
+                       ;[k (track results-atom orig-v
+                       ;          (binding [*should-track* false]
+                       ;            (conj path (key-path {} ks k))))]
 
                        :else 
                        [(track results-atom k
