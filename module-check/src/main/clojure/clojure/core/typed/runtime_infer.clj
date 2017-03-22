@@ -977,11 +977,13 @@
     :IFn1 (let [{:keys [dom rng fixed-name-lookup]} m
                 these-names (get fixed-name-lookup (count dom))
                 these-names (when (= (count dom) (count these-names))
+                              these-names)
+                ;; we could extract better names from destructuring here.
+                these-names (when (every? symbol? these-names)
                               these-names)]
             (assert (every? identity [dom rng]))
             (assert (or (nil? these-names)
                         (and (vector? these-names)
-                             (every? symbol? these-names)
                              (= (count dom) (count these-names)))))
             (conj (mapv (fn [t nme]
                           (if (and nme *new-aliases*
@@ -1005,7 +1007,7 @@
                {fixed-arglists :fixed [rest-arglist] :rest}
                (group-by (fn [v]
                            (if (and (<= 2 (count v))
-                                    (#{'&} (get v (dec (count v)))))
+                                    (#{'&} (get v (- (count v) 2))))
                              :rest
                              :fixed))
                          arglists)
