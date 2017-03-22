@@ -341,12 +341,14 @@
 (defn map-vals-path []
   {:op :map-vals})
 
-(defn key-path [kw-entries keys key]
-  {:op :key
-   ;; (Map Kw (ValType Kw)) for constant keyword entries
-   :kw-entries kw-entries
-   :keys keys
-   :key key})
+(defn key-path 
+  ([keys key] (key-path {} keys key))
+  ([kw-entries keys key]
+   {:op :key
+    ;; (Map Kw (ValType Kw)) for constant keyword entries
+    :kw-entries kw-entries
+    :keys keys
+    :key key}))
 
 (defn index-path [count nth]
   {:op :index
@@ -410,7 +412,10 @@
   (case (first p)
     val (-val (second p))
     class (-class (resolve (second p)) (mapv parse-type (nth p 2)))
-    key (key-path (second p) (nth p 2))
+    key (do
+          (assert (== 3 (count p))
+                  "extra argument not supported to key-path")
+          (key-path (second p) (nth p 2)))
     rng (fn-rng-path (second p))
     dom (fn-dom-path (second p) (nth p 2))
     var (var-path (second p))
