@@ -5,6 +5,7 @@
             [clojure.string :as str]
             [clojure.java.io :as io]
             [clojure.core.typed.ast-utils :as ast]
+            [clojure.core.typed.util-vars :as vs]
             [clojure.core.typed.current-impl :as impl]
             [clojure.core.typed.debug :refer [dbg]]
             [clojure.tools.reader.reader-types :as rdrt]
@@ -171,6 +172,9 @@
 
 (defn get-infer-results [results-atom]
   (get @results-atom :infer-results))
+
+(defn swap-infer-results! [results-atom f & args]
+  (apply swap! results-atom update :infer-results f args))
 
 (defn infer-result [path type]
   {:op :path-type
@@ -1116,18 +1120,19 @@
          (vector? path)]}
   (cond 
     (empty? path) (throw (Exception. "Cannot update empty path"))
-    (= 1 (count path)) (let [x (nth path 0)
-                             n (:name x)
-                             t (if-let [t (get (type-env env) n)]
-                                 (do
-                                   #_(prn "update-path join"
-                                          (map :op [t type]))
-                                   (join t type))
-                                 type)]
-                         (assert (#{:var} (:op x))
-                                 (str "First element of path must be a variable " x))
-                         (update-type-env-in-ns env (or (:ns x) (current-ns))
-                                                assoc n t))
+    (= 1 (count path)) (let [x (nth path 0)]
+                         (case (:op x)
+                           :var (let [n (:name x)
+                                      t (if-let [t (get (type-env env) n)]
+                                          (do
+                                            #_(prn "update-path join"
+                                                   (map :op [t type]))
+                                            (join t type))
+                                          type)]
+                                  (assert (#{:var} (:op x))
+                                          (str "First element of path must be a variable or local-fn " x))
+                                  (update-type-env-in-ns env (or (:ns x) (current-ns))
+                                                         assoc n t))))
     :else 
     (let [last-pos (dec (count path))
           cur-pth (nth path last-pos)
@@ -1669,6 +1674,13 @@
   (pp/with-pprint-dispatch wrap-dispatch
     (apply pp/pprint args)))
 
+(defn pprint-str-no-line [& args]
+  (binding [pp/*print-right-margin* nil]
+    ;; remove trailing newline
+    (let [s (with-out-str
+              (apply pprint args))]
+      (subs s 0 (dec (count s))))))
+
 ; ppenv : Env -> nil
 (defn ppenv [env]
   (pprint (into {}
@@ -2010,6 +2022,33 @@
                                 :ns (ns-name ns)
                                 :name vsym}]))))
 
+(defn track-local-fn [line column end-line end-column ns val]
+  {:pre []}
+  (track results-atom val [{:op :var
+                            :local-fn true
+                            :line line
+                            :column column
+                            :end-line end-line
+                            :end-column end-column
+                            :ns (ns-name ns)
+                            :name (with-meta
+                                    (symbol
+                                      (str (ns-name ns)
+                                           "|"
+                                           line
+                                           "|"
+                                           column
+                                           "|"
+                                           end-line
+                                           "|"
+                                           end-column))
+                                    {:local-fn true
+                                     :line line
+                                     :column column
+                                     :end-line end-line
+                                     :end-column end-column
+                                     :ns (ns-name ns)})}]))
+
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Analysis compiler pass
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -2029,6 +2068,13 @@
    :form `'~vsym
    :env env
    :val vsym})
+
+(defn dummy-num [env n]
+  {:op :const
+   :type :number
+   :form n
+   :env env
+   :val n})
 
 ; wrap-var-deref : TAExpr Sym Namespace -> TAExpr
 (defn wrap-var-deref [expr vsym *ns*]
@@ -2078,12 +2124,60 @@
             (dummy-sym (:env expr) (:ns (:env expr)))
             expr]}))
 
+(defn wrap-local-fn [coord expr *ns*]
+  (do
+    (println (str "Instrumenting local fn in " (ns-name *ns*)
+                  " "
+                  (:line coord)
+                  ":"
+                  (:column coord)
+                  #_":" 
+                  #_(-> expr :env :line)
+                  #_(when-let [col (-> expr :env :column)]
+                      ":" col)))
+    {:op :invoke
+     :children [:fn :args]
+     :form `(track-local-fn ~(:form expr))
+     :env (:env expr)
+     :fn {:op :var
+          :var #'track-local-fn
+          :form `track-local-fn
+          :env (:env expr)}
+     :args [(dummy-num (:env expr) (:line coord))
+            (dummy-num (:env expr) (:column coord))
+            (dummy-num (:env expr) (:end-line coord))
+            (dummy-num (:env expr) (:end-column coord))
+            (dummy-sym (:env expr) (:ns (:env expr)))
+            expr]}))
+
+(def ^:dynamic *found-fn* false)
+
 ; check : (IFn [TAExpr -> TAExpr] [TAExpr CTType -> TAExpr]
 (defn check
   "Assumes collect-expr is already called on this AST."
   ([expr] (check expr nil))
   ([expr expected]
-   (letfn []
+   (let [_ (when-let [load-state vs/*typed-load-atom*]
+             (prn "load-state" (::refreshed? @load-state))
+             (when-not (::refreshed? @load-state)
+               ;; delete all local fn info for the current namespace, since it's likely to go out of date
+               ;; as soon as the file is edited.
+               (let [;tracks-lambda? (fn [r]
+                     ;                 (let [fpth (first (:path r))]
+                     ;                   (assert (#{:var} (:op fpth)))
+                     ;                   (boolean
+                     ;                     (and (:local-fn fpth)
+                     ;                          (= (:ns fpth) (current-ns))))))
+                     for-current-ns? (fn [r]
+                                       (let [fpth (first (:path r))]
+                                         (assert (#{:var} (:op fpth)))
+                                         (= (:ns fpth) (current-ns))))]
+                 (swap-infer-results! results-atom 
+                                      (fn [rs]
+                                        (into #{}
+                                              (remove for-current-ns?)
+                                              rs)))
+                 (swap! load-state assoc ::refreshed? true))))]
      (case (:op expr)
        ;; Wrap def's so we can instrument their usages outside this
        ;; namespace.
@@ -2101,6 +2195,24 @@
               (if-not (contains? (conj ns-exclusions (ns-name *ns*)) vns)
                 (wrap-var-deref expr vsym *ns*)
                 expr))
+       :fn 
+       ;; this is a top-level function that's already being wrapped
+       (if (not *found-fn*)
+         (binding [*found-fn* true]
+           (ast/walk-children check expr))
+         ;; instrument this
+         (let [out (ast/walk-children check expr)
+               coord (meta (:form out))
+               _ (prn coord)
+                               ;; un-annotatable
+               skip-track? (or
+                             (not (:line coord))
+                             (not (:column coord))
+                             (and (= (:line coord) (:end-line coord))
+                                  (= (:column coord) (:end-column coord))))]
+           (if skip-track?
+             out
+             (wrap-local-fn coord out *ns*))))
        (ast/walk-children check expr)))))
 
 (def runtime-infer-expr check)
@@ -2370,10 +2482,16 @@
 ;                   as)]
 ;    ))
 
+(defn local-fn-symbol? [s]
+  (boolean (:local-fn (meta s))))
+
 (defn envs-to-specs [env config]
   ;(prn "envs-to-specs")
   (binding [*envs* (atom env)]
-    (let [tenv (type-env env)
+    (let [tenv (into {}
+                     ;; don't spec local functions
+                     (remove (comp local-fn-symbol? key))
+                     (type-env env))
           ;_ (prn (keys tenv))
           aliases-generated (atom #{})
           prep-alias-map (fn [a-needed a-used]
@@ -2441,47 +2559,62 @@
                               def-spec))))
             tenv)
           ]
-      top-level-types)))
+      {:top-level 
+       top-level-types})))
 
 (defn envs-to-annotations [env config]
-  (let [;; don't annotate macros
+  (let [full-type-env (type-env env)
+        local-fn-env (into {}
+                           (filter (comp local-fn-symbol? key))
+                           full-type-env)
+        _ (prn "local-fn-env" local-fn-env)
         tenv (into {}
                    (remove (fn [[k v]]
                              {:pre [(symbol? k)]}
-                             (some-> (find-var (symbol (str (current-ns)) (str k)))
-                                     meta
-                                     :macro)))
-                   (type-env env))
+                             (or
+                               ;; don't annotate macros
+                               (some-> (find-var (symbol (str (current-ns)) (str k)))
+                                       meta
+                                       :macro)
+                               ;; don't annotate local functions
+                               (local-fn-symbol? k))))
+                   full-type-env)
         tfvs (into #{}
                    (mapcat
                      (fn [t]
                        (fv env t true)))
-                   (vals tenv))
+                   (concat (vals tenv)
+                           (vals local-fn-env)))
         as (into {}
                  (filter (comp tfvs key))
                  (alias-env env))]
     (binding [*envs* (atom env)]
-      (into
-        (into [(list* (if (= (ns-resolve (current-ns) 'declare)
-                             #'clojure.core/declare)
-                        'declare
-                        'clojure.core/declare)
-                      (map (comp symbol name key) as))]
-              (map (fn [[k v]]
-                     (list (qualify-typed-symbol 'defalias)
-                           (symbol (name k))
-                           (unparse-type v)))
-                   as))
-        (map (fn [[k v]]
-               (list (qualify-typed-symbol 'ann)
-                     (if (= (namespace k)
-                            (str (ns-name (current-ns))))
-                       ;; defs
-                       (symbol (name k))
-                       ;; imports
-                       k)
-                     (unparse-type v))))
-        tenv))))
+      {:top-level
+       (into
+         (into [(list* (if (= (ns-resolve (current-ns) 'declare)
+                              #'clojure.core/declare)
+                         'declare
+                         'clojure.core/declare)
+                       (map (comp symbol name key) as))]
+               (map (fn [[k v]]
+                      (list (qualify-typed-symbol 'defalias)
+                            (symbol (name k))
+                            (unparse-type v)))
+                    as))
+         (map (fn [[k v]]
+                (list (qualify-typed-symbol 'ann)
+                      (if (= (namespace k)
+                             (str (ns-name (current-ns))))
+                        ;; defs
+                        (symbol (name k))
+                        ;; imports
+                        k)
+                      (unparse-type v))))
+         tenv)
+       :local-fns (mapv (fn [[k v]]
+                          (assoc (meta k) :type v))
+                        local-fn-env)
+       })))
 
 
 (defn gen-current3 
@@ -2721,14 +2854,191 @@
                        (meta ns-form)))]
     end-line))
 
+(def ^:dynamic *indentation* 2)
+
+(defn insert-local-fns [local-fns old config]
+  {:post [(string? %)]}
+  (prn "insert-local-fns" local-fns)
+  (let [;; reverse
+        sorted-fns (sort-by (juxt :line :column) local-fns)
+        ls (with-open [pbr (java.io.BufferedReader.
+                             (java.io.StringReader. old))]
+             (vec (doall (line-seq pbr))))]
+    (prn "top ls" (count ls))
+    (loop [ls ls
+           fns sorted-fns]
+      (prn "current ls")
+      (println (str/join "\n" ls))
+      (if (empty? fns)
+        (str/join "\n" ls)
+        (let [;; assume these coordinates are correct
+              {:keys [line column end-line end-column] :as f} (first fns)
+              _ (prn "current fn" f)
+              [file-slice trailing] 
+              (let [_ (prn "ls" (count ls) (dec line) end-line)
+                    v (subvec ls (dec line) end-line)
+                    last-line (peek v)
+                    _ (prn "last-line" last-line (dec end-column))
+                    before-end-column (subs last-line 0 (dec end-column))
+                    after-end-column (subs last-line (dec end-column))]
+                [(assoc v (dec (count v)) before-end-column)
+                 after-end-column])
+
+              first-line (nth file-slice 0)
+              before-first-pos (subs first-line 0 (dec column))
+              after-first-pos (subs first-line (dec column))
+              _ (prn "after-first-pos" after-first-pos)
+              ;; insert (^::t/auto-gen t/ann-form
+              before-line (str
+                            before-first-pos
+                            (binding [*print-length* nil
+                                      *print-level* nil]
+                              (with-out-str 
+                                (print "(^")
+                                (print (pprint-str-no-line ::t/auto-gen))
+                                (print " ")
+                                (print (pprint-str-no-line (qualify-typed-symbol 'ann-form))))))
+              indentation *indentation*
+              indentation-spaces (apply str (repeat (+ (dec column) indentation) " "))
+              ;; insert column+indentation spaces
+              the-fn-line (str indentation-spaces after-first-pos)
+
+              rest-slice (if (= 1 (count file-slice))
+                           []
+                           (subvec file-slice 1 (count file-slice)))
+
+              ;; indent each line at column
+              indented-fn (map (fn [a]
+                                  {:pre [(string? a)]}
+                                  ;; insert indentation at column if there's already whitespace there
+                                  (if (= \space (nth a (dec column)))
+                                    (let [_ (prn "indenting" a)
+                                          _ (prn "left half " (subs a 0 (dec column)))
+                                          _ (prn "right half" (subs a (dec column)))]
+                                      (str (subs a 0 column)
+                                           (apply str (repeat indentation " "))
+                                           (subs a column)))
+                                    (do
+                                      (prn (str
+                                             "WARNING: Not indenting line " line
+                                             " of " (:ns f) ", found non-whitespace "
+                                             " at column " column "."))
+                                      a)))
+                                rest-slice)
+              _ (prn "the type pp" (pprint-str-no-line (unparse-type (:type f))))
+              the-type-line (str indentation-spaces
+                                 (pprint-str-no-line (unparse-type (:type f)))
+                                 ")")
+              ;; now add any trailing code after end-column
+              ;; eg. (map (fn ...) c) ==> (map (ann-form (fn ...) ...)
+              ;;                               c)
+              trailing-line (when (not= 0 (count trailing))
+                              (str (apply str (repeat (dec column) " "))
+                                   ;; TODO compensate for this change in update-column
+                                   (if nil #_(= \space (nth trailing 0))
+                                     (subs trailing 1)
+                                     trailing)))
+
+              final-split (concat
+                            [before-line
+                             the-fn-line]
+                            indented-fn
+                            [the-type-line]
+                            (when trailing-line
+                              [trailing-line]))
+              new-ls (vec (concat
+                            (subvec ls 0 (dec line))
+                            final-split
+                            (subvec ls end-line)))
+              update-line (fn [old-line]
+                            (cond
+                              ;; occurs before the current changes
+                              (< old-line line) old-line
+                              ;; occurs inside the bounds of the current function.
+                              ;; Since we've added an extra line before this function (the beginning ann-form)
+                              ;; we increment the line.
+                              (<= line old-line end-line) (inc old-line)
+                              ;; occurs after the current function.
+                              ;; We've added possibly 2-3 lines: 
+                              ;; - the beginning of the ann-form
+                              ;; - the end of the ann-form
+                              ;; - possibly, the trailing code
+                              :else (if trailing-line
+                                      (+ 3 old-line)
+                                      (+ 2 old-line))))
+              update-column (fn [old-column old-line]
+                              (cond
+                                ;; occurs before the current changes
+                                (< old-line line) old-column
+                                ;; occurs inside the bounds of the current function.
+                                ;; We indent each of these lines by 2.
+                                ;; WARNING: we might not have indented here
+                                (<= line old-line end-line) (+ 2 old-column)
+                                :else old-column))
+              next-fns
+              (map 
+                ;; adjust the coordinates of any functions that have moved.
+                (fn [v]
+                  (-> v
+                      (update :line update-line)
+                      (update :end-line update-line)
+                      ;; pass original line
+                      (update :column update-column (:line v))
+                      ;; pass original end-line
+                      (update :end-column update-column (:end-line v))))
+                (next fns))
+              ]
+          (recur new-ls
+                 next-fns))))))
+
+(comment
+  (println
+    (insert-local-fns
+      [{:line 1 :column 1
+        :end-line 1 :end-column 11
+        :type {:op :Top}}]
+      "(fn [a] a)"
+      {}))
+  (println
+    (insert-local-fns
+      [{:line 1 :column 1
+        :end-line 2 :end-column 5
+        :type {:op :Top}}]
+      "(fn [a]\n  a) foo"
+      {}))
+  (println
+    (insert-local-fns
+      [{:line 1 :column 3
+        :end-line 2 :end-column 7
+        :type {:op :Top}}]
+      "  (fn [a]\n    a) foo"
+      {}))
+  (println
+    (insert-local-fns
+      [{:line 1 :column 1
+        :end-line 1 :end-column 20
+        :type {:op :Top}}
+       {:line 1 :column 9
+        :end-line 1 :end-column 19
+        :type {:op :Top}}]
+      "(fn [b] (fn [a] a))"
+      {}))
+  )
+
+(declare prepare-ann infer-anns)
+
 (defn insert-generated-annotations-in-str
   "Insert annotations after ns form."
-  [old ann-str config]
-  {:pre [(string? old)
-         (string? ann-str)]
+  [old ns {:keys [replace-top-level?] :as config}]
+  {:pre [(string? old)]
    :post [(string? %)]}
   ;(prn "insert" ann-str)
-  (let [insert-after (ns-end-line old)]
+  (let [{:keys [top-level local-fns] :as as} (infer-anns ns config)
+        ann-str (prepare-ann top-level config)
+        _ (assert (string? ann-str))
+        old (insert-local-fns local-fns old config)
+        old (delete-generated-annotations-in-str old)
+        insert-after (ns-end-line old)]
     (with-open [pbr (java.io.BufferedReader.
                       (java.io.StringReader. old))]
       (loop [ls (line-seq pbr)
@@ -2756,35 +3066,31 @@
 
 (declare infer-anns)
 
-(defn prepare-ann [ns config]
+(defn prepare-ann [top-level config]
   {:post [(string? %)]}
-  (let [as (infer-anns ns config)]
-    (binding [*print-length* nil
-              *print-level* nil]
-      (with-out-str
-        (println generate-ann-start)
-        (doseq [a as]
-          (pprint a))
-        (print generate-ann-end)))))
+  (binding [*print-length* nil
+            *print-level* nil]
+    (with-out-str
+      (println generate-ann-start)
+      (doseq [a top-level]
+        (pprint a))
+      (print generate-ann-end))))
 
 (defn insert-generated-annotations [ns config]
   (impl/with-clojure-impl
     (update-file (ns-file-name (ns-name ns))
                  insert-generated-annotations-in-str
-                 (prepare-ann ns config)
+                 ns
                  config)))
 
 (defn replace-generated-annotations [ns config]
   (impl/with-clojure-impl
     (update-file (ns-file-name (ns-name ns))
-                 (fn [s]
-                   (-> s
-                       delete-generated-annotations-in-str
-                       (insert-generated-annotations-in-str
-                         (prepare-ann ns config)
-                         config))))))
+                 insert-generated-annotations-in-str
+                 ns
+                 (assoc config :replace-top-level? true))))
 
-(defn infer-anns 
+(defn infer-anns
   ([ns {:keys [output spec?] :as config}]
    {:pre [(or (instance? clojure.lang.Namespace ns)
               (symbol? ns))]}
