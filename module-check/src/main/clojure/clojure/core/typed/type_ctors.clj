@@ -311,6 +311,20 @@
 (t/defalias TypeCache 
   (t/Map (t/Set r/Type) r/Type))
 
+(defn -not [t]
+  {:pre [(r/Type? t)]}
+  (let [t (fully-resolve-type t)
+        t' (cond
+             (r/NotType? t) (:type t)
+             ;; (Not (I a b)) ==> (U (Not a) (Not b))
+             (r/Intersection? t) (apply Un (map -not (:types t)))
+             ;; (Not (U a b)) ==> (I (Not a) (Not b))
+             (r/Union? t) (apply In (map -not (:types t)))
+             (r/Top? t) r/-nothing
+             :else (r/NotType-maker t))]
+    ;(prn "-not" t t')
+    t'))
+
 (t/ann ^:no-check initial-Un-cache TypeCache)
 (def ^:private initial-Un-cache (cache/lu-cache-factory {} :threshold 256))
 
@@ -328,13 +342,8 @@
 (defn Un [& types]
   {:pre [(every? r/Type? types)]
    :post [(r/Type? %)]}
-  ;(prn "Un" (map ind/unparse-type types))
-  (if-let [hit (p :Union-cache-lookup (get @Un-cache (p :Union-calc-hash (set types))))]
-    (do (p :Un-cache-hit)
-        hit)
-  (p :type-ctors/Un-ctor
-  (let [_ (p :Un-cache-miss)
-        res (let [subtype? @(subtype?-var)]
+  ;(prn "Un" types)
+  (let [res (let [subtype? @(subtype?-var)]
               (letfn [;; a is a Type (not a union type)
                       ;; b is a Set[Type] (non overlapping, non Union-types)
                       ;; The output is a non overlapping list of non Union types.
@@ -344,16 +353,19 @@
                                    true)
                                (not (r/Union? a))]
                          :post [(set? %)]}
-                        #_(prn "merge-type" a b)
                         (let [b* (make-Union b)
                               ;_ (prn "merge-type" a b*)
+                              sub-pick-b (subtype? a b*)
+                              ;_ (prn "sub-pick-b" sub-pick-b b)
+                              sub-pick-a (subtype? b* a)
+                              ;_ (prn "sub-pick-a" sub-pick-a #{a})
                               res (cond
                                     ; don't resolve type applications in case types aren't
                                     ; fully defined yet
                                     ; TODO basic error checking, eg. number of params
                                     (some (some-fn r/Name? r/TApp?) (conj b a)) (conj b a)
-                                    (subtype? a b*) b
-                                    (subtype? b* a) #{a}
+                                    sub-pick-b b
+                                    sub-pick-a #{a}
                                     :else (set (cons a 
                                                      (remove #(subtype? % a) b))))]
                           ;(prn "res" res)
@@ -363,14 +375,13 @@
                     (empty? types) r/empty-union
                     (= 1 (count types)) (first types)
                     :else 
-                    (p :Un-merge-type 
-                       (make-Union
-                         (reduce (fn [acc t] (p :Un-merge-type-inner (merge-type t acc)))
-                                 #{}
-                                 (p :Un-flatten-unions 
-                                    (set (flatten-unions types))))))))))]
-    (swap! Un-cache assoc (set types) res)
-    res))))
+                    (let [tfs (flatten-unions types)]
+                      ;(prn "Un flatten-unions" tfs)
+                      (make-Union
+                        (reduce (fn [acc t] (merge-type t acc))
+                                #{}
+                                tfs)))))))]
+    res))
 
 ;; Intersections
 
@@ -390,7 +401,9 @@
 
 (t/ann ^:no-check make-Intersection [(t/U nil (t/Seqable r/Type)) -> r/Type])
 (defn make-Intersection [types]
-  (let [cnt (count types)]
+  (assert (not-any? (some-fn r/Union? r/Intersection?) types))
+  (let [types (remove #{r/-any} types)
+        cnt (count types)]
     (cond
       (= 0 cnt) r/-any
       (= 1 cnt) (first types)
@@ -426,6 +439,8 @@
     :complete?
       (not-any? :other-keys? [t1 t2])))
 
+(declare flatten-intersections)
+
 (t/ann ^:no-check intersect [r/Type r/Type -> r/Type])
 (defn intersect [t1 t2]
   {:pre [(r/Type? t1)
@@ -433,54 +448,59 @@
          #_(not (r/Union? t1))
          #_(not (r/Union? t2))]
    :post [(r/Type? %)]}
-  (let [subtype? @(subtype?-var)]
-    ;(prn "intersect" (map ind/unparse-type [t1 t2]))
-    (if-let [hit (@intersect-cache (set [t1 t2]))]
-      (do
-        ;(prn "intersect hit" (ind/unparse-type hit))
-        (p :intersect-cache-hit)
-        hit)
-      (let [_ (p :intersect-cache-miss)
-            t (cond
-                ; Unchecked is "sticky" even though it's a subtype/supertype
-                ; of everything
-                (or (and (r/Unchecked? t1) (not (r/Unchecked? t2)))
-                    (and (not (r/Unchecked? t1)) (r/Unchecked? t2)))
-                (make-Intersection [t1 t2])
+  (let [make-In (fn [t1 t2]
+                  (let [ts (flatten-intersections [t1 t2])]
+                    ;(prn "ts" ts)
+                    (cond
+                      ; distribute intersection
+                      ;  t ^ (s v s') ==> (t ^ s) v (t ^ s')
+                      (some r/Union? ts) (let [dist (map (fn [c] (apply In c))
+                                                         (apply comb/cartesian-product (map flatten-unions ts)))]
+                                           ;(prn "dist" dist)
+                                           (apply Un dist))
+                      :else (make-Intersection ts))))
+        subtype? @(subtype?-var)
+        ;_ (prn "intersect" [t1 t2])
+        t (cond
+            ; Unchecked is "sticky" even though it's a subtype/supertype
+            ; of everything
+            (or (and (r/Unchecked? t1) (not (r/Unchecked? t2)))
+                (and (not (r/Unchecked? t1)) (r/Unchecked? t2)))
+            (make-In t1 t2)
 
-                (and (r/HeterogeneousMap? t1)
-                     (r/HeterogeneousMap? t2))
-                  (intersect-HMap t1 t2)
+            (and (r/HeterogeneousMap? t1)
+                 (r/HeterogeneousMap? t2))
+            (intersect-HMap t1 t2)
 
-                ;RClass's with the same base, intersect args pairwise
-                (and (r/RClass? t1)
-                     (r/RClass? t2)
-                     (= (:the-class t1) (:the-class t2)))
-                (let [args (doall (map intersect (:poly? t1) (:poly? t2)))]
-                  ; if a new arg is bottom when none of the old args are bottom,
-                  ; reduce type to bottom
-                  (if (some (fn [[new [old1 old2]]]
-                              (and (every? (complement #{(Un)}) [old1 old2])
-                                   (#{(Un)} new)))
-                            (map vector args (map vector (:poly? t1) (:poly? t2))))
-                    (Un)
-                    (RClass-of (:the-class t1) args)))
+            ;RClass's with the same base, intersect args pairwise
+            (and (r/RClass? t1)
+                 (r/RClass? t2)
+                 (= (:the-class t1) (:the-class t2)))
+            (let [args (doall (map intersect (:poly? t1) (:poly? t2)))]
+              ; if a new arg is bottom when none of the old args are bottom,
+              ; reduce type to bottom
+              (if (some (fn [[new [old1 old2]]]
+                          (and (every? (complement #{(Un)}) [old1 old2])
+                               (#{(Un)} new)))
+                        (map vector args (map vector (:poly? t1) (:poly? t2))))
+                (Un)
+                (RClass-of (:the-class t1) args)))
 
-                (not (overlap t1 t2)) bottom
+            (not (overlap t1 t2)) (do
+                                    ;(prn "no overlap" t1 t2)
+                                    bottom)
 
-                (subtype? t1 t2) t1
-                (subtype? t2 t1) t2
-                :else (do
-                        #_(prn "failed to eliminate intersection" (make-Intersection [t1 t2]))
-                        (make-Intersection [t1 t2])))]
-        (swap! intersect-cache assoc (set [t1 t2]) t)
-        ;(prn "intersect miss" (ind/unparse-type t))
-        t))))
+            (subtype? t1 t2) t1
+            (subtype? t2 t1) t2
+            :else (do 
+                    (make-In t1 t2)))]
+    ;(prn "intersect res" t)
+    t))
 
 (t/ann ^:no-check flatten-intersections [(t/U nil (t/Seqable r/Type)) -> (t/Seqable r/Type)])
 (defn flatten-intersections [types]
   {:pre [(every? r/Type? types)]
-   :post [(every? r/Type? %)]}
+   :post [(every? (every-pred r/Type? (complement r/Intersection?)) %)]}
   (t/loop [work :- (t/Seqable r/Type), types
            result :- (t/Seqable r/Type), []]
     (if (empty? work)
@@ -507,51 +527,51 @@
 (defn In [& types]
   {:pre [(every? r/Type? types)]
    :post [(r/Type? %)]}
-  ;(prn "In" types)
-;  (if-let [hit (@In-cache (set types))]
-;    (do #_(prn "In hit" hit)
-;        hit)
-  (p :type-ctors/In-ctor
-    (let [res (let [ts (set (flatten-intersections types))]
-                (cond
-                  ; empty intersection is Top
-                  (empty? ts) r/-any
+  (let [res (let [ts (map (fn [t] (if (r/NotType? t)
+                                    (-not (:type t))
+                                    t))
+                          types)
+                  ts (set (flatten-intersections types))]
+              (cond
+                ; empty intersection is Top
+                (empty? ts) r/-any
 
-                  ; intersection containing Bottom is Bottom
-                  (contains? ts bottom) r/-nothing
+                ; intersection containing Bottom is Bottom
+                (contains? ts bottom) r/-nothing
 
-                  (= 1 (count ts)) (first ts)
+                (= 1 (count ts)) (first ts)
 
-                  ; normalise (I t1 t2 (t/U t3 t4))
-                  ; to (t/U (I t1 t2) (I t1 t2 t3) (t/U t1 t2 t4))
-                  :else (let [{unions true non-unions false} (group-by r/Union? ts)
-                              ;_ (prn "unions" (map ind/unparse-type unions))
-                              ;_ (prn "non-unions" (map ind/unparse-type non-unions))
-                              ;intersect all the non-unions to get a possibly-nil type
-                              intersect-non-unions 
-                              (p :intersect-in-In (when (seq non-unions)
-                                                    (reduce intersect non-unions)))
-                              ;if we have an intersection above, use it to update each
-                              ;member of the unions we're intersecting
-                              flat-unions (set (flatten-unions unions))
-                              intersect-union-ts (cond 
-                                                   intersect-non-unions
-                                                   (if (seq flat-unions)
-                                                     (reduce (fn [acc union-m]
-                                                               (conj acc (intersect intersect-non-unions union-m)))
-                                                             #{} flat-unions)
-                                                     #{intersect-non-unions})
+                ; normalise (I t1 t2 (t/U t3 t4))
+                ; to (t/U (I t1 t2) (I t1 t2 t3) (t/U t1 t2 t4))
+                :else (let [{unions true non-unions false} (group-by r/Union? ts)
+                            ;_ (prn "unions" (map ind/unparse-type unions))
+                            ;_ (prn "non-unions" (map ind/unparse-type non-unions))
+                            ;intersect all the non-unions to get a possibly-nil type
+                            intersect-non-unions 
+                            (p :intersect-in-In (when (seq non-unions)
+                                                  (reduce intersect non-unions)))
+                            ;_ (prn "intersect-non-unions" intersect-non-unions)
+                            ;if we have an intersection above, use it to update each
+                            ;member of the unions we're intersecting
+                            flat-unions (set (flatten-unions unions))
+                            ;_ (prn "flatten-unions" flat-unions)
+                            intersect-union-ts (cond 
+                                                 intersect-non-unions
+                                                 (if (seq flat-unions)
+                                                   (reduce (fn [acc union-m]
+                                                             (conj acc (intersect intersect-non-unions union-m)))
+                                                           #{} flat-unions)
+                                                   #{intersect-non-unions})
 
-                                                   :else flat-unions)
-                              _ (assert (every? r/Type? intersect-union-ts)
-                                        intersect-union-ts)
-                              ;_ (prn "intersect-union-ts" (map ind/unparse-type intersect-union-ts))
-                              ]
-                          (apply Un intersect-union-ts))))]
-      ;(swap! In-cache assoc (set types) res)
-      #_(prn 'IN res (class res))
-      res))
-  )
+                                                 :else flat-unions)
+                            _ (assert (every? r/Type? intersect-union-ts)
+                                      intersect-union-ts)
+                            ;_ (prn "intersect-union-ts" intersect-union-ts)
+                            ]
+                        (apply Un intersect-union-ts))))]
+    ;(prn "In" types)
+    ;(prn "result In" res)
+    res))
 
 (declare TypeFn* instantiate-poly instantiate-typefn abstract-many instantiate-many)
 
@@ -1360,6 +1380,7 @@
     (r/App? ty) (resolve-App ty)
     (r/TApp? ty) (resolve-TApp ty)
     (r/GetType? ty) (resolve-Get ty)
+    (r/NotType? ty) (-not (:type ty))
     :else ty)))
 
 (t/ann requires-resolving? [r/Type -> t/Any])
@@ -1369,9 +1390,11 @@
   (or (r/Name? ty)
       (r/App? ty)
       (and (r/TApp? ty)
-           (not (r/F? (fully-resolve-type (.rator ^TApp ty)))))
+           (not (r/F? (fully-resolve-type (:rator ty)))))
       (and (r/GetType? ty)
            (not (r/F? (fully-resolve-type (:target ty)))))
+      (and (r/NotType? ty)
+           (requires-resolving? (:type ty)))
       (r/Mu? ty))))
 
 (t/ann ^:no-check resolve-Name [Name -> r/Type])
@@ -1549,6 +1572,7 @@
 (defn overlap 
   ([t1 t2] (overlap *overlap-seen* t1 t2))
   ([A t1 t2]
+   ;(prn "overlap" t1 t2)
   (if (contains? A [t1 t2])
     true
     (let [A* (conj A [t1 t2])
@@ -1577,7 +1601,8 @@
                              (and (r/Record? r)
                                   (subtype? s (impl/impl-case
                                                 :clojure (RClass-of clojure.lang.ISeq [r/-any])
-                                                :cljs (Protocol-of 'cljs.core/ISeq [r/-any])))))]
+                                                :cljs (Protocol-of 'cljs.core/ISeq [r/-any])))))
+          res 
       (cond 
         eq eq
 
@@ -1605,22 +1630,36 @@
         (r/Intersection? t2)
         (every? #(overlap t1 %) (:types t2))
 
-        (and (r/NotType? t1)
-             (r/NotType? t2))
-        ;FIXME what if both are Not's?
-        true
+        ;; this doesn't seem viable, should it return
+        ;; (not (overlap (:type t1) (:type t2))) ?
+        ;; isn't overlap too conservative for that?
+;        (and (r/NotType? t1)
+;             (r/NotType? t2))
+;        (overlap (:type t1) (:type t2))
 
         ; eg. (overlap (Not Number) Integer) => false
         ;     (overlap (Not Integer) Number) => true
+        ; TODO
         ;     (overlap (Not y) x) => true
-        (r/NotType? t1)
-        (let [neg-type (fully-resolve-type (:type t1))]
-          (or (some (some-fn r/B? r/F?) [neg-type t2])
-              (not (overlap neg-type t2))))
+        (and (r/NotType? t1)
+             ;; easy case
+             (and (r/RClass? (:type t1))
+                  (empty? (:poly? (:type t1))))
+             (and (r/RClass? t2)
+                  (empty? (:poly? t2))))
+        (not (subtype? t2 (:type t1)))
 
         (r/NotType? t2)
         ;switch arguments to catch above case
         (overlap t2 t1)
+
+        (and (r/Value? t1)
+             (some? (:val t1)))
+        (overlap (RClass-of (class (:val t1))) t2)
+
+        (and (r/Value? t2)
+             (some? (:val t2)))
+        (overlap t1 (RClass-of (class (:val t2))))
 
         ;if both are Classes, and at least one isn't an interface, then they must be subtypes to have overlap
         ;      (and (r/RClass? t1)
@@ -1658,11 +1697,11 @@
             (and (some (fn [pos] (overlap pos other-type)) (.extends the-extends))
                  (not-any? (fn [neg] (overlap neg other-type)) (.without the-extends)))))
 
-        ;; already rules out free variables, so this is safe.
-        (or (r/Value? t1)
-            (r/Value? t2))
-        (or (subtype? t1 t2)
-            (subtype? t2 t1))
+;        ;; already rules out free variables, so this is safe.
+;        (or (r/Value? t1)
+;            (r/Value? t2))
+;        (or (subtype? t1 t2)
+;            (subtype? t2 t1))
 
         (and (r/CountRange? t1)
              (r/CountRange? t2)) 
@@ -1723,7 +1762,10 @@
           (or (rest-sub? t1 t2)
               (rest-sub? t2 t1)))
 
-        :else true))))) ;FIXME conservative result
+        :else true) ;FIXME conservative result
+          ]
+;(prn "overlap res" res)
+    res))))
 
 ; restrict t1 to be a subtype of t2
 (t/ann ^:no-check restrict [r/Type r/Type -> r/Type])

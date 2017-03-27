@@ -4,6 +4,7 @@
     ; this loads the type system, must go first
     [clojure.core.typed.test.test-utils :refer :all]
             [clojure.test :refer :all]
+            [clojure.core.typed.util-vars :as vs]
             [clojure.core.typed.analyze-clj :as ana]
             [clojure.tools.analyzer.passes.jvm.emit-form :as emit-form]
             [clojure.repl :refer [pst]]
@@ -5460,6 +5461,270 @@
   (is-tc-e (let [x (ann-form 1 (U nil Int))]
              (when (some? x)
                (inc x)))))
+
+(defmacro with-new-cs-gen [& body]
+  `(binding [vs/*new-cs-gen* true]
+     ~@body))
+
+(deftest new-cs-gen-test
+  (is-clj (with-new-cs-gen
+            (tc-e (let [id (ann-form (fn [a] a)
+                                     (All [x] [x -> x]))]
+                    (id 1 )))))
+  (is-clj (with-new-cs-gen
+            (tc-e (identity 1)
+                  Num)))
+  (is-clj (with-new-cs-gen
+            (tc-e (identity 1)
+                  Bool)))
+  (is-clj (with-new-cs-gen
+            (tc-e (map identity [1]))))
+  (is-clj (with-new-cs-gen
+            (tc-e (do
+                    (ann ^:no-check vec2 (All [x] [(t/Seqable x) -> (t/Seqable Any)]))
+                    (def vec2 vec)
+                    (vec2 [(ann-form 1 Num)])
+                  ))))
+  (is-clj (with-new-cs-gen
+            (tc-e (do
+                    (ann ^:no-check vec2 (All [x] [(t/Seqable x) -> (t/Seqable x)]))
+                    (def vec2 vec)
+                    (vec2 [1 2])
+                  ))))
+  (is-clj (with-new-cs-gen
+            (tc-e (do
+                    (ann ^:no-check map2 (All [x a] [[x -> a] (t/Seqable x) -> (t/Seqable a)]))
+                    (def map2 map)
+                    (let [id (ann-form (fn [a] a)
+                                       (All [b] [b -> b]))]
+                      (map2 id [1]))
+                  ))))
+  ;; fails with non-int arity
+  (is-clj (with-new-cs-gen
+            (tc-err (do
+                    (ann even (All [a]
+                                (IFn #_[Int -> Boolean]
+                                     [(I a (Not Int)) -> (I a (Not Int))])))
+                    (defn even [a]
+                      (cond
+                        (integer? a) (even? a)
+                        :else a))
+                    (even 1)
+                  ))))
+  (is-clj (with-new-cs-gen
+            (tc-e (do
+                    (ann even (All [a]
+                                (IFn #_[Int -> Boolean]
+                                     [(I a (Not Long)) -> (I a (Not Long))])))
+                    (defn even [a]
+                      (cond
+                        (instance? Long a) (even? a)
+                        :else a))
+                    (even 'a)
+                  ))))
+  (is-clj (with-new-cs-gen
+            (tc-err (do
+                    (ann even (All [a]
+                                (IFn #_[Int -> Boolean]
+                                     [(I a (Not Long)) -> (I a (Not Long))])))
+                    (defn even [a]
+                      (cond
+                        (instance? Long a) (even? a)
+                        :else a))
+                    (ann ^:no-check map2 (All [x b] [[x -> b] (t/Seqable x) -> (t/Seqable b)]))
+                    (def map2 map)
+                    (map2 (inst even Long) (ann-form [1] (Seqable Long)))
+                  ))))
+  ;; FIXME definitely should fail!
+  (is-clj (with-new-cs-gen
+            (tc-err (do
+                    (ann nothin [Nothing -> Any])
+                    (defn nothin [a] a)
+                    (ann ^:no-check map2 (All [x] [[x -> Any] (t/Seqable x) -> Any]))
+                    (def map2 map)
+                    (map2 nothin (ann-form [1] (t/Seqable Any)))
+                  ))))
+  (is-clj (with-new-cs-gen
+            (tc-e (do
+                    (ann any [Any -> Any])
+                    (defn any [a] a)
+                    (ann ^:no-check map2 (All [x b] [[x -> b] (t/Seqable x) -> (t/Seqable b)]))
+                    (def map2 map)
+                    (map2 any [1])
+                  ))))
+  (is-clj (with-new-cs-gen
+            (tc-e (do
+                    (ann id (All [y] [y -> y]))
+                    (defn id [a] a)
+                    (ann ^:no-check map2 (All [x] [[x -> x] (t/Seqable x) -> (t/Seqable x)]))
+                    (def map2 map)
+                    (map2 id [1])
+                  ))))
+  (is-clj (with-new-cs-gen
+            (tc-e (do
+                    (ann id (All [z] [z -> z]))
+                    (defn id [a] a)
+                    (ann ^:no-check map2 (All [x y] [[x -> y] (t/Seqable x) -> (t/Seqable y)]))
+                    (def map2 map)
+                    (map2 id [1])
+                  ))))
+  (is-clj (with-new-cs-gen
+            (tc-e (do
+                    (ann idvec (All [y] [y -> '[y]]))
+                    (defn idvec [a] [a])
+                    (ann ^:no-check map2 (All [x y] [[x -> y] (t/Seqable x) -> (t/Seqable y)]))
+                    (def map2 map)
+                    (map2 idvec [1])
+                  ))))
+  (is-clj (with-new-cs-gen
+            (tc-e (do
+                    (ann nothin (All [y] [Nothing -> Nothing]))
+                    (defn nothin [a] a)
+                    (nothin 1)
+                  ))))
+  (is-clj (with-new-cs-gen
+            (tc-e (do
+                      (ann even (All [a]
+                                     (IFn [Long -> Boolean]
+                                          [(I a (Not Long)) -> (I a (Not Long))])))
+                      (defn even [a]
+                        (cond
+                          (instance? Long a) (even? a)
+                          :else a))
+                      (ann ^:no-check map2 (All [x b] [[x -> b] (t/Seqable x) -> (t/Seqable b)]))
+                      (def map2 map)
+                      (map2 even (ann-form ['a] (Seqable Sym)))
+                      ))))
+  (is-clj (with-new-cs-gen
+            (tc-e (do
+                      (ann even (All [a]
+                                     (IFn [Long -> Boolean]
+                                          [(I a (Not Long)) -> (I a (Not Long))])))
+                      (defn even [a]
+                        (cond
+                          (instance? Long a) (even? a)
+                          :else a))
+                      (ann ^:no-check map2 (All [x b] [[x -> b] (t/Seqable x) -> (t/Seqable b)]))
+                      (def map2 map)
+                      (map2 even (ann-form ['a] (Seqable (U Long Sym))))
+                      ))))
+)
+
+(deftest intersect-not-test
+  (is (= 
+        -nothing
+        (In (RClass-of Integer)
+            (make-F 'a)
+            (-not (RClass-of Integer)))))
+  (is (= 
+        -nothing
+        (clj
+          (In (RClass-of Integer)
+              (make-F 'a)
+              (-not (RClass-of Integer))
+              (-not (RClass-of Long))))))
+  (is-clj (not= -nothing
+             (-not (Un (RClass-of Integer)
+                       (RClass-of Long)))))
+  (is-clj (not= -nothing
+                (-not (Name-maker `tc/Int))))
+  (is-clj (not= -nothing
+                (In (-not (RClass-of Integer))
+                    (-not (RClass-of Byte)))))
+  (is-clj (overlap (-not (RClass-of Integer))
+                   (-not (RClass-of Byte))))
+  (is-clj (not=
+            (RClass-of Number)
+            (clj (Un 
+                   (In (RClass-of Number)
+                       (RClass-of java.lang.Comparable))
+                   (In (RClass-of Number)
+                       (RClass-of java.lang.Cloneable))))))
+  ; since Serializable <: Number
+  (is-clj (= 
+            (RClass-of Number)
+            (clj (Un 
+                   (RClass-of Number)
+                   (In (RClass-of Number)
+                       (RClass-of java.io.Serializable))))))
+  (is-clj (Intersection?
+            (In (RClass-of Number)
+                (RClass-of java.lang.Comparable))))
+  (is-clj (Union?
+            (clj (Un 
+                   (RClass-of java.lang.Comparable)
+                   (RClass-of Number)))))
+  ;; all simplify to Number, because (U t (I t s)) = t
+  ;; because the union forgets the more specific information.
+  (is-clj (=
+           (RClass-of Number)
+            (clj 
+              (Un (In (RClass-of Number)
+                      (RClass-of Number))
+                  (In (RClass-of Number)
+                      (RClass-of java.lang.Comparable))))
+            (clj (Un 
+                   (In (RClass-of Number)
+                       (RClass-of java.lang.Comparable))
+                   (RClass-of Number)))))
+  (is-clj (=
+            (RClass-of Number)
+            (clj (Un 
+                   (In (RClass-of Number)
+                       (RClass-of java.lang.Comparable))
+                   (In (RClass-of Number)
+                       (RClass-of java.io.Serializable))))))
+  (is-clj (=
+           (clj (Un 
+                  (In (RClass-of Number)
+                      (RClass-of java.lang.Comparable))
+                  (In (RClass-of Number)
+                      (RClass-of java.lang.Cloneable))))
+           (In (RClass-of Number)
+               (Un (RClass-of java.lang.Comparable)
+                   (RClass-of java.lang.Cloneable)))))
+  (is-clj (false?
+            (overlap (RClass-of Integer)
+                     (RClass-of Long))))
+  (is (= 
+        -nothing
+        (clj
+          (In (RClass-of Integer)
+              (make-F 'a)
+              (-not (Un (RClass-of Integer)
+                        (RClass-of Long)))))))
+  (is (NotType?
+            (-not (make-FnIntersection
+                    (make-Function
+                      []
+                      -any)))))
+  (is (= -any (-not -nothing)))
+#_
+  (is
+    (not= (-val 1)
+          (clj
+            (In (-val 1)
+                (-not 
+                  (In (make-F 'a)
+                      (-not (RClass-of Integer))))))))
+  (is (= (Un (RClass-of Integer)
+             (-not (make-F 'a)))
+         (-not 
+           (In (make-F 'a)
+               (-not (RClass-of Integer))))))
+  (is (clj
+        (= (In (RClass-of java.lang.Boolean)
+               (-not (make-F 'a)))
+           (In (RClass-of Boolean)
+               (Un (RClass-of Integer)
+                   (-not (make-F 'a)))))))
+  (is (clj
+        (= (-val 1)
+           (Un (-val 1)
+               (In (-val 1)
+                   (-not (make-F 'a)))))))
+  )
+
 
 ;    (is-tc-e 
 ;      (let [f (fn [{:keys [a] :as m} :- '{:a (U nil Num)}] :- '{:a Num} 

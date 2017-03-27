@@ -1,16 +1,21 @@
 (ns ^:skip-wiki clojure.core.typed.check.funapp
   (:require [clojure.core.typed.type-rep :as r]
             [clojure.core.typed.utils :as u]
+            [clojure.core.typed.current-impl :as impl]
+            [clojure.core.typed.util-vars :as uv]
             [clojure.core.typed.subtype :as sub]
             [clojure.core.typed.coerce-utils :as coerce]
             [clojure.core.typed.type-ctors :as c]
+            [clojure.core.typed.tvar-env :as tvar]
             [clojure.core.typed.parse-unparse :as prs]
             [clojure.core.typed.check.utils :as cu]
             [clojure.core.typed.errors :as err]
             [clojure.core.typed.check.invoke-kw :as invoke-kw]
             [clojure.core.typed.check.funapp-one :as funapp1]
             [clojure.core.typed.check.app-error :as app-err]
+            [clojure.core.typed.cs-rep :as crep]
             [clojure.core.typed.cs-gen :as cgen]
+            ;[clojure.core.typed.cs-gen-new :as cgen-new]
             [clojure.core.typed.free-ops :as free-ops]
             [clojure.core.typed.contract-utils :as con]
             [clojure.core.typed.indirect-utils :as ind-u]
@@ -40,6 +45,62 @@
       (r/RClass? t)
       (first (filter (some-fn r/Poly? r/FnIntersection?) (c/RClass-supers* t)))
       ;handle other types here
+      )))
+
+(defn new-cs-gen [fexpr args fexpr-ret-type arg-ret-types expected]
+  (let [fexpr-type (c/fully-resolve-type (r/ret-t fexpr-ret-type))]
+    (cond
+      (when (r/Poly? fexpr-type)
+        (let [names (c/Poly-fresh-symbols* fexpr-type)
+              body (c/Poly-body* names fexpr-type)]
+          (when (r/FnIntersection? body)
+            (every? (complement :drest) (:types body)))))
+      (let [fs-names (c/Poly-fresh-symbols* fexpr-type)
+            _ (assert (every? symbol? fs-names))
+            fin (c/Poly-body* fs-names fexpr-type)
+            bbnds (c/Poly-bbnds* fs-names fexpr-type)
+            _ (assert (r/FnIntersection? fin))
+            no-mentions (set (keys tvar/*current-tvars*))
+            result-var (gensym "result")
+            _ (require 'clojure.core.typed.cs-gen-new)
+            infer-substs (impl/v 'clojure.core.typed.cs-gen-new/infer-substs)
+            cs (concat
+                 [[fin (r/make-FnIntersection
+                         (r/make-Function
+                           (mapv :t arg-ret-types)
+                           (r/make-F result-var)))]]
+                 (when expected
+                   [[(r/make-F result-var) (r/ret-t expected)]]))
+            ;; Only infer free variables in the return type
+            ret-substs
+            (free-ops/with-bounded-frees (zipmap (map r/F-maker fs-names) bbnds)
+              (infer-substs
+                no-mentions
+                (map first cs)
+                (map second cs)))
+            _ (prn "ret-substs" ret-substs)
+            result-var-substs (keep #(get % result-var) ret-substs)
+            _ (prn "result-var-substs" result-var-substs)
+            result-intersect (when (seq result-var-substs)
+                               (apply c/In (map (fn [sbst]
+                                                  (cond
+                                                    (crep/t-subst? sbst) (:type sbst)
+                                                    :else (assert nil (str "What is this? " (pr-str sbst)))))
+                                                result-var-substs)))
+            result-fvs (when result-intersect
+                         (filter (set fs-names) (frees/fv result-intersect)))
+            poly-result (when result-fvs
+                          (if (seq result-fvs)
+                            (c/Poly* result-fvs
+                                     (map (constantly r/no-bounds) result-fvs)
+                                     result-intersect)
+                            result-intersect))
+                          ]
+        (if poly-result
+          (r/ret poly-result)
+          (app-err/polyapp-type-error fexpr args fexpr-type arg-ret-types expected)))
+:else
+      (assert nil "TODO new-cs-gen cases")
       )))
 
 ; Expr Expr^n TCResult TCResult^n (U nil TCResult) -> TCResult
@@ -195,6 +256,10 @@
         (if success-ret-type
           success-ret-type
           (app-err/plainapp-type-error fexpr args fexpr-type arg-ret-types expected))))
+
+      (and (r/Poly? fexpr-type)
+           uv/*new-cs-gen*)
+      (new-cs-gen fexpr args fexpr-ret-type arg-ret-types expected)
 
       ;ordinary polymorphic function without dotted rest
       (when (r/Poly? fexpr-type)

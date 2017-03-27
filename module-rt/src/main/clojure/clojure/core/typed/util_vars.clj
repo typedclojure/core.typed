@@ -43,3 +43,4 @@
 (defonce ^{:doc "Internal use only"} ^:skip-wiki ^:dynamic *lexical-env* nil)
 (defonce ^{:doc "Internal use only"} ^:skip-wiki ^:dynamic *can-rewrite* nil)
 (defonce ^{:doc "Internal use only"} ^:skip-wiki ^:dynamic *in-typed-load* nil)
+(defonce ^{:doc "Internal use only"} ^:skip-wiki ^:dynamic *new-cs-gen* nil)

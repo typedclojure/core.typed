@@ -791,7 +791,7 @@
    (or (nil? pdot)
        (DottedPretype? pdot))]
   :methods
-  [p/TCAnyType])
+  [p/TCType])
 
 (u/ann-record TopFunction [])
 (u/def-type TopFunction []

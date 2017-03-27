@@ -404,11 +404,11 @@
         ;________________________________________
         ; A <: (Not B)
 ;   Should this also require (fv s) U (fv t) to be empty?
-        (r/NotType? t)
-        (if (and (not-any? (some-fn r/B? r/F?) [s (:type t)])
-                 (not (subtype? s (:type t))))
-          *sub-current-seen*
-          (fail! s t))
+;        (r/NotType? t)
+;        (if (and (not-any? (some-fn r/B? r/F?) [s (:type t)])
+;                 (not (subtype? s (:type t))))
+;          *sub-current-seen*
+;          (fail! s t))
 
 ; delegate to NotType
         (r/DifferenceType? s)
