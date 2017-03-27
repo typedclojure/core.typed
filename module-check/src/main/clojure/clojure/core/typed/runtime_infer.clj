@@ -2834,7 +2834,7 @@
 
        :else (do
                (add-infer-result! results-atom (infer-result path (-class (class v) [])))
-               v)))))
+               v))))))
 
 (def prim-invoke-interfaces
   (into #{}
