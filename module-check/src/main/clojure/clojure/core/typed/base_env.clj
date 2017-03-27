@@ -1670,6 +1670,55 @@ clojure.java.javadoc/javadoc [Object -> Any]
 complete.core/completions
 (IFn [Any -> Any]
      [Any Any -> Any])
+;; transients
+clojure.core/disj!
+     (All [x]
+        [(ITransientSet x) Any * -> (ITransientSet x)])
+
+clojure.core/transient
+     (All [t]
+				[(IEditableCollection t) -> t])
+
+clojure.core/persistent!
+     (All [x y]
+          (IFn [(ITransientVector x) -> (Vec x)]
+               [(ITransientSet x) -> (Set x)]
+               [(ITransientMap x y) -> (Map x y)]))
+
+clojure.core/assoc!
+     (All [b c d]
+          (IFn [(ITransientMap b c) b c -> (ITransientMap b c)]
+							 [(ITransientMap b c) b c b c -> (ITransientMap b c)]
+							 [(ITransientMap b c) b c b c b c -> (ITransientMap b c)]
+               [(ITransientVector d) AnyInteger d -> (ITransientVector d)]
+               [(ITransientVector d) AnyInteger d AnyInteger d -> (ITransientVector d)]
+               [(ITransientVector d) AnyInteger d AnyInteger d AnyInteger d -> (ITransientVector d)]))
+
+clojure.core/dissoc!
+     (All [k v] 
+          [(ITransientMap k v) Any Any * -> (ITransientMap k v)])
+
+clojure.core/conj!
+     (All [x y]
+         (IFn [(ITransientVector x) x x * -> (ITransientVector x)]
+             [(ATransientMap x y)
+              (U nil (Seqable (IMapEntry x y)) (IMapEntry x y) '[x y])
+              (U nil (Seqable (IMapEntry x y)) (IMapEntry x y) '[x y]) *
+              -> (ATransientMap x y)]
+             [(ITransientMap x y)
+              (U nil (Seqable (IMapEntry x y)) (IMapEntry x y) '[x y])
+              (U nil (Seqable (IMapEntry x y)) (IMapEntry x y) '[x y]) * -> (ITransientMap x y)]
+             [(ITransientSet x) x x * -> (ITransientSet x)]))
+
+clojure.core/pop! (All [x]
+									  [(ITransientVector x) -> (ITransientVector x)])
+
+
+
+
+
+
+
   )
     {'clojure.core/count (count-type)
      'clojure.core/aset-boolean (aset-*-type 'boolean)
