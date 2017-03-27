@@ -1500,7 +1500,8 @@ clojure.core/rseq
 
 ;coercions
 clojure.core/bigdec [Number -> BigDecimal]
-clojure.core/bigint [Number -> clojure.lang.BigInt]
+;; also takes byte array, revisit when real primitive arrays can be expressed
+clojure.core/bigint [(U Str Number) -> clojure.lang.BigInt]
 clojure.core/biginteger [Number -> java.math.BigInteger]
 clojure.core/boolean [Any -> Boolean]
 clojure.core/byte [(U Character Number) -> Byte]
