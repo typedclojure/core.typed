@@ -657,7 +657,8 @@
     clojure.core/name [(U Keyword String Symbol) -> String]
     ;todo clojure.core/replace
     clojure.core/fnext (All [a] [(Seqable a) -> a])
-    clojure.core/rem [Number Number -> Number]")
+    clojure.core/rem [Number Number -> Number]
+    clojure.core/frequencies (All [a] [(Seqable a) -> (Map a Int)])")
 
 (def common-var-annotations
   (delay

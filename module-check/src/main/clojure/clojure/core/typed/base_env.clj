@@ -508,7 +508,7 @@ clojure.core/comp
 
 clojure.core/apply
      (All [y a b c d r z ...]
-          (Fn [[z ... z -> y] (U nil (HSequential [z ... z])) -> y]
+          (IFn [[z ... z -> y] (U nil (HSequential [z ... z])) -> y]
               [[a z ... z -> y] a (U nil (HSequential [z ... z])) -> y]
               [[a b z ... z -> y] a b (U nil (HSequential [z ... z])) -> y]
               [[a b c z ... z -> y] a b c (U nil (HSequential [z ... z])) -> y]
@@ -517,7 +517,8 @@ clojure.core/apply
               [[a r * -> y] a (U nil (Seqable r)) -> y]
               [[a b r * -> y] a b (U nil (Seqable r)) -> y]
               [[a b c r * -> y] a b c (U nil (Seqable r)) -> y]
-              [[a b c d r * -> y] a b c d (U nil (Seqable r)) -> y]))
+              [[a b c d r * -> y] a b c d (U nil (Seqable r)) -> y]
+              ))
 
 ;partial: wishful thinking (replaces the first 4 arities)
 ; (All [b1 ...]
@@ -1986,6 +1987,8 @@ clojure.lang.Numbers/gte [Number Number -> Boolean]
 clojure.lang.Numbers/isZero [Number -> Boolean
                              :filters {:then (is (Value 0) 0)
                                        :else (!  (Value 0) 0)}]
+clojure.lang.Numbers/isNeg [Number -> Boolean]
+clojure.lang.Numbers/isPos [Number -> Boolean]
 
 clojure.lang.Util/compare [Any Any -> Number]
 
