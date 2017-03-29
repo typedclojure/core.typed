@@ -1,6 +1,6 @@
 (ns clojure.core.typed.test.mini-occ
   {:lang :core.typed
-   :core.typed {:features #{#_:runtime-infer}
+   :core.typed {:features #{:runtime-infer}
                 :runtime-infer {:collapse #{:E}}}
    }
   (:require [clojure.test :refer [deftest is]]
