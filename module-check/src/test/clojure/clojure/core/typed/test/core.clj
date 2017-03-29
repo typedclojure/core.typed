@@ -5502,7 +5502,8 @@
 
 (deftest apply-concat-test
   (is-tc-e (apply concat []))
-  (is-tc-e (apply concat [[1]])))
+  (is-tc-e (apply concat [[1]]))
+  (is-tc-e (apply distinct? [[1]])))
 
 ;    (is-tc-e 
 ;      (let [f (fn [{:keys [a] :as m} :- '{:a (U nil Num)}] :- '{:a Num} 

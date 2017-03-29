@@ -1347,10 +1347,11 @@
 
 ;;TODO attach new :args etc.
 ;;convert apply to normal function application
+(add-invoke-apply-method :default 
+  [expr & [expected]]
 ; commented: Now done in the invoke-special method for apply
-;(add-invoke-apply-method :default 
-;  [expr & [expected]]
-;  (maybe-special-apply check expr expected))
+  #_(maybe-special-apply check expr expected)
+  cu/not-special)
 
 (add-check-method :invoke
   [{fexpr :fn :keys [args env] :as expr} & [expected]]
