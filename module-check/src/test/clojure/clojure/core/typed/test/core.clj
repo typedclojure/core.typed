@@ -5505,6 +5505,36 @@
   (is-tc-e (apply concat [[1]]))
   (is-tc-e (apply distinct? [[1]])))
 
+(deftest vals-path-test
+  (is-tc-e (fn [blah :- (Map Int Int)]
+             (let [foo (vals blah)]
+               foo)))
+  (is-tc-e (fn [blah :- (Map Int Int)]
+             (let [foo (vals blah)]
+               (apply + foo)))))
+
+(deftest sorted-map-test
+  (is-tc-e (hash-map))
+  (is-tc-e (sorted-map))
+  (is-tc-err (sorted-map 1))
+  (is-tc-e (sorted-map 1 2)))
+
+(deftest number-intersection-test
+  (is-tc-e 
+    (do
+      (ann ^:no-check takes-int-coll [(t/Coll Int) -> Any])
+      (def takes-int-coll identity)
+      (ann ^:no-check num-coll-pred [(t/Coll t/Any) :-> Boolean :filters {:then (is (t/Coll t/Num) 0)}])
+      (def num-coll-pred identity)
+      (fn [e :- (t/Coll (U Character t/Int))]
+        (when (num-coll-pred e)
+          (when (seq e)
+            (inc (first e))))))))
+
+(deftest vector-as-first-class-function-test
+  (is-tc-e (fn [a :- (Vec String)] :- (Seqable String)
+             (map a (range 10)))))
+
 ;    (is-tc-e 
 ;      (let [f (fn [{:keys [a] :as m} :- '{:a (U nil Num)}] :- '{:a Num} 
 ;                {:pre [(number? a)]} 

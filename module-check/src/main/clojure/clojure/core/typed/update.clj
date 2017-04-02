@@ -330,9 +330,10 @@
                                   [(c/RClass-of clojure.lang.Seqable [(r/make-F x)])]
                                   r/-any)))
             ;_ (prn "subst for Keys/Vals" subst)
-            _ (when-not subst
-                (err/int-error (str "Cannot update " (if (pe/KeysPE? fstpth) "keys" "vals") " of an "
-                                    "IPersistentMap with type: " (pr-str (prs/unparse-type u)))))
+            ]
+        (if-not subst
+          t
+          (let [
             element-t-subst (get subst x)
             _ (assert (crep/t-subst? element-t-subst))
             ; the updated 'keys/vals' type
@@ -349,7 +350,7 @@
                      (c/RClass-of IPersistentMap [r/-any element-t]))
                    pos? nil)
           ; can we do anything for a NotTypeFilter?
-          t))
+          t))))
 
       (pe/KeywordPE? (first lo))
       ;; t is the old type, eg. (Val "my-key"). Can also be any type.

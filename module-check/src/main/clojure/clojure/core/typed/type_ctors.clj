@@ -105,7 +105,7 @@
 (def AnyHSequential?
   "Predicate for any type that fully supports the HSequential interface."
   ;; HeterogeneousList does not currently support :rest and others
-  (some-fn r/HSequential? r/HeterogeneousSeq? r/HeterogeneousVector?))
+  r/-AnyHSequential?)
 )
 
 ;; Heterogeneous maps
@@ -2433,6 +2433,6 @@
 (defn -name [sym & ts]
   (let [nme (r/Name-maker sym)]
     (if ts
-      (-tapp nme ts)
+      (r/TApp-maker nme ts)
       nme)))
 )

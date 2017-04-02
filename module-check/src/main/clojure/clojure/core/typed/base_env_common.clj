@@ -638,8 +638,7 @@
     clojure.core/reductions (All [a b] (IFn [[a b -> a] (Seqable b) -> (ASeq a)]
                                             [[a b -> a] a (Seqable b) -> (ASeq a)]))
     clojure.core/reduced? [Any -> Boolean]
-    clojure.core/sequence (All [a] (IFn [(Seqable a) -> (ASeq a)]
-                                        [Any -> (EmptySeqable a)]))
+    clojure.core/sequence (All [a] [(Seqable a) -> (ASeq a)])
     clojure.core/dec [Number -> Number]
     clojure.core/inc [Number -> Number]
     clojure.core/set (All [a] [(Coll a) -> (Set a)])

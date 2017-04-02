@@ -3038,6 +3038,17 @@
 
 (defn track-local-fn [track-kind line column end-line end-column ns val]
   {:pre [(#{:local-fn :loop-var} track-kind)]}
+  (prn "track-local-fn" 
+       (symbol
+         (str (ns-name ns)
+              "|"
+              line
+              "|"
+              column
+              "|"
+              end-line
+              "|"
+              end-column)))
   (track results-atom val [{:op :var
                             ::track-kind track-kind
                             :line line

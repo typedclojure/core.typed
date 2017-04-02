@@ -44,6 +44,27 @@
                      (path-type t* ps resolved))
                    (:types t)))
 
+       (pe/KeysPE? (first ps))
+       (c/-name 
+         'clojure.core.typed/ASeq
+         (cond
+           (r/HeterogeneousMap? t) (c/RClass-of clojure.lang.Keyword)
+           (r/RClass? t) (let [_ (assert (= (:the-class t) 'clojure.lang.IPersistentMap))
+                               _ (assert (= 2 (count (:poly? t))))]
+                           (first (:poly? t)))
+           :else (err/int-error (str "Bad call to path-type: bad KeysPE, " (pr-str t) ", " (pr-str ps)))))
+
+       (pe/ValsPE? (first ps))
+       (c/-name 
+         'clojure.core.typed/ASeq
+         (cond
+           (r/HeterogeneousMap? t) (apply c/Un (mapcat vals [(:mandatory t) (:optional t)]))
+           (r/RClass? t) (let [_ (assert (= (:the-class t) 'clojure.lang.IPersistentMap))
+                               _ (assert (= 2 (count (:poly? t))))]
+                           (second (:poly? t)))
+           :else (err/int-error (str "Bad call to path-type: bad KeysPE, " (pr-str t) ", " (pr-str ps)))))
+
+
        (and (pe/KeyPE? (first ps))
             (r/HeterogeneousMap? t))
        (let [kpth (cu/KeyPE->Type (first ps))]
