@@ -5535,6 +5535,15 @@
   (is-tc-e (fn [a :- (Vec String)] :- (Seqable String)
              (map a (range 10)))))
 
+(deftest group-by-annotation-test
+  (is-tc-e #(group-by (inst identity Any) (range 10)))
+  (is-tc-e
+    (fn [N :- Int
+         growth-string :- (Vec Int)]
+      (let [groups (group-by growth-string (range N))]
+        (map groups (range (count groups)))))))
+
+
 ;    (is-tc-e 
 ;      (let [f (fn [{:keys [a] :as m} :- '{:a (U nil Num)}] :- '{:a Num} 
 ;                {:pre [(number? a)]} 
