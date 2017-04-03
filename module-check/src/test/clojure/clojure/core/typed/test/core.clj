@@ -5543,6 +5543,12 @@
       (let [groups (group-by growth-string (range N))]
         (map groups (range (count groups)))))))
 
+(deftest seqable-sequential-cast-nth-test
+  (is-tc-e (fn [a]
+             {:pre [(seqable? a)
+                    (sequential? a)]}
+             (nth a 1))))
+
 
 ;    (is-tc-e 
 ;      (let [f (fn [{:keys [a] :as m} :- '{:a (U nil Num)}] :- '{:a Num} 

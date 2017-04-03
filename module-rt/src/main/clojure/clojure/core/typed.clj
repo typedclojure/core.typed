@@ -2078,8 +2078,8 @@ for checking namespaces, cf for checking individual forms."}
   
   eg. (ann-protocol IFoo
         bar
-        (Fn [IFoo -> Any]
-            [IFoo Number Symbol -> Any])
+        (IFn [IFoo -> Any]
+             [IFoo Number Symbol -> Any])
         baz
         [IFoo Number -> Number])
       (defprotocol> IFoo
@@ -2091,8 +2091,8 @@ for checking namespaces, cf for checking individual forms."}
       (ann-protocol [[x :variance :covariant]]
         IFooPoly
         bar
-        (Fn [(IFooPoly x) -> Any]
-            [(IFooPoly x) Number Symbol -> Any])
+        (IFn [(IFooPoly x) -> Any]
+             [(IFooPoly x) Number Symbol -> Any])
         baz
         [(IFooPoly x) Number -> Number])
       (defprotocol> IFooPoly

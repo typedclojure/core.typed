@@ -645,7 +645,7 @@
     clojure.core/nfirst (All [a b c] [(Seqable (Seqable a)) -> (ASeq a)])
     clojure.core/group-by (All [x y] [[x -> y] (U nil (Seqable x)) -> (Map y (Vec x))])
     clojure.core/keep (All [a b] [[a -> (Option b)] (Coll a) -> (Option (ASeq b))])
-    clojure.core/seqable? [Any -> Boolean]
+    clojure.core/seqable? (Pred (Seqable Any))
     clojure.core/sort-by (All [a] (IFn [(Coll a) -> (ASeq a)]
                                        [[a -> Number] (Coll a) -> (ASeq a)]))
     clojure.core/replicate (All [a] [Number a -> (ASeq a)])

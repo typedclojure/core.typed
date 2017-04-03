@@ -1497,9 +1497,9 @@ clojure.core/rseq
        [(clojure.core.typed/Reversible x) -> (Option (NonEmptyASeq x))])
 
 ;coercions
-clojure.core/bigdec [Number -> BigDecimal]
-clojure.core/bigint [Number -> clojure.lang.BigInt]
-clojure.core/biginteger [Number -> java.math.BigInteger]
+clojure.core/bigdec [(U String Number) -> BigDecimal]
+clojure.core/bigint [(U String Number) -> clojure.lang.BigInt]
+clojure.core/biginteger [(U String Number) -> java.math.BigInteger]
 clojure.core/boolean [Any -> Boolean]
 clojure.core/byte [(U Character Number) -> Byte]
 clojure.core/char [(U Character Number) -> Character]
