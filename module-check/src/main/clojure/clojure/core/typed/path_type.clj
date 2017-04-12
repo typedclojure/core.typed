@@ -12,10 +12,6 @@
             [clojure.core.typed.errors :as err])
   (:import (clojure.lang Keyword Symbol)))
 
-(t/tc-ignore
-(alter-meta! *ns* assoc :skip-wiki true)
-  )
-
 ; ported from Typed Racket, originally by Andrew Kent
 ;; returns the result of following a path into a type
 ;;  Type (Listof PathElem)-> Type
@@ -94,6 +90,9 @@
 
        (pe/CountPE? (first ps))
        (path-type (r/Name-maker `t/Int) (next ps))
+
+       (pe/ClassPE? (first ps))
+       (path-type (c/Un r/-nil (c/RClass-of Class)) (next ps))
 
        (and (pe/NthPE? (first ps))
             (r/HeterogeneousList? t))

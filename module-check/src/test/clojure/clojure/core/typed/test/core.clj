@@ -5549,6 +5549,11 @@
                     (sequential? a)]}
              (nth a 1))))
 
+(deftest class-path-elem-test
+  (is-tc-e (fn [a :- t/Any]
+             (let [c (class a)
+                   _ (assert c)]
+               (.isArray c)))))
 
 ;    (is-tc-e 
 ;      (let [f (fn [{:keys [a] :as m} :- '{:a (U nil Num)}] :- '{:a Num} 

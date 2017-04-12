@@ -1,0 +1,14 @@
+0: ITERATION: top of populate-envs
+{:top-level [(declare)], :local-fns []}
+ITERATION: after local aliases
+{:top-level [(declare)], :local-fns []}
+ITERATION: after alias-single-HMaps
+{:top-level [(declare)], :local-fns []}
+finished squash-horizonally
+ITERATION: after squash-horizonally
+{:top-level [(declare)], :local-fns []}
+Start follow-all
+end follow-all
+ITERATION: after follow-all
+{:top-level [(declare)], :local-fns []}
+done populating

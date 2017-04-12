@@ -3,7 +3,7 @@
   :license {:name "Eclipse Public License"
             :url "http://www.eclipse.org/legal/epl-v10.html"}
 
-  :dependencies [[org.clojure/clojure "1.9.0-alpha14"]
+  :dependencies [[org.clojure/clojure "1.9.0-alpha15"]
                  ;[org.clojure/clojurescript "1.9.227"]
                  [com.taoensso/timbre "2.1.2"]
                  [org.clojure/core.match "0.2.0-alpha12"]
@@ -17,6 +17,7 @@
                  [org.clojure/core.cache "0.6.4"]
                  [com.gfredericks/test.chuck "0.2.6"]
                  [org.clojure/test.check "0.9.0"]
+                 [org.clojure/clojurescript "1.9.494"]
                  [rhizome "0.2.5"]
                  ]
 
@@ -55,4 +56,5 @@
                "module-rt/test/clojure"
                "module-rt/test/cljs"]
 
+  :jvm-opts ["-Xss4m"]
   :cljsbuild {:builds {}})

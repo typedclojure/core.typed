@@ -2622,12 +2622,16 @@
 (def ^:const apply-realize-limit 20)
 
 (def ^:dynamic *max-track-depth* Long/MAX_VALUE #_5)
+(def ^:dynamic *max-track-count* 5)
 
 ; track : (Atom InferResultEnv) Value Path -> Value
 (defn track 
   ([results-atom v path]
    {:pre [(vector? path)]}
-   (let []
+   (prn (str "track depth " (count path) " " (-> path first :name)))
+   #_(when (< 3 (count path))
+     (prn (class v)))
+   (let [_ (swap! results-atom update-in [:path-occurrences (-> path first :name)] (fnil inc 1))]
      (cond
        ((some-fn keyword? nil? false?) v)
        (do
@@ -2636,6 +2640,7 @@
 
        ;; cut off path
        (or
+         (< 200 (get-in @results-atom [:path-occurrences (-> path first :name)] 0))
          (> (count path) *max-track-depth*)
          (not *should-track*))
        ;(debug
@@ -2657,20 +2662,31 @@
        ;; all arities 21 and over will collapse into one.
        (fn? v) (let [;; if this is never called, remember it is actually a function
                      ir (infer-result path (-class clojure.lang.IFn []))
-                     _ (add-infer-result! results-atom ir)]
+                     _ (add-infer-result! results-atom ir)
+                     inner-fn 
+                     (fn [& args]
+                       (let [blen (bounded-count apply-realize-limit args) ;; apply only realises 20 places
+                             _ (when (= 0 blen)
+                                 (track results-atom -any
+                                        (conj path (fn-dom-path 0 -1))))
+                             args (map-indexed
+                                    (fn [n v]
+                                      (if (< n blen)
+                                        (track results-atom v (conj path (fn-dom-path blen n)))
+                                        v))
+                                    args)]
+                         #_(binding [*print-length* 2
+                                   *print-level* 2]
+                           (prn (-> path first :name) "args" (count args)))
+                         (track results-atom (apply v args) (conj path (fn-rng-path blen)))))
+                     ;; readable name
+                     outer-fn 
+                     (eval `(fn [f#] 
+                              (fn ~(symbol (gensym (munge (-> path first :name)))) [& args#] 
+                                (apply f# args#))))
+                     ]
                  (with-meta
-                   (fn [& args]
-                     (let [blen (bounded-count apply-realize-limit args) ;; apply only realises 20 places
-                           _ (when (= 0 blen)
-                               (track results-atom -any
-                                      (conj path (fn-dom-path 0 -1))))
-                           args (map-indexed
-                                  (fn [n v]
-                                    (if (< n blen)
-                                      (track results-atom v (conj path (fn-dom-path blen n)))
-                                      v))
-                                  args)]
-                       (track results-atom (apply v args) (conj path (fn-rng-path blen)))))
+                   (outer-fn inner-fn)
                    (meta v)))
 
        (list? v)
@@ -2736,16 +2752,21 @@
        (and (vector? v) 
             (satisfies? clojure.core.protocols/IKVReduce v)) ; MapEntry's are not IKVReduce
        (let [heterogeneous? (<= (count v) 4)
-             len (count v)]
+             len (count v)
+             so-far (atom 0)]
          (when (= 0 len)
            (add-infer-result! results-atom (infer-result path (-class clojure.lang.IPersistentVector [{:op :union :types #{}}]))))
          (reduce-kv
            (fn [e k v]
+             (swap! so-far inc)
              (let [v' (track results-atom v (conj path (if heterogeneous?
                                                          (index-path len k)
                                                          (vec-entry-path))))]
-               (if (identical? v v')
-                 e
+               (cond
+                 (< *max-track-count* @so-far) (reduced (binding [*should-track* false]
+                                                          (assoc e k v')))
+                 (identical? v v') e
+                 :else
                  (binding [*should-track* false]
                    (assoc e k v')))))
            v
@@ -2819,46 +2840,61 @@
                no-kw-val))
 
            :else
-           (reduce
-             (fn [m k]
-               (let [orig-v (get m k)
-                     [new-k v] 
-                     (cond
-                       ;; We don't want to pollute the HMap-req-ks with
-                       ;; non keywords (yet), disable.
-                       ;(keyword? k)
-                       ;[k (track results-atom orig-v
-                       ;          (binding [*should-track* false]
-                       ;            (conj path (key-path {} ks k))))]
+           (let [so-far (atom 0)]
+             (reduce
+               (fn [m k]
+                 (swap! so-far inc)
+                 (let [orig-v (get m k)
+                       [new-k v] 
+                       (cond
+                         ;; We don't want to pollute the HMap-req-ks with
+                         ;; non keywords (yet), disable.
+                         ;(keyword? k)
+                         ;[k (track results-atom orig-v
+                         ;          (binding [*should-track* false]
+                         ;            (conj path (key-path {} ks k))))]
 
-                       :else 
-                       [(track results-atom k
-                               (binding [*should-track* false]
-                                 (conj path (map-keys-path))))
-                        (track results-atom orig-v
-                               (binding [*should-track* false]
-                                 (conj path (map-vals-path))))])]
-                 (cond
-                   ;; only assoc if needed
-                   (identical? v orig-v) m
+                         :else 
+                         [(track results-atom k
+                                 (binding [*should-track* false]
+                                   (conj path (map-keys-path))))
+                          (track results-atom orig-v
+                                 (binding [*should-track* false]
+                                   (conj path (map-vals-path))))])]
+                   (cond
+                     ; cut off homogeneous map
+                     (< *max-track-count* @so-far)
+                     (reduced
+                       (binding [*should-track* false]
+                         (-> m
+                             ;; ensure we replace the key
+                             (dissoc k)
+                             (assoc new-k v))))
 
-                   ;; make sure we replace the key
-                   (not (identical? new-k k))
-                   (binding [*should-track* false]
-                     (-> m
-                         (dissoc k)
-                         (assoc m new-k v)))
+                     ;; only assoc if needed
+                     (identical? v orig-v) m
 
-                   :else
-                   (binding [*should-track* false]
-                     (assoc m new-k v)))))
-             v
-             (keys v))))
+                     ;; make sure we replace the key
+                     (not (identical? new-k k))
+                     (binding [*should-track* false]
+                       (-> m
+                           (dissoc k)
+                           (assoc new-k v)))
+
+                     :else
+                     (binding [*should-track* false]
+                       (assoc m new-k v)))))
+               v
+               (keys v)))))
 
         (instance? clojure.lang.IAtom v)
-        (let [new-path (binding [*should-track* false]
+        (let [old-val (-> v meta ::t/old-val)
+              new-path (binding [*should-track* false]
                          (conj path (atom-contents)))
-              _ (track results-atom @v new-path)
+              should-track? (binding [*should-track* false]
+                              (not= @v old-val))
+              _ (when should-track?
+                  (track results-atom @v new-path))
               _ (binding [*should-track* false]
                   (add-watch
                     v
@@ -3038,6 +3074,7 @@
 
 (defn track-local-fn [track-kind line column end-line end-column ns val]
   {:pre [(#{:local-fn :loop-var} track-kind)]}
+  #_
   (prn "track-local-fn" 
        (symbol
          (str (ns-name ns)
@@ -3243,18 +3280,28 @@
      (case (:op expr)
        ;; Wrap def's so we can instrument their usages outside this
        ;; namespace.
-       :def (if (:init expr)
-              (update expr :init 
-                      (fn [init]
-                        (-> init
-                            check
-                            (wrap-def-init (ast/def-var-name expr) *ns*))))
-              expr)
+       :def (let [v (:var expr)
+                  _ (assert ((some-fn nil? var?) v))
+                  no-infer? (some-> v meta ::t/no-infer)]
+              (when no-infer?
+                (prn "no-infer" (ast/def-var-name expr)))
+              (if (and (:init expr)
+                       (not no-infer?))
+                (update expr :init 
+                        (fn [init]
+                          (-> init
+                              check
+                              (wrap-def-init (ast/def-var-name expr) *ns*))))
+                expr))
        ;; Only wrap library imports so we can infer how they are used.
        :var (let [vsym (impl/var->symbol (:var expr))
-                  vns (symbol (namespace vsym))]
+                  vns (symbol (namespace vsym))
+                  no-infer? (-> vsym meta ::t/no-infer)]
+              (when no-infer?
+                (prn "no-infer" vsym))
               ;(prn "var" vsym)
-              (if-not (contains? (conj ns-exclusions (ns-name *ns*)) vns)
+              (if-not (or (contains? (conj ns-exclusions (ns-name *ns*)) vns)
+                          no-infer?)
                 (wrap-var-deref expr vsym *ns*)
                 expr))
        :fn 
