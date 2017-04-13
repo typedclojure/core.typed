@@ -2623,7 +2623,7 @@
 
 (def ^:dynamic *max-track-depth* Long/MAX_VALUE #_5)
 (def ^:dynamic *max-track-count* Long/MAX_VALUE #_5)
-(def ^:dynamic *max-path-occurrences Long/MAX_VALUE #_5)
+(def ^:dynamic *max-path-occurrences* Long/MAX_VALUE #_5)
 
 ; track : (Atom InferResultEnv) Value Path -> Value
 (defn track 
@@ -2641,7 +2641,7 @@
 
        ;; cut off path
        (or
-         (< *max-path-occurrences (get-in @results-atom [:path-occurrences (-> path first :name)] 0))
+         (< *max-path-occurrences* (get-in @results-atom [:path-occurrences (-> path first :name)] 0))
          (> (count path) *max-track-depth*)
          (not *should-track*))
        ;(debug
