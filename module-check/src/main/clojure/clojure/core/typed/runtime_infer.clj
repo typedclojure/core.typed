@@ -4194,7 +4194,7 @@
                         (if def-spec
                           (conj prefix def-spec)
                           prefix))))
-            tenv)
+            (sort-by first tenv))
           ]
       {:top-level 
        top-level-types})))
