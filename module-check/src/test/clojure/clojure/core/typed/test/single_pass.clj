@@ -968,6 +968,9 @@
                {:a 1}
                (MyMap. {:a 1}))))))))
 
+(deftest static-invoke-expr
+  (is (ast (long 1))))
+
 #_(emit-form
 (ast
 (let* [v__4413__auto__ (def nth-path-multimethod)]

@@ -3539,7 +3539,7 @@ public static class InstanceOfExpr implements Expr, MaybePrimitiveExpr{
 
 }
 
-static class StaticInvokeExpr implements Expr, MaybePrimitiveExpr{
+public static class StaticInvokeExpr implements Expr, MaybePrimitiveExpr{
 	public final Type target;
 	public final Class retClass;
 	public final Class[] paramclasses;
@@ -3902,7 +3902,8 @@ public static class InvokeExpr implements Expr{
            && context != C.EVAL)
 			{
 			Var v = ((VarExpr)fexpr).var;
-            if(!v.isDynamic() && !RT.booleanCast(RT.get(v.meta(), redefKey, false)))
+            if(false && // don't create StaticInvokeExpr's since we don't handle it in the converter - Ambrose
+                !v.isDynamic() && !RT.booleanCast(RT.get(v.meta(), redefKey, false)))
                 {
                 Symbol formtag = tagOf(form);
                 Object arglists = RT.get(RT.meta(v), arglistsKey);
