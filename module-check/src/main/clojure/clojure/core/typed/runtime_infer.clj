@@ -2622,7 +2622,8 @@
 (def ^:const apply-realize-limit 20)
 
 (def ^:dynamic *max-track-depth* Long/MAX_VALUE #_5)
-(def ^:dynamic *max-track-count* 5)
+(def ^:dynamic *max-track-count* Long/MAX_VALUE #_5)
+(def ^:dynamic *max-path-occurrences Long/MAX_VALUE #_5)
 
 ; track : (Atom InferResultEnv) Value Path -> Value
 (defn track 
@@ -2640,7 +2641,7 @@
 
        ;; cut off path
        (or
-         (< 200 (get-in @results-atom [:path-occurrences (-> path first :name)] 0))
+         (< *max-path-occurrences (get-in @results-atom [:path-occurrences (-> path first :name)] 0))
          (> (count path) *max-track-depth*)
          (not *should-track*))
        ;(debug
@@ -2675,18 +2676,15 @@
                                         (track results-atom v (conj path (fn-dom-path blen n)))
                                         v))
                                     args)]
-                         #_(binding [*print-length* 2
-                                   *print-level* 2]
-                           (prn (-> path first :name) "args" (count args)))
                          (track results-atom (apply v args) (conj path (fn-rng-path blen)))))
                      ;; readable name
-                     outer-fn 
-                     (eval `(fn [f#] 
-                              (fn ~(symbol (gensym (munge (-> path first :name)))) [& args#] 
-                                (apply f# args#))))
+                     ;outer-fn 
+                     ;(eval `(fn [f#] 
+                     ;         (fn ~(symbol (gensym (munge (-> path first :name)))) [& args#] 
+                     ;           (apply f# args#))))
                      ]
                  (with-meta
-                   (outer-fn inner-fn)
+                   inner-fn ;(outer-fn inner-fn)
                    (meta v)))
 
        (list? v)
