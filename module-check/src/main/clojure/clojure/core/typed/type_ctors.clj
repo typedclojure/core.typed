@@ -2407,6 +2407,6 @@
 (defn -name [sym & ts]
   (let [nme (r/Name-maker sym)]
     (if ts
-      (-tapp nme ts)
+      (apply -tapp nme ts)
       nme)))
 )
