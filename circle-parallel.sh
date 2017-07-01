@@ -3,11 +3,11 @@
 # -o maven flags force offline mode so dependencies are cached.
 
 # 1x parallelism: run everything on a single container.
-ONE_PARALLEL="mvn test -o gpg.skip=true"
+ONE_PARALLEL="mvn test -o -Dgpg.skip"
 
 # 2x parallelism: isolate very slow tests for container 1, everything else on container 2.
-TWO_PARALLEL_C1="mvn test -o -pl module-check gpg.skip=true"
-TWO_PARALLEL_C2="mvn test -o -pl module-rt gpg.skip=true"
+TWO_PARALLEL_C1="mvn test -o -pl module-check -Dgpg.skip"
+TWO_PARALLEL_C2="mvn test -o -pl module-rt -Dgpg.skip"
 
 case $CIRCLE_NODE_TOTAL in
  1) # 1x parallelism
