@@ -8,5 +8,5 @@ dependencies:
 
 test:
   override:
-    - ./circle-parallel.sh
+    - ./circle-parallel.sh:
         parallel: true
