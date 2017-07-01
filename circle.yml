@@ -4,7 +4,7 @@ machine:
 
 dependencies:
   override:
-    - mvn -DskipTests clean install dependency:resolve-plugins dependency:go-offline
+    - mvn -DskipTests clean install dependency:resolve-plugins dependency:go-offline -Dgpg.skip
 
 test:
   override:
