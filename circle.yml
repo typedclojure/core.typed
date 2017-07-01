@@ -8,4 +8,5 @@ dependencies:
 
 test:
   override:
-    - mvn test
+    - ./circle-parallel.sh
+        parallel: true
