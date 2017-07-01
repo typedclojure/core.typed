@@ -1,11 +1,13 @@
 #!/bin/sh
 
+# -o maven flags force offline mode so dependencies are cached.
+
 # 1x parallelism: run everything on a single container.
-ONE_PARALLEL="mvn test"
+ONE_PARALLEL="mvn test -o"
 
 # 2x parallelism: isolate very slow tests for container 1, everything else on container 2.
-TWO_PARALLEL_C1="mvn test -pl module-check"
-TWO_PARALLEL_C2="mvn test -pl module-rt"
+TWO_PARALLEL_C1="mvn test -o -pl module-check"
+TWO_PARALLEL_C2="mvn test -o -pl module-rt"
 
 case $CIRCLE_NODE_TOTAL in
  1) # 1x parallelism
