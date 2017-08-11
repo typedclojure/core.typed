@@ -5550,6 +5550,12 @@
   ;(is-tc-err (fn [^{:clojure.core.typed/ann t/Bool} a] (inc a)))
 )
 
+(deftest let-alias-regression-test
+  (is-tc-e (fn [f :- (Map Any Any)] :- String
+             (let [s (:foo f)]
+               (assert (string? s))
+               s))))
+
 ;    (is-tc-e 
 ;      (let [f (fn [{:keys [a] :as m} :- '{:a (U nil Num)}] :- '{:a Num} 
 ;                {:pre [(number? a)]} 
