@@ -6561,7 +6561,7 @@ public static class LetExpr implements Expr, MaybePrimitiveExpr{
 								Var.pushThreadBindings(
 									RT.map(	CLEAR_PATH, clearpath,
 											 		CLEAR_ROOT, clearroot,
-													NO_RECUR, null
+													NO_RECUR, null,
 													METHOD_RETURN_CONTEXT, methodReturnContext));
                                                        
 							}
