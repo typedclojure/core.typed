@@ -1699,6 +1699,7 @@ public static class StaticMethodExpr extends MethodExpr{
 	public final int column;
 	public final java.lang.reflect.Method method;
 	public final Symbol tag;
+	public final boolean tailPosition;
 	public final Object form;
 	final static Method forNameMethod = Method.getMethod("Class classForName(String)");
 	final static Method invokeStaticMethodMethod =
@@ -1706,7 +1707,8 @@ public static class StaticMethodExpr extends MethodExpr{
 	final static Keyword warnOnBoxedKeyword = Keyword.intern("warn-on-boxed");
 	Class jc;
 
-	public StaticMethodExpr(String source, int line, int column, Symbol tag, Class c, String methodName, IPersistentVector args, Object form)
+	public StaticMethodExpr(String source, int line, int column, Symbol tag, Class c, String methodName, IPersistentVector args, Object form,
+      boolean tailPosition)
 			{
 		this.c = c;
 		this.methodName = methodName;
@@ -1715,6 +1717,7 @@ public static class StaticMethodExpr extends MethodExpr{
 		this.line = line;
 		this.column = column;
 		this.tag = tag;
+		this.tailPosition = tailPosition;
 		this.form = form;
 
 		List methods = Reflector.getMethods(c, args.count(), methodName, true);
