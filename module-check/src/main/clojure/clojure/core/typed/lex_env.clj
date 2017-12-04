@@ -74,6 +74,8 @@
          (r/Type? t)
          (obj/RObject? o)]
    :post [(PropEnv? %)]}
+(assoc-in env [:l id] t)
+#_
   (cond
     ; no aliasing to add
     (obj/EmptyObject? o)
