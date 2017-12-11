@@ -217,7 +217,7 @@
     (let [mform (ana/macroexpand-1 form env)]
       (if (= form mform) ;; function/special-form invocation
         (pre-parse mform env)
-        (-> (pre-analyze-child mform env)
+        (-> (pre-analyze-form mform env)
           (update-in [:raw-forms] (fnil conj ())
                      (vary-meta form assoc ::resolved-op (u/resolve-sym op env))))))))
 
@@ -336,11 +336,11 @@
                               :form form}
                              (u/-source-info form env)))))
     (let [env' (assoc env :in-try true)
-          body (pre-analyze-child body env')
+          body (pre-analyze-body body env')
           cenv (u/ctx env' :ctx/expr)
           cblocks (mapv #(pre-parse-catch % cenv) cblocks)
           fblock (when-not (empty? fblock)
-                   (pre-analyze-child (rest fblock) (u/ctx env :ctx/statement)))]
+                   (pre-analyze-body (rest fblock) (u/ctx env :ctx/statement)))]
       (merge {:op      :try
               :env     env
               :form    form
@@ -369,7 +369,7 @@
      :local       local
      :env         env
      :form        form
-     :body        (pre-analyze-child body (assoc-in env [:locals ename] (u/dissoc-env local)))
+     :body        (pre-analyze-body body (assoc-in env [:locals ename] (u/dissoc-env local)))
      :children    [:class :local :body]}))
 
 (defn pre-parse-throw

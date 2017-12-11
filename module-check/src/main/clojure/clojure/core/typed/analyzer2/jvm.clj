@@ -585,7 +585,8 @@
   [{:keys [analyzed-atom form] :as ast} opts]
   (if-some [ast @analyzed-atom]
     (emit-form/emit-form ast)
-    (do (assert (not (#{:hygienic :qualified-symbols} opts)))
+    (do (assert (not (#{:hygienic :qualified-symbols} opts))
+                "Cannot support emit-form options on unanalyzed form")
         #_(throw (Exception. "Cannot emit :unanalyzed form"))
         (prn (str "WARNING: emit-form: did not analyze:" form))
         form)))

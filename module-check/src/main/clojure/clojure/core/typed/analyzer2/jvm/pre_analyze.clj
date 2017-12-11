@@ -226,12 +226,15 @@
 (defn pre-analyze
   ""
   [ast]
-  (prn "pre-analyze" (:op ast))
+  ;(prn "pre-analyze" (:op ast))
   (case (:op ast)
-    :unanalyzed (let [{:keys [analyzed-atom form env]} ast]
-                  (if-some [ast @analyzed-atom]
-                    ast
-                    (let [ast (pre/pre-analyze-form form env)]
-                      (reset! analyzed-atom ast)
-                      ast)))
+    :unanalyzed (let [{:keys [analyzed-atom form env]} ast
+                      ;_ (prn "pre-analyze form" form)
+                      ast (if-some [ast @analyzed-atom]
+                            ast
+                            (let [ast (pre/pre-analyze-form form env)]
+                              (reset! analyzed-atom ast)
+                              ast))]
+                  (assert (not= :unanalyzed (:op ast)))
+                  ast)
     ast))
