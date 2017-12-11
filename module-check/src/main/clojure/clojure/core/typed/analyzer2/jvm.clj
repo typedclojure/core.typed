@@ -385,7 +385,6 @@
   [& args]
    (apply classify-invoke/classify-invoke args))
 
-
 (def default-passes
   "Set of passes that will be run by default on the AST by #'run-passes"
   taj/default-passes
@@ -448,6 +447,17 @@
    :collect/top-level?              false
    :collect-closed-overs/where      #{:deftype :reify :fn :loop :try}
    :collect-closed-overs/top-level? false})
+
+(declare pre-analyze)
+(defn pre-analyze-children
+  "Run after *pre-passes*."
+  [ast]
+  (*post-passes* (update-children ast pre-analyze)))
+
+(defn pre-analyze
+  "A prewalk-like traversal of analysis."
+  [form]
+  (pre-analyze-children (*pre-passes* (pre-parse form))))
 
 (defn analyze
   "Analyzes a clojure form using tools.analyzer augmented with the JVM specific special ops
