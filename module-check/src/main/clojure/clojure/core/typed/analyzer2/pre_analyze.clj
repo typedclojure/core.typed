@@ -1,23 +1,10 @@
-(ns clojure.core.typed.analyzer2.pre-parse
+;; adapted from tools.analyzer
+(ns clojure.core.typed.analyzer2.pre-analyze
   (:refer-clojure :exclude [macroexpand-1 macroexpand var? record? boolean?])
   (:require [clojure.tools.analyzer.utils :as u]
-            [clojure.core.typed.analyzer2 :as ana]
-            [clojure.tools.analyzer.env :as env])
+            [clojure.tools.analyzer.env :as env]
+            [clojure.core.typed.analyzer2 :as ana])
   (:import (clojure.lang Symbol IPersistentVector IPersistentMap IPersistentSet ISeq IType IRecord)))
-
-(defn pre-analyze-child
-  [form env]
-  {:op :clojure.core.typed.analyzer2/unanalyzed
-   :form form
-   :env env})
-
-(defn pre-analyze-child-in-env
-  "Takes an env map and returns a function that analyzes a form in that env"
-  [env]
-  (fn [form]
-    {:op :clojure.core.typed.analyzer2/unanalyzed
-     :form form
-     :env env}))
 
 (defmulti -pre-analyze-form (fn [form _] (class form)))
 
@@ -105,14 +92,22 @@
   [form env]
   (assoc (pre-analyze-form form env) :top-level true))
 
-(defn pre-analyze-in-env
+(defn pre-analyze-child
+  [form env]
+  {:op :unanalyzed
+   :form form
+   :env env
+   ;; update this atom when this node has been analyzed
+   :analyzed-atom (atom nil)})
+
+(defn pre-analyze-child-in-env
   "Takes an env map and returns a function that analyzes a form in that env"
   [env]
   (fn [form] (pre-analyze-form form env)))
 
 (def ^{:dynamic  true
        :arglists '([[op & args] env])
-       :doc      "Multimethod that dispatches on op, should default to -parse"}
+       :doc      "Multimethod that dispatches on op, should default to -pre-parse"}
   pre-parse)
 
 ;; this node wraps non-quoted collections literals with metadata attached
@@ -148,7 +143,7 @@
 (defn pre-analyze-vector
   [form env]
   (let [items-env (u/ctx env :ctx/expr)
-        items (mapv (pre-analyze-in-env items-env) form)]
+        items (mapv (pre-analyze-child-in-env items-env) form)]
     (pre-wrapping-meta
      {:op       :vector
       :env      env
@@ -162,8 +157,8 @@
         [keys vals] (reduce-kv (fn [[keys vals] k v]
                                  [(conj keys k) (conj vals v)])
                                [[] []] form)
-        ks (mapv (pre-analyze-in-env kv-env) keys)
-        vs (mapv (pre-analyze-in-env kv-env) vals)]
+        ks (mapv (pre-analyze-child-in-env kv-env) keys)
+        vs (mapv (pre-analyze-child-in-env kv-env) vals)]
     (pre-wrapping-meta
      {:op       :map
       :env      env
@@ -175,7 +170,7 @@
 (defn pre-analyze-set
   [form env]
   (let [items-env (u/ctx env :ctx/expr)
-        items (mapv (pre-analyze-in-env items-env) form)]
+        items (mapv (pre-analyze-child-in-env items-env) form)]
     (pre-wrapping-meta
      {:op       :set
       :env      env
@@ -208,6 +203,7 @@
                     :class mform})))
              {:env  env
               :form mform})
+      ;; FIXME not 100% sure if this is the correct pre-analyze-* call
       (-> (pre-analyze-form mform env)
         (update-in [:raw-forms] (fnil conj ()) sym)))))
 
@@ -221,7 +217,7 @@
     (let [mform (ana/macroexpand-1 form env)]
       (if (= form mform) ;; function/special-form invocation
         (pre-parse mform env)
-        (-> (pre-analyze-form mform env)
+        (-> (pre-analyze-child mform env)
           (update-in [:raw-forms] (fnil conj ())
                      (vary-meta form assoc ::resolved-op (u/resolve-sym op env))))))))
 
@@ -270,7 +266,7 @@
     {:op          :new
      :env         env
      :form        form
-     :class       (pre-analyze-child class (assoc env :locals {})) ;; avoid shadowing
+     :class       (pre-analyze-form class (assoc env :locals {})) ;; avoid shadowing
      :args        args
      :children    [:class :args]}))
 
@@ -340,11 +336,11 @@
                               :form form}
                              (u/-source-info form env)))))
     (let [env' (assoc env :in-try true)
-          body (pre-analyze-body body env')
+          body (pre-analyze-child body env')
           cenv (u/ctx env' :ctx/expr)
           cblocks (mapv #(pre-parse-catch % cenv) cblocks)
           fblock (when-not (empty? fblock)
-                   (pre-analyze-body (rest fblock) (u/ctx env :ctx/statement)))]
+                   (pre-analyze-child (rest fblock) (u/ctx env :ctx/statement)))]
       (merge {:op      :try
               :env     env
               :form    form
@@ -373,7 +369,7 @@
      :local       local
      :env         env
      :form        form
-     :body        (pre-analyze-body body (assoc-in env [:locals ename] (u/dissoc-env local)))
+     :body        (pre-analyze-child body (assoc-in env [:locals ename] (u/dissoc-env local)))
      :children    [:class :local :body]}))
 
 (defn pre-parse-throw
@@ -729,7 +725,7 @@
 (defn pre-parse-invoke
   [[f & args :as form] env]
   (let [fenv (u/ctx env :ctx/expr)
-        fn-expr (pre-analyze-child-in-env f fenv)
+        fn-expr (pre-analyze-child f fenv)
         args-expr (mapv (pre-analyze-child-in-env fenv) args)
         m (meta form)]
     (merge {:op   :invoke

@@ -3,12 +3,17 @@
             [clojure.core.typed.analyzer2.jvm :as ana]
             [clojure.tools.analyzer.jvm :as taj]))
 
+(defmacro ast' [form]
+  `(ana/analyze '~form))
+
 (defmacro ast [form]
   `(ana/analyze+eval '~form))
 
 (deftest analyzer-test
 	(is (ast 1))
 	(is (ast (-> 1 +)))
+	(is (clojure.pprint/pprint
+        (ast' (let [a 1] a))))
 	(is (ast (let [a 1] a)))
 	(is (ast (loop [a 1] a)))
 	(is (ast (do (def a 1)

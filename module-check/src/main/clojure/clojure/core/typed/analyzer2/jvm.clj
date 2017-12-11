@@ -5,6 +5,7 @@
             [clojure.tools.analyzer.jvm.utils :as ju]
             [clojure.tools.analyzer.env :as env]
             [clojure.tools.analyzer :as ta]
+            [clojure.tools.analyzer.ast :as ast]
             [clojure.tools.analyzer.jvm :as taj]
             [clojure.tools.analyzer.passes.jvm.emit-form :as emit-form]
             [clojure.tools.analyzer.passes :as passes]
@@ -12,7 +13,6 @@
             [clojure.tools.analyzer.passes.jvm.box :as box]
             [clojure.tools.analyzer.passes.jvm.warn-on-reflection :as warn-on-reflection]
             [clojure.tools.analyzer.passes.warn-earmuff :as warn-earmuff]
-            [clojure.tools.analyzer.passes.uniquify :as uniquify]
             [clojure.tools.analyzer.passes.add-binding-atom :as add-binding-atom]
             [clojure.tools.analyzer.passes.jvm.fix-case-test :as fix-case-test]
             [clojure.tools.analyzer.passes.jvm.infer-tag :as infer-tag]
@@ -26,7 +26,10 @@
             [clojure.tools.analyzer.passes.source-info :as source-info]
             [clojure.tools.analyzer.passes.jvm.constant-lifter :as constant-lift]
             [clojure.tools.analyzer.passes.jvm.classify-invoke :as classify-invoke]
+            [clojure.core.typed.analyzer2.passes.uniquify :as uniquify2]
             [clojure.core.typed.analyzer2 :as ana]
+            [clojure.core.typed.analyzer2.pre-analyze :as preana]
+            [clojure.core.typed.analyzer2.jvm.pre-analyze :as pre]
             [clojure.core.memoize :as memo])
   (:import (clojure.lang IObj RT Var)))
 
@@ -273,17 +276,18 @@
         :else
         form)))
 
-;;redefine passes mainly to remove dependency on `uniquify-locals`
+;;redefine passes mainly to move dependency on `uniquify-locals`
+;; to `uniquify2/uniquify-locals`
 
 (defn add-binding-atom
   "Adds an atom-backed-map to every local binding,the same
    atom will be shared between all occurences of that local.
 
    The atom is put in the :atom field of the node."
-  {:pass-info {:walk :pre :depends #{#_#'uniquify-locals}  ;; TODO reincorporate this dependency
+  {:pass-info {:walk :pre :depends #{#'uniquify2/uniquify-locals}
                :state (fn [] (atom {}))}}
-  [& args]
-  (apply add-binding-atom/add-binding-atom args))
+  [state ast]
+  (add-binding-atom/add-binding-atom state ast))
 
 (defn fix-case-test
   "If the node is a :case-test, annotates in the atom shared
@@ -315,7 +319,7 @@
                                       ; use fix-case-test in this namespace
                                       #'fix-case-test 
                                       #'analyze-host-expr/analyze-host-expr} 
-               ; don't care about trim
+               ; trim is incompatible with core.typed
                #_#_:after #{#'trim}}}
   [& args]
   (apply infer-tag/infer-tag args))
@@ -362,10 +366,10 @@
   "Returns a pass that validates the loop locals, calling analyze on the loop AST when
    a mismatched loop-local is found"
   {:pass-info {:walk :post :depends #{#'validate} 
-               :affects #{#'analyze-host-expr/analyze-host-expr 
+               :affects #{#'analyze-host-expr/analyze-host-expr
                           ; use our infer-tag
-                          #'infer-tag 
-                          #'validate} 
+                          #'infer-tag
+                          #'validate}
                :after #{#'classify-invoke/classify-invoke}}}
   [& args]
   (apply validate-loop-locals/validate-loop-locals args))
@@ -385,16 +389,105 @@
   [& args]
    (apply classify-invoke/classify-invoke args))
 
+(defn compile-passes [pre-passes post-passes info]
+  (let [with-state (filter (comp :state info) (concat pre-passes post-passes))
+        state      (zipmap with-state (mapv #(:state (info %)) with-state))
+
+        pfns-fn    (fn [passes]
+                     (reduce (fn [f p]
+                               (let [i (info p)
+                                     p (cond
+                                         (:state i)
+                                         (fn [_ s ast] 
+                                           ;(prn "before pass" p)
+                                           ;(clojure.pprint/pprint ast)
+                                           (let [ast (p (s p) ast)]
+                                             ;(prn "after pass" p)
+                                             ;(clojure.pprint/pprint ast)
+                                             ast))
+                                         (:affects i)
+                                         (fn [a _ ast]
+                                           (assert nil "no affects, single pass only")
+                                           ((p a) ast))
+                                         :else
+                                         (fn [_ _ ast] 
+                                           ;(prn "before pass" p)
+                                           ;(clojure.pprint/pprint ast)
+                                           (let [ast (p ast)]
+                                             ;(prn "after pass" p)
+                                             ;(clojure.pprint/pprint ast)
+                                             ast)))]
+                                 (fn [a s ast]
+                                   (p a s (f a s ast)))))
+                             (fn [_ _ ast] ast)
+                             passes))
+        pre-pfns  (pfns-fn pre-passes)
+        post-pfns  (pfns-fn post-passes)]
+    (fn analyze [ast]
+      (ast/walk ast
+                (partial pre-pfns analyze (u/update-vals state #(%)))
+                (partial pre-pfns analyze (u/update-vals state #(%)))))))
+
+(defn schedule
+  "Takes a set of Vars that represent tools.analyzer passes and returns a function
+   that takes an AST and applies all the passes and their dependencies to the AST,
+   trying to compose together as many passes as possible to reduce the number of
+   full tree traversals.
+
+   Each pass must have a :pass-info element in its Var's metadata and it must point
+   to a map with the following parameters (:before, :after, :affects and :state are
+   optional):
+   * :after    a set of Vars, the passes that must be run before this pass
+   * :before   a set of Vars, the passes that must be run after this pass
+   * :depends  a set of Vars, the passes this pass depends on, implies :after
+   * :walk     a keyword, one of:
+                 - :none if the pass does its own tree walking and cannot be composed
+                         with other passes
+                 - :post if the pass requires a postwalk and can be composed with other
+                         passes
+                 - :pre  if the pass requires a prewalk and can be composed with other
+                         passes
+                 - :any  if the pass can be composed with other passes in both a prewalk
+                         or a postwalk
+   * :affects  a set of Vars, this pass must be the last in the same tree traversal that all
+               the specified passes must partecipate in
+               This pass must take a function as argument and return the actual pass, the
+               argument represents the reified tree traversal which the pass can use to
+               control a recursive traversal, implies :depends
+   * :state    a no-arg function that should return an atom holding an init value that will be
+               passed as the first argument to the pass (the pass will thus take the ast
+               as the second parameter), the atom will be the same for the whole tree traversal
+               and thus can be used to preserve state across the traversal
+   An opts map might be provided, valid parameters:
+   * :debug?   if true, returns a vector of the scheduled passes rather than the concrete
+               function"
+  [passes & [opts]]
+  {:pre [(set? passes)
+         (every? var? passes)]}
+  (let [info        (@#'passes/indicize (mapv (fn [p] (merge {:name p} (:pass-info (meta p)))) passes))
+        passes+deps (into passes (mapcat :depends (vals info)))]
+    (if (not= passes passes+deps)
+      (recur passes+deps [opts])
+      (let [[{pre-passes  :passes :as pre}
+             {post-passes :passes :as post}
+             :as ps]
+            (-> (passes/schedule-passes info)
+                (update-in [0 :passes] #(vec (cons #'pre/pre-analyze %))))
+
+            _ (assert (= 2 (count ps)))
+            _ (assert (= :pre (:walk pre)))
+            _ (assert (= :post (:walk post)))]
+        (if (:debug? opts)
+          (mapv #(select-keys % [:passes :walk]) ps)
+          (compile-passes pre-passes post-passes info))))))
+
 (def default-passes
   "Set of passes that will be run by default on the AST by #'run-passes"
-  taj/default-passes
-  #_
+  ;taj/default-passes
   #{;#'warn-on-reflection
     ;#'warn-earmuff
 
-    ; TODO reincorporate
-    ;#'uniquify-locals
-    #'uniquify/uniquify-locals
+    #'uniquify2/uniquify-locals
 
 ;KEEP
     #'source-info/source-info
@@ -402,9 +495,11 @@
     #'constant-lift/constant-lift
 ;KEEP
 
+    ; not compatible with core.typed
     ;#'trim/trim
 
     ; FIXME is this needed? introduces another pass
+    ; TODO does this still introduce another pass with `uniquify2/uniquify-locals`?
     ;#'box
     ;#'box/box
 
@@ -420,13 +515,12 @@
 ;KEEP
     })
 
-
 (def scheduled-default-passes
-  (passes/schedule default-passes))
+  (schedule default-passes))
 
 (comment
   (clojure.pprint/pprint
-    (passes/schedule default-passes
+    (schedule default-passes
                      {:debug? true}))
   )
 
@@ -447,17 +541,6 @@
    :collect/top-level?              false
    :collect-closed-overs/where      #{:deftype :reify :fn :loop :try}
    :collect-closed-overs/top-level? false})
-
-(declare pre-analyze)
-(defn pre-analyze-children
-  "Run after *pre-passes*."
-  [ast]
-  (*post-passes* (update-children ast pre-analyze)))
-
-(defn pre-analyze
-  "A prewalk-like traversal of analysis."
-  [form]
-  (pre-analyze-children (*pre-passes* (pre-parse form))))
 
 (defn analyze
   "Analyzes a clojure form using tools.analyzer augmented with the JVM specific special ops
@@ -482,14 +565,15 @@
      (with-bindings (merge {Compiler/LOADER     (RT/makeClassLoader)
                             #'ana/macroexpand-1 macroexpand-1
                             #'ana/create-var    taj/create-var
-                            #'ana/parse         parse
+                            ;#'ana/parse         parse
+                            #'preana/pre-parse  pre/pre-parse
                             #'ana/var?          var?
                             #'*ns*              (the-ns (:ns env))}
                            (:bindings opts))
        (env/ensure (taj/global-env)
          (doto (env/with-env (u/mmerge (env/deref-env)
                                      {:passes-opts (get opts :passes-opts default-passes-opts)})
-                 (run-passes (ana/analyze form env)))
+                 (run-passes (preana/pre-analyze-child form env)))
            (do (taj/update-ns-map!)))))))
 
 (deftype ExceptionThrown [e ast])
@@ -497,10 +581,20 @@
 (defn ^:private throw! [e]
   (throw (.e ^ExceptionThrown e)))
 
+(defmethod emit-form/-emit-form :unanalyzed
+  [{:keys [analyzed-atom form] :as ast} opts]
+  (if-some [ast @analyzed-atom]
+    (emit-form/emit-form ast)
+    (do (assert (not (#{:hygienic :qualified-symbols} opts)))
+        #_(throw (Exception. "Cannot emit :unanalyzed form"))
+        (prn (str "WARNING: emit-form: did not analyze:" form))
+        form)))
+
 (defn eval-ast [a {:keys [handle-evaluation-exception] 
                    :or {handle-evaluation-exception throw!}
                    :as opts}]
   (let [frm (emit-form/emit-form a)
+        _ (prn "frm" frm)
         result (try (eval frm) ;; eval the emitted form rather than directly the form to avoid double macroexpansion
                     (catch Exception e
                       (handle-evaluation-exception (ExceptionThrown. e a))))]

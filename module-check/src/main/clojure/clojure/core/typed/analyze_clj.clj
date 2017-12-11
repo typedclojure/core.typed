@@ -271,12 +271,12 @@
                     (unanalyzed-expr mform)
                     ;; rebinds *ns* during analysis
                     ;; FIXME unclear which map needs to have *ns*, especially post TAJ 0.3.0
-                    (eval-fn opts 
-                             (p/p :analyze-clj/analyze-no-eval
+                    (eval-fn (p/p :analyze-clj/analyze-no-eval
                                (taj/analyze mform (assoc env :ns (ns-name *ns*))
                                             (-> opts 
                                                 (dissoc :bindings-atom)
-                                                (assoc-in [:bindings #'*ns*] *ns*))))))
+                                                (assoc-in [:bindings #'*ns*] *ns*))))
+                             opts))
                   {:raw-forms raw-forms}))))))
 
 ;; reflect-validated from eastwood
@@ -398,7 +398,7 @@
 (defn thread-bindings []
   (t/tc-ignore
     {#'ana2/macroexpand-1 macroexpand-1
-     #'jana2/run-passes run-passes
+     ;#'jana2/run-passes run-passes
      }))
 
 ;; bindings is an atom that records any side effects during macroexpansion. Useful
@@ -533,7 +533,7 @@
   ;  (merge ast {:result result}))
   (let [frm (emit-form/emit-form ast)
         ;_ (prn "form" frm)
-        #_#_
+        ;#_#_
         _ (binding [*print-meta* true
                     ;*print-dup* true
                     ]
