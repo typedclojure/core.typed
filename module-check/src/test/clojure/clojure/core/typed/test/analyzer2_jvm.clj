@@ -37,3 +37,10 @@
         :ret))
   (is (not= :maybe-class (:op (ast Number))))
   )
+
+(deftest async-test
+  (is (-> (ast (do (ns asdfasdf
+                     (:require [clojure.core.async :as a]
+                               [clojure.core.typed.async :refer [go chan]]))
+                   #(go)))
+          :result)))

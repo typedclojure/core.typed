@@ -157,7 +157,8 @@
       The function must return a valid tools.analyzer.jvm AST node."
   {:pass-info {:walk :post :depends #{#'infer-tag
                                       #'analyze-host-expr/analyze-host-expr
-                                      #'validate-recur/validate-recur}}}
+                                      ;; validate-recur doesn't seem to play nicely with core.async/go
+                                      #_#'validate-recur/validate-recur}}}
   [& args]
   (apply validate/validate args))
 
