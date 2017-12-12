@@ -100,8 +100,7 @@
 (defn fix-case-test
   "If the node is a :case-test, annotates in the atom shared
   by the binding and the local node with :case-test"
-  {:pass-info {:walk :pre :depends #{;; use this namespace's add-binding-atom
-                                     #'add-binding-atom}}}
+  {:pass-info {:walk :pre :depends #{#'add-binding-atom}}}
   [& args]
   (apply fix-case-test/fix-case-test args))
 
@@ -124,7 +123,6 @@
                       inference"
   {:pass-info {:walk :post :depends #{#'annotate-tag/annotate-tag 
                                       #'annotate-host-info/annotate-host-info 
-                                      ; use fix-case-test in this namespace
                                       #'fix-case-test 
                                       #'analyze-host-expr/analyze-host-expr} 
                ; trim is incompatible with core.typed
@@ -164,9 +162,7 @@
 
 (defn box
   "Box the AST node tag where necessary"
-  {:pass-info {:walk :pre :depends 
-               ;; add this namespace's infer-tag
-               #{#'infer-tag} 
+  {:pass-info {:walk :pre :depends #{#'infer-tag} 
                :after #{#'validate}}}
   [& args]
   (apply box/box args))
@@ -176,7 +172,6 @@
    a mismatched loop-local is found"
   {:pass-info {:walk :post :depends #{#'validate} 
                :affects #{#'analyze-host-expr/analyze-host-expr
-                          ; use our infer-tag
                           #'infer-tag
                           #'validate}
                :after #{#'classify-invoke/classify-invoke}}}
