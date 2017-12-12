@@ -1,7 +1,8 @@
 (ns clojure.core.typed.test.analyzer2-jvm
   (:require [clojure.test :refer :all]
             [clojure.core.typed.analyzer2.jvm :as ana]
-            [clojure.tools.analyzer.jvm :as taj]))
+            [clojure.tools.analyzer.jvm :as taj]
+            [clojure.tools.analyzer.jvm.utils :as ju]))
 
 (defmacro ast' [form]
   `(ana/analyze '~form))
@@ -35,4 +36,6 @@
                    (:require [clojure.core.typed :as t]))
                  (t/ann-form 'foo 'a)))
         :ret))
+  (is (not= :maybe-class (:op (ast Number))))
+  (is (-> (ast Number) :class ju/maybe-class-literal))
   )

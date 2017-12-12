@@ -201,40 +201,45 @@
   (let [with-state (filter (comp :state info) (concat pre-passes post-passes))
         state      (zipmap with-state (mapv #(:state (info %)) with-state))
 
-        pfns-fn    (fn [passes]
+        pfns-fn    (fn [passes direction]
                      (reduce (fn [f p]
                                (let [i (info p)
                                      p (cond
                                          (:state i)
                                          (fn [_ s ast] 
-                                           ;(prn "before pass" p)
+                                           ;(prn (str "before state " direction " pass" p))
                                            ;(clojure.pprint/pprint ast)
                                            (let [ast (p (s p) ast)]
-                                             ;(prn "after pass" p)
+                                             ;(prn (str "after state " direction " pass" p))
                                              ;(clojure.pprint/pprint ast)
                                              ast))
                                          (:affects i)
                                          (fn [a _ ast]
-                                           (assert nil "no affects, single pass only")
-                                           ((p a) ast))
+                                           (assert nil "affects not allowed, single pass only")
+                                           ;(prn (str "before affects " direction " pass" p))
+                                           ;(clojure.pprint/pprint ast)
+                                           (let [ast ((p a) ast)]
+                                             ;(prn (str "after affects " direction " pass" p))
+                                             ;(clojure.pprint/pprint ast)
+                                             ast))
                                          :else
                                          (fn [_ _ ast] 
-                                           ;(prn "before pass" p)
+                                           ;(prn (str "before normal " direction " pass" p))
                                            ;(clojure.pprint/pprint ast)
                                            (let [ast (p ast)]
-                                             ;(prn "after pass" p)
+                                             ;(prn (str "after normal " direction " pass" p))
                                              ;(clojure.pprint/pprint ast)
                                              ast)))]
                                  (fn [a s ast]
                                    (p a s (f a s ast)))))
                              (fn [_ _ ast] ast)
                              passes))
-        pre-pfns  (pfns-fn pre-passes)
-        post-pfns  (pfns-fn post-passes)]
+        pre-pfns  (pfns-fn pre-passes :pre)
+        post-pfns  (pfns-fn post-passes :post)]
     (fn analyze [ast]
       (ast/walk ast
                 (partial pre-pfns analyze (u/update-vals state #(%)))
-                (partial pre-pfns analyze (u/update-vals state #(%)))))))
+                (partial post-pfns analyze (u/update-vals state #(%)))))))
 
 (defn schedule
   "Takes a set of Vars that represent tools.analyzer passes and returns a function
@@ -313,7 +318,7 @@
 
 ;KEEP
     #'analyze-host-expr/analyze-host-expr
-    #'validate-loop-locals
+    ;#'validate-loop-locals
     #'validate
     #'infer-tag
 ;KEEP
