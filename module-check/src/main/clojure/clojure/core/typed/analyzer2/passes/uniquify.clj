@@ -17,9 +17,9 @@
 
 (defn pre-uniquify-child
   [ast]
-  (assoc ast
-         ::locals-frame *locals-frame*
-         ::locals-counter *locals-counter*))
+  (-> ast
+      (assoc-in [:env ::locals-frame] *locals-frame*)
+      (assoc-in [:env ::locals-counter] *locals-counter*)))
 
 (defn uniquify-locals-around
   [ast]
@@ -42,7 +42,7 @@
 (defn uniquify-binding
   [b]
   (let [i (binding [*locals-frame* (atom @*locals-frame*)] ;; inits need to be uniquified before the local
-            (uniquify-locals-around (:init b)))            ;; to avoid potential shadowings
+            (pre-uniquify-child (:init b)))            ;; to avoid potential shadowings
         name (:name b)]
     (uniquify name)
     (let [name (normalize name)]
@@ -87,13 +87,11 @@
   Passes opts:
   * :uniquify/uniquify-env  If true, uniquifies the :env :locals map"
   {:pass-info {:walk :pre :depends #{}}}
-  [{:keys [::locals-counter ::locals-frame]
-    :or {locals-counter (atom {})
-         locals-frame   (atom {})}
+  [{{:keys [::locals-counter ::locals-frame]
+     :or {locals-counter (atom {})
+          locals-frame   (atom {})}}
+    :env
     :as ast}]
   (binding [*locals-counter* locals-counter
             *locals-frame*   locals-frame]
-    (uniquify-locals-around
-      (assoc ast
-             ::locals-counter locals-counter
-             ::locals-frame locals-frame))))
+    (uniquify-locals-around ast)))
