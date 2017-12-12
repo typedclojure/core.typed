@@ -17,7 +17,6 @@
          (:result (ast (-> 1 inc)))))
   (is (= 1
          (:result (ast (let [a 1] a)))))
-  (is (clojure.pprint/pprint (ast (let [a 1] #_a))))
   (is (= 1
          (:result (ast (loop [a 1] a)))))
   (is (= 1
@@ -30,12 +29,11 @@
          (:result (ast (do (ns foo) (= 1 1))))))
   (is (= "a"
          (:result (ast (.toString (reify Object (toString [this] "a")))))))
-  (is (clojure.pprint/pprint (ast #(inc %))))
+  (is (= 2 (:result (ast (#(inc %) 1)))))
   (is (->
         (ast (do (ns bar
                    (:require [clojure.core.typed :as t]))
                  (t/ann-form 'foo 'a)))
         :ret))
   (is (not= :maybe-class (:op (ast Number))))
-  (is (-> (ast Number) :class ju/maybe-class-literal))
   )
