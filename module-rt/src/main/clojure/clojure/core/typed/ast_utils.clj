@@ -1,7 +1,6 @@
 (ns ^:skip-wiki clojure.core.typed.ast-utils
   (:require [clojure.core.typed.current-impl :as impl]
             [clojure.core.typed.contract-utils :as con]
-            [clojure.tools.analyzer.passes.constant-lifter :as constant-lift]
             [clojure.core.typed.coerce-utils :as coerce]))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -32,7 +31,10 @@
 (defn map-expr-at [expr key]
   (impl/impl-case
     :clojure (case (:op expr)
-               :map (map-expr-at (constant-lift/constant-lift expr) key)
+               :map (let [const (do (require '[clojure.tools.analyzer.passes.jvm.constant-lifter])
+                                    ((impl/v 'clojure.tools.analyzer.passes.jvm.constant-lifter/constant-lift) expr))]
+                      (assert (#{:const} (:op const)))
+                      (map-expr-at const key))
                :const (let [v (:val expr)]
                         (assert (contains? v key) key)
                         (get v key)))

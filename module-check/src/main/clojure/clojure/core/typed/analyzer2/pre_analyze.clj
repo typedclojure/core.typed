@@ -103,7 +103,7 @@
 (defn pre-analyze-child-in-env
   "Takes an env map and returns a function that analyzes a form in that env"
   [env]
-  (fn [form] (pre-analyze-form form env)))
+  (fn [form] (pre-analyze-child form env)))
 
 (def ^{:dynamic  true
        :arglists '([[op & args] env])
