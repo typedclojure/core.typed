@@ -180,7 +180,7 @@
     <dependency>
       <groupId>org.clojure</groupId>
       <artifactId>core.async</artifactId>
-      <version>0.3.443</version>
+      <version>0.3.465</version>
       <optional>true</optional>
       <exclusions>
         <exclusion>
