@@ -12,6 +12,12 @@
   macroexpand-1)
 
 (def ^{:dynamic  true
+       :arglists '([op env])
+       :doc      "Returns true if the op is a macro that should
+                 be frozen (ie. not analyzed)."}
+  frozen-macro?)
+
+(def ^{:dynamic  true
        :arglists '([[op & args] env])
        :doc      "Multimethod that dispatches on op, should default to -parse"}
   parse)

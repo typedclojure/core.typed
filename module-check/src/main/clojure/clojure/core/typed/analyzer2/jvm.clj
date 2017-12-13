@@ -38,11 +38,32 @@
   (into ana/specials
         '#{monitor-enter monitor-exit clojure.core/import* reify* deftype* case*}))
 
+(def frozen-macros 
+  #{}
+  #_
+  #{'clojure.core/dotimes
+		'clojure.core/doseq
+    'clojure.core/for
+    #_'clojure.core/deftype})
+
+(defn frozen-macro? [op env]
+  (if (specials op)
+    false
+    (let [^Var v (u/resolve-sym op env)
+          m (meta v)
+          local? (-> env :locals (get op))
+          macro? (and (not local?) (:macro m))] ;; locals shadow macros
+      (and (var? v)
+           macro?
+           (contains? frozen-macros (symbol (str (ns-name (.ns v)))
+                                            (str (.sym v))))))))
+
 (defn macroexpand-1
   "If form represents a macro form or an inlineable function,returns its expansion,
    else returns form."
   ([form] (macroexpand-1 form (taj/empty-env)))
   ([form env]
+   (assert nil "use core.typed macroexpand-1")
        (cond
 
         (seq? form)
@@ -377,6 +398,7 @@
                             ;#'ana/parse         parse
                             #'preana/pre-parse  pre/pre-parse
                             #'ana/var?          var?
+                            #'ana/frozen-macro? frozen-macro?
                             #'*ns*              (the-ns (:ns env))}
                            (:bindings opts))
        (env/ensure (taj/global-env)
@@ -384,6 +406,9 @@
                                      {:passes-opts (get opts :passes-opts default-passes-opts)})
                  (run-passes (preana/pre-analyze-child form env)))
            (do (taj/update-ns-map!)))))))
+
+(defn thaw-form [form env thread-bindings]
+  (analyze form env {:bindings thread-bindings}))
 
 (deftype ExceptionThrown [e ast])
 
@@ -399,6 +424,12 @@
         #_(throw (Exception. "Cannot emit :unanalyzed form"))
         (prn (str "WARNING: emit-form: did not analyze:" form))
         form)))
+
+(defmethod emit-form/-emit-form :frozen-macro
+  [{:keys [form] :as ast} opts]
+  (assert (not (#{:hygienic :qualified-symbols} opts))
+          "Cannot support emit-form options on :frozen-macro form")
+  form)
 
 (defn eval-ast [a {:keys [handle-evaluation-exception] 
                    :or {handle-evaluation-exception throw!}
@@ -448,16 +479,19 @@
                                                #'ana/macroexpand-1 (get-in opts [:bindings #'ana/macroexpand-1] 
                                                                            macroexpand-1)}
                                  (loop [form form raw-forms []]
-                                   (let [mform (ana/macroexpand-1 form env)]
-                                     (if (= mform form)
-                                       [mform (seq raw-forms)]
-                                       (recur mform (conj raw-forms
-                                                          (if-let [[op & r] (and (seq? form) form)]
-                                                            (if (or (ju/macro? op  env)
-                                                                    (ju/inline? op r env))
-                                                              (vary-meta form assoc ::ana/resolved-op (u/resolve-sym op env))
-                                                              form)
-                                                            form)))))))]
+                                   (let [op (when (seq? form) (first form))]
+                                     (if (frozen-macro? op env)
+                                       [form (seq raw-forms)]
+                                       (let [mform (ana/macroexpand-1 form env)]
+                                         (if (= mform form)
+                                           [mform (seq raw-forms)]
+                                           (recur mform (conj raw-forms
+                                                              (if-let [[op & r] (and (seq? form) form)]
+                                                                (if (or (ju/macro? op  env)
+                                                                        (ju/inline? op r env))
+                                                                  (vary-meta form assoc ::ana/resolved-op (u/resolve-sym op env))
+                                                                  form)
+                                                                form)))))))))]
          (if (and (seq? mform) (= 'do (first mform)) (next mform)
                   (additional-gilardi-condition mform))
            ;; handle the Gilardi scenario
@@ -480,6 +514,7 @@
                 :raw-forms  raw-forms}
                statements-expr
                ret-expr))
-           (let [a (analyze mform (analyze-env-fn env) (analyze-opts-fn opts))
+           (let [_ (prn "analyze+eval" mform)
+                 a (analyze mform (analyze-env-fn env) (analyze-opts-fn opts))
                  e (eval-fn a opts)]
              (merge e {:raw-forms raw-forms})))))))

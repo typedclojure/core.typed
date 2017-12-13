@@ -113,16 +113,16 @@
               (loop* ~(vec (interleave gs gs))
                      (let ~(vec (interleave bs gs))
                        ~@body)))))))
-   #'clojure.core/for
-   (fn [&form &env seq-exprs body-expr]
-     (@#'T/for &form &env seq-exprs body-expr))
+   ;#'clojure.core/for
+   ;(fn [&form &env seq-exprs body-expr]
+   ;  (@#'T/for &form &env seq-exprs body-expr))
 
    ;; setting the :macro metadata on a var is a runtime side effect that
    ;; core.typed cannot see. Here, we tc-ignore the body of macros manually.
-   #'clojure.core/defmacro
-   (fn [&form &env & args]
-     `(T/tc-ignore
-        ~(apply @#'core/defmacro &form &env args)))
+   ;#'clojure.core/defmacro
+   ;(fn [&form &env & args]
+   ;  `(T/tc-ignore
+   ;     ~(apply @#'core/defmacro &form &env args)))
    })
 
 (T/ann ^:no-check typed-macro-lookup [T/Any :-> T/Any])
@@ -165,7 +165,7 @@
                    (vary-meta res merge (meta form))
                    res))
 
-               inline?
+               false #_inline? ;; never inline, better type errors
                (let [res (apply inline? args)]
                  (taj/update-ns-map!)
                  (if (ta-utils/obj? res)
@@ -453,6 +453,12 @@
   (binding [*ns* (or (find-ns nsym)
                      *ns*)]
     (analyze1 form)))
+
+(defn thaw-form
+  "Returns an AST node for the form"
+  [form {:keys [thread-bindings] :as env}]
+  {:pre [(map? thread-bindings)]}
+  (jana2/thaw-form form env thread-bindings))
 
 (def reread-with-tr (comp tr/read readers/indexing-push-back-reader print-str))
 

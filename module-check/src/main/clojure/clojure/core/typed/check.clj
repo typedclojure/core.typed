@@ -250,6 +250,210 @@
           :return (assoc expr
                          u/expr-type (cu/error-ret expected)))))))
 
+
+(defmulti check-frozen-macro (fn [{:keys [^Var var] :as expr} expected]
+                               (let [msym (symbol (str (ns-name (.ns var))) (str (.sym var)))]
+                                 ;(prn "msym" msym)
+                                 msym)))
+
+(defmethod check-frozen-macro 'clojure.core.typed/tc-ignore
+  [{:keys [form] :as expr} expected]
+  (assoc expr
+         u/expr-type
+         (binding [vs/*current-expr* expr]
+           (below/maybe-check-below
+             (r/ret r/-any)
+             expected))))
+
+(defmethod check-frozen-macro 'clojure.core/defmacro
+  [{:keys [form] :as expr} expected]
+  ;(prn "check-frozen-macro" 'clojure.core/defmacro)
+  (assoc expr
+         u/expr-type
+         (binding [vs/*current-expr* expr]
+           (below/maybe-check-below
+             (r/ret (c/RClass-of Var [r/-nothing r/-any])
+                    (fo/-true-filter))
+             expected))))
+
+(defmethod check-frozen-macro 'clojure.core/dotimes
+  [{:keys [form env] :as expr} expected]
+  {:post [((some-fn #{:default} map?) %)]}
+  (cond
+    ;; exactly one binding (dotimes [l r] body ...)
+    (and (vector? (second form))
+         (= 2 (count (second form))))
+    (let [[_ [b init] & body] form
+          uinit (ana-clj/thaw-form init env)
+          cinit (check uinit (r/ret (c/RClass-of Number)))
+          ubody (ana-clj/thaw-form `(t/fn [~b :- Long] ~@body) env)
+          cbody (check ubody)]
+      (assoc expr
+             u/expr-type
+             (binding [vs/*current-expr* expr]
+               (below/maybe-check-below
+                 (r/ret r/-nil (fo/-false-filter))
+                 expected))))
+
+    ;; otherwise should throw a spec error on re-expansion
+    :else :default))
+
+;; vector destructuring == nth
+;; map destructuring == get
+(defn check-destructure [b t]
+  (assert nil)
+  (cond
+    (vector? b) (let [b (take-while (complement #{:as}) b)
+                      [bs [_ rst]] (split-with (complement #{'&}) b)]
+                  (assert (not rst))
+                  (map-indexed 
+                    (fn [i b]
+                      check-destructure 
+                    bs)))
+    (map? b) (assert nil)
+    (symbol? b) nil
+    :else (err/tc-delayed-error (str "Bad destructuring syntax: " b))))
+
+(defn typed-destructure [bindings]
+  (reduce (fn [bindings [b init]]
+            (if (symbol? b)
+              (conj bindings b init)
+              (let [gb (gensym 'b)]
+                (conj bindings 
+                      gb init
+                      (gensym '_) `(check-destructure '~b ~gb)
+                      b (gensym 'b)))))
+          []
+          (partition 2 bindings)))
+
+#_
+(add-invoke-special-method `check-destructure
+  [{:keys [args] :as expr} & [expected]]
+  (assert (not expected))
+  (assert (#{2} (count args)))
+  (assert (#{:const} (-> args first :op))
+          (-> args first :op))
+  (let [lhs-syntax (-> args first :val)
+        rhs-type (-> args second check u/expr-type :t)]
+    (check-destructure lhs-syntax rhs-type)))
+
+(defn check-for-comprehension-like [{:keys [form env] :as expr} expected
+                                    & {:keys [doseq?]}]
+  {:post [((some-fn #{:default} map?) %)]}
+  (let [[_ bindings & body] form
+        bindings (partition 2 bindings)
+        _ (when (not doseq?)
+						(when-not (some (comp not keyword? first) bindings)
+							(err/int-error (str "clojure.core/for takes at least one binding, found none.")))
+						(when-not (= 1 (count body))
+							(err/int-error (str "clojure.core/for takes 2 arguments, found " (count form)))))
+        done-innermost? (atom nil)
+        simple-expansion (reduce (fn [form [b init]]
+                                   (case b
+                                     :let `(let ~init ~form)
+                                     (:while :when) `(when ~init ~form)
+                                     (if @done-innermost?
+                                       `(mapcat (fn [~b] ~form) ~init)
+                                       (do (reset! done-innermost? true)
+                                           ;; innermost list is a `map`
+                                           `(map (fn [~b] ~form) ~init)))))
+                                 `(do ~@body)
+                                 (reverse bindings))
+        _ (prn "simple-expansion" simple-expansion)
+        ubody (ana-clj/thaw-form simple-expansion env)
+        body-expected (when (and (not doseq?) expected)
+                        (if (sub/subtype? (c/-tapp (c/-name `t/ASeq) r/-nothing) (:t expected))
+                          expected
+                          ;; improve the error message if expected type is not a good argument to `mapcat`,
+                          ;; (thus avoiding an error that blames `mapcat`)
+                          (binding [vs/*current-expr* expr]
+                            (err/tc-delayed-error (str "clojure.core/" (if doseq? 'doseq 'for) 
+                                                       " returns a non-nil sequence, but the surrounding context expects "
+                                                       (binding [prs/*unparse-type-in-ns* (cu/expr-ns expr)]
+                                                         (pr-str
+                                                           (prs/unparse-type (:t expected)))))
+                                                  :form (ast-u/emit-form-fn expr))
+                            nil)))
+  			;_ (prn "body-expected" body-expected)
+        cbody (check ubody body-expected)]
+    (assoc expr
+           u/expr-type
+           (cond 
+             doseq? (binding [vs/*current-expr* expr]
+                      (below/maybe-check-below
+                        (r/ret r/-nil (fo/-false-filter))
+                        expected))
+             :else (u/expr-type cbody)))))
+
+(defmethod check-frozen-macro 'clojure.core/doseq [expr expected]
+	(prn "doseq frozen check")
+  (check-for-comprehension-like expr expected :doseq? true))
+(defmethod check-frozen-macro 'clojure.core/for [expr expected]
+  (check-for-comprehension-like expr expected))
+
+;  #_
+;  (doseq [[a b] rhs1
+;          :let [lhs (first b)]
+;          [c d] rhs2
+;          :when c
+;          [e f] rhs3
+;          :while (< c d)]
+;    body1
+;    body2)
+;  #_
+;  rhs1 : (Coll t1)
+;  #_
+;  (t/fn [[a b] :- t1]
+;    (let [lhs (first b)]
+;      rhs2))
+;  : [t1 -> t2]
+;  #_
+;  (t/fn [[a b] :- t1]
+;    (let [lhs (first b)]
+;      (t/fn [[c d] :- t2]
+;        (if c
+;          rhs3
+;          (throw (Exception.))))))
+;  : [t1 -> [t2 -> t3]]
+;
+;#_
+;  (t/fn [[a b] :- t1]
+;    (let [lhs (first b)]
+;      (t/fn [[c d] :- t2]
+;        (if c
+;          (t/fn [[e f] :- t3]
+;            (if (< c d)
+;              (do body1 body2)
+;              (throw (Exception.))))
+;          (throw (Exception.))))))
+;  : [t1 -> [t2 -> [t3 -> t4]]]
+;
+;#_
+;(map
+;  (t/fn [[a b] :- t1]
+;    (let [lhs (first b)]
+;      (map
+;        (t/fn [[c d] :- t2]
+;          (if c
+;            (map
+;              (t/fn [[e f] :- t3]
+;                (if (< c d)
+;                  (do body1 body2)
+;                  (throw (Exception.))))
+;              rhs3)
+;            (throw (Exception.))))
+;        rhs2)))
+;  rhs1)
+
+(add-check-method :frozen-macro
+  [{:keys [form] :as expr} & [expected]]
+  {:post [(map? %)]}
+  (let [c (check-frozen-macro expr expected)]
+    (if (#{:default} c)
+			(err/int-error (str "No rule for macro: " (:var expr)))
+			#_ast ;; don't check frozen macros without rules
+      c)))
+
 (add-check-method :the-var
   [{:keys [^Var var env] :as expr} & [expected]]
   {:pre [(var? var)]}
