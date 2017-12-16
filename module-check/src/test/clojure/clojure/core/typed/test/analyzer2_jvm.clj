@@ -1,5 +1,6 @@
 (ns clojure.core.typed.test.analyzer2-jvm
   (:require [clojure.test :refer :all]
+            [clojure.core.typed.analyzer2.pre-analyze :as pre]
             [clojure.core.typed.analyzer2.jvm :as ana]
             [clojure.tools.analyzer.jvm :as taj]
             [clojure.tools.analyzer.jvm.utils :as ju]))
@@ -44,3 +45,14 @@
                                [clojure.core.typed.async :refer [go chan]]))
                    #(go)))
           :result)))
+
+(deftest frozen-macros-test
+  (is (binding [ana/frozen-macros #{'clojure.core/doseq}]
+        (= :frozen-macro (:op (ast' (doseq [a []]))))))
+  (is (binding [ana/frozen-macros #{#_'clojure.core/doseq}]
+        (not= :frozen-macro (:op (ast' (doseq [a []]))))))
+  (is (binding [ana/frozen-macros #{'clojure.core/doseq}]
+        (not= :frozen-macro
+              (:op 
+                (pre/thaw-frozen-macro
+                  (ast' (doseq [a []]))))))))

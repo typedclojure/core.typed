@@ -18,6 +18,11 @@
 
 (def ^{:dynamic  true
        :arglists '([sym env])
+       :doc      "True if a macro call should be frozen."}
+  freeze-macro?)
+
+(def ^{:dynamic  true
+       :arglists '([sym env])
        :doc      "Creates a var for sym and returns it"}
   create-var)
 
