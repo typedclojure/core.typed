@@ -207,6 +207,25 @@
       (-> (pre-analyze-form mform env)
         (update-in [:raw-forms] (fnil conj ()) sym)))))
 
+(defn pre-analyze-seq-no-frozen
+  [form env]
+  (let [op (first form)]
+    (when (nil? op)
+      (throw (ex-info "Can't call nil"
+                      (merge {:form form}
+                             (u/-source-info form env)))))
+      (let [mform (ana/macroexpand-1 form env)]
+        (if (= form mform) ;; function/special-form invocation
+          (pre-parse mform env)
+          (-> (pre-analyze-form mform env)
+            (update-in [:raw-forms] (fnil conj ())
+                       (vary-meta form assoc ::resolved-op (u/resolve-sym op env))))))))
+
+(defn thaw-frozen-macro [{:keys [op thread-bindings form env] :as expr}]
+  {:pre [(= :frozen-macro op)]}
+  (with-bindings thread-bindings
+    (pre-analyze-seq-no-frozen form env)))
+
 (defn pre-analyze-seq
   [form env]
   (let [op (first form)]
@@ -214,12 +233,18 @@
       (throw (ex-info "Can't call nil"
                       (merge {:form form}
                              (u/-source-info form env)))))
-    (let [mform (ana/macroexpand-1 form env)]
-      (if (= form mform) ;; function/special-form invocation
-        (pre-parse mform env)
-        (-> (pre-analyze-form mform env)
-          (update-in [:raw-forms] (fnil conj ())
-                     (vary-meta form assoc ::resolved-op (u/resolve-sym op env))))))))
+    (cond
+      (ana/freeze-macro? op env) {:op   :frozen-macro
+                                  :thread-bindings (get-thread-bindings)
+                                  :form form
+                                  :env  env}
+      :else
+      (let [mform (ana/macroexpand-1 form env)]
+        (if (= form mform) ;; function/special-form invocation
+          (pre-parse mform env)
+          (-> (pre-analyze-form mform env)
+            (update-in [:raw-forms] (fnil conj ())
+                       (vary-meta form assoc ::resolved-op (u/resolve-sym op env)))))))))
 
 (defn pre-parse-do
   [[_ & exprs :as form] env]

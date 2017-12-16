@@ -38,8 +38,20 @@
   (into ana/specials
         '#{monitor-enter monitor-exit clojure.core/import* reify* deftype* case*}))
 
+(def ^:dynamic frozen-macros #{})
+
+(defn freeze-macro? [op env]
+  (boolean
+    (when (symbol? op)
+      (when-not (specials op)
+        (let [^Var v (u/resolve-sym op env)]
+          (when (var? v)
+            (let [vsym (symbol (str (ns-name (.ns v)))
+                               (str (.sym v)))]
+              (contains? frozen-macros vsym))))))))
+
 (defn macroexpand-1
-  "If form represents a macro form or an inlineable function,returns its expansion,
+  "If form represents a macro form or an inlineable function, returns its expansion,
    else returns form."
   ([form] (macroexpand-1 form (taj/empty-env)))
   ([form env]
@@ -373,6 +385,7 @@
   ([form env opts]
      (with-bindings (merge {Compiler/LOADER     (RT/makeClassLoader)
                             #'ana/macroexpand-1 macroexpand-1
+                            #'ana/freeze-macro? freeze-macro?
                             #'ana/create-var    taj/create-var
                             ;#'ana/parse         parse
                             #'preana/pre-parse  pre/pre-parse
@@ -446,7 +459,9 @@
              [mform raw-forms] (with-bindings {Compiler/LOADER     (RT/makeClassLoader)
                                                #'*ns*              (the-ns (:ns env))
                                                #'ana/macroexpand-1 (get-in opts [:bindings #'ana/macroexpand-1] 
-                                                                           macroexpand-1)}
+                                                                           macroexpand-1)
+                                               #'ana/freeze-macro? (get-in opts [:bindings #'ana/freeze-macro?] 
+                                                                           freeze-macro?)}
                                  (loop [form form raw-forms []]
                                    (let [mform (ana/macroexpand-1 form env)]
                                      (if (= mform form)
