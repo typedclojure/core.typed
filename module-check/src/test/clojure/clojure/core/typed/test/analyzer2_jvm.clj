@@ -2,6 +2,7 @@
   (:require [clojure.test :refer :all]
             [clojure.core.typed.analyzer2.pre-analyze :as pre]
             [clojure.core.typed.analyzer2.jvm :as ana]
+            [clojure.tools.analyzer.passes.jvm.emit-form :refer [emit-form]]
             [clojure.tools.analyzer.jvm :as taj]
             [clojure.tools.analyzer.jvm.utils :as ju]))
 
@@ -54,5 +55,26 @@
   (is (binding [ana/frozen-macros #{'clojure.core/doseq}]
         (not= :frozen-macro
               (:op 
-                (pre/thaw-frozen-macro
-                  (ast' (doseq [a []]))))))))
+                (ana/thaw-frozen-macro
+                  (ast' (doseq [a []])))))))
+  (let [frozen (binding [ana/frozen-macros #{'clojure.core/doseq}]
+                 (ast' (doseq [a [(-> 1 identity)]]
+                         (-> a identity))))
+        env (:env frozen)
+        [_ bindings body-form :as frozen-form] (:form frozen)
+        ;; TODO how to uniquify?
+        dummy-bindings (into {}
+                             (map (fn [[b _]]
+                                    (when (symbol? b)
+                                      [b {:op    :binding
+                                          :env   env
+                                          :form  b
+                                          :local :fn
+                                          :name  b}])))
+                             (partition 2 bindings))
+        body-env (update env :locals merge dummy-bindings)
+        thawed-body (ana/thaw-form body-form body-env)
+        ;_ (prn thawed-body)
+        thawed-body-form (emit-form thawed-body)
+        ]
+    (is (= thawed-body-form '(identity a)))))

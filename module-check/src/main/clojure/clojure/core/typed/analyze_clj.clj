@@ -39,7 +39,9 @@
 ;  https://github.com/clojure/clojure/commit/7f79ac9ee85fe305e4d9cbb76badf3a8bad24ea0
 (T/ann ^:no-check *typed-macros* (T/Map T/Any T/Any))
 (def ^:dynamic *typed-macros*
-  {#'clojure.core/ns 
+  {
+   #_#_
+   #'clojure.core/ns 
    (fn [&form &env name & references]
      (let [process-reference
            (fn [[kname & args]]
@@ -230,6 +232,7 @@
                                                                   ;; use custom macroexpand-1
                                                                   macroexpand-1)]
                                  (loop [form form raw-forms []]
+                                   (assert nil "TODO handle frozen macros")
                                    (let [mform (ta/macroexpand-1 form env)]
                                      (if (= mform form)
                                        [mform (seq raw-forms)]
@@ -394,10 +397,14 @@
 (defn run-passes [ast]
   (typed-schedule ast))
 
+(def frozen-macros #{'clojure.core/ns
+                     'clojure.core.typed/ann-form})
+
 ;; (All [x ...] [-> '{(Var x) x ...})])
 (defn thread-bindings []
   (t/tc-ignore
     {#'ana2/macroexpand-1 macroexpand-1
+     #'jana2/frozen-macros frozen-macros
      ;#'jana2/run-passes run-passes
      }))
 
@@ -519,6 +526,8 @@
          (when cache
            (cache/miss cache nsym asts))
          asts)))))
+
+(def thaw-form #'jana2/thaw-form)
 
 ; eval might already be monkey-patched, eval' avoids infinite looping
 (defn eval' [frm]

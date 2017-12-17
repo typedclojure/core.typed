@@ -221,23 +221,21 @@
             (update-in [:raw-forms] (fnil conj ())
                        (vary-meta form assoc ::resolved-op (u/resolve-sym op env))))))))
 
-(defn thaw-frozen-macro [{:keys [op thread-bindings form env] :as expr}]
-  {:pre [(= :frozen-macro op)]}
-  (with-bindings thread-bindings
-    (pre-analyze-seq-no-frozen form env)))
-
 (defn pre-analyze-seq
   [form env]
+  ;(prn "pre-analyze-seq" form)
   (let [op (first form)]
     (when (nil? op)
       (throw (ex-info "Can't call nil"
                       (merge {:form form}
                              (u/-source-info form env)))))
     (cond
-      (ana/freeze-macro? op env) {:op   :frozen-macro
-                                  :thread-bindings (get-thread-bindings)
-                                  :form form
-                                  :env  env}
+      (ana/freeze-macro? op env) (do
+                                   ;(prn "freezing macro")
+                                   {:op   :frozen-macro
+                                    :macro (u/resolve-sym op env)
+                                    :form form
+                                    :env  (assoc env :thread-bindings (get-thread-bindings))})
       :else
       (let [mform (ana/macroexpand-1 form env)]
         (if (= form mform) ;; function/special-form invocation

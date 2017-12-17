@@ -277,6 +277,13 @@
                                   (fo/-true-filter))
                            expected)))))
 
+(defmulti invoke-frozen (fn [{:keys [op macro] :as expr} expected] 
+                           {:pre [(#{:frozen-macro} op)
+                                  (var? macro)]
+                            :post [(symbol? %)]}
+                           (coerce/var->symbol macro)))
+(u/add-defmethod-generator invoke-frozen)
+
 (defmulti invoke-special (fn [{fexpr :fn :keys [op] :as expr} & args] 
                            {:pre [(#{:invoke} op)]
                             :post [((some-fn nil? symbol?) %)]}
@@ -636,6 +643,42 @@
                u/expr-type (below/maybe-check-below
                              (r/ret r/-nil)
                              expected)))))
+
+(add-invoke-frozen-method 'clojure.core/ns
+  [{:keys [form env] :as expr} expected]
+  (assoc expr
+         u/expr-type (r/ret r/-nil
+                            (fo/-FS fl/-bot fl/-top))))
+
+(add-invoke-frozen-method 'clojure.core.typed/ann-form
+  [{:keys [form env] :as expr} expected]
+  (prn "frozen" 'clojure.core.typed/ann-form)
+  (let [[_ expr-form tsyn] form
+        parsed-t (binding [vs/*current-env* env
+                           prs/*parse-type-in-ns* (cu/expr-ns expr)]
+                   (prs/parse-type tsyn))
+        body (impl/impl-case
+               :clojure (ana-clj/thaw-form expr-form env)
+               :cljs (assert nil "TODO"))
+        cbody (check body (or (when expected
+                                (assoc expected :t parsed-t))
+                              (r/ret parsed-t
+                                     ;; TODO let users add expected filters
+                                     (fo/-FS fl/-top fl/-top)
+                                     obj/-empty
+                                     (r/-flow fl/-top))))
+        body-out-form (ast-u/emit-form-fn cbody)]
+    (assoc expr
+           :form `(clojure.core.typed/ann-form ~body-out-form ~tsyn)
+           u/expr-type (binding [vs/*current-expr* expr
+                                 vs/*current-env* env]
+                         (below/maybe-check-below
+                           (u/expr-type cbody)
+                           expected)))))
+
+(add-check-method :frozen-macro
+  [expr & [expected]]
+  (invoke-frozen expr expected))
 
 (defn swap!-dummy-arg-expr [env [target-expr & [f-expr & args]]]
   (assert f-expr)
