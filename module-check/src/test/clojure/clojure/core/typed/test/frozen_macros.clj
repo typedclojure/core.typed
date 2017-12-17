@@ -21,3 +21,13 @@
 (deftest tc-ignore-test
   (is-tc-e (tc-ignore #(/ nil nil)))
   (is-tc-err (tc-ignore #(/ nil nil)) nil))
+
+(deftest when-test
+  (is-tc-e (fn [a :- (U nil Number)]
+						 (when a (inc a))))
+  (is-tc-e (fn [a :- (U nil Number)]
+						 (when a (inc a))))
+  (is-tc-err (fn [a :- (U nil Number)] :- Number,
+							 (when a (inc a))))
+  (is-tc-err (fn [a :- (U nil Number)] :- Number,
+							 (when a))))
