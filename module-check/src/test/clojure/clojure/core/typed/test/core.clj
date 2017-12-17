@@ -3716,13 +3716,21 @@
   (testing "conditionals"
     (is-tc-e (if 1 2 3) Num)
     (is-tc-err (if 1 2 3) Sym)
-    ;TODO
-    #_(is-tc-e (if 1 2 3) 
+    (is-tc-e (if 1 2 3) 
              :expected-ret (ret (parse-clj `Num)
                                 (-FS -top -bot)))
+    (is-tc-e (if 1 nil nil) 
+             :expected-ret (ret (parse-clj `nil)
+                                (-FS -bot -top)))
     (is-tc-err (if 1 2 3) 
                :expected-ret (ret (parse-clj `Num)
-                                  (-FS -bot -top))))
+                                  (-FS -bot -top)))
+    (is-tc-e (fn [a] (if a nil nil))
+             [Any -> nil :filters {:then ff :else tt}])
+    (is-tc-e (fn [a b] (if a a a))
+             [Any Any -> Any :object {:id 0}])
+    (is-tc-err (fn [a b] (if b b b))
+               [Any Any -> Any :object {:id 0}]))
   (testing "functions are truthy"
     (is-tc-e (fn [])
              :expected-ret (ret -any
