@@ -647,13 +647,30 @@
 (add-invoke-frozen-method 'clojure.core/ns
   [{:keys [form env] :as expr} expected]
   (assoc expr
-         u/expr-type (r/ret r/-nil
-                            (fo/-FS fl/-bot fl/-top))))
+         u/expr-type (below/maybe-check-below
+                       (r/ret r/-nil
+                              (fo/-FS fl/-bot fl/-top))
+                       expected)))
 
-(add-invoke-frozen-method 'clojure.core.typed/ann-form
+(defn frozen-tc-ignore [{:keys [form env] :as expr} expected]
+  (assoc expr
+         u/expr-type (below/maybe-check-below
+                       (r/ret r/-any)
+                       expected)))
+
+(add-invoke-frozen-method 'clojure.core.typed/tc-ignore
+  [expr expected]
+  (frozen-tc-ignore expr expected))
+
+(add-invoke-frozen-method 'clojure.core.typed.macros/tc-ignore
+  [expr expected]
+  (frozen-tc-ignore expr expected))
+
+(defn frozen-ann-form
   [{:keys [form env] :as expr} expected]
-  (prn "frozen" 'clojure.core.typed/ann-form)
-  (let [[_ expr-form tsyn] form
+  ;(prn "frozen" 'clojure.core.typed/ann-form)
+  (let [[_ expr-form tsyn & more] form
+        _ (assert (not more) "Too many arguments to ann-form")
         parsed-t (binding [vs/*current-env* env
                            prs/*parse-type-in-ns* (cu/expr-ns expr)]
                    (prs/parse-type tsyn))
@@ -676,9 +693,18 @@
                            (u/expr-type cbody)
                            expected)))))
 
+(add-invoke-frozen-method 'clojure.core.typed/ann-form
+  [expr expected]
+  (frozen-ann-form expr expected))
+
+(add-invoke-frozen-method 'clojure.core.typed.macros/ann-form
+  [expr expected]
+  (frozen-ann-form expr expected))
+
 (add-check-method :frozen-macro
   [expr & [expected]]
-  (invoke-frozen expr expected))
+  (binding [vs/*current-expr* expr]
+    (invoke-frozen expr expected)))
 
 (defn swap!-dummy-arg-expr [env [target-expr & [f-expr & args]]]
   (assert f-expr)

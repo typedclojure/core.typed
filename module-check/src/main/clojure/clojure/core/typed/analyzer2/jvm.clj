@@ -41,7 +41,7 @@
 (def ^:dynamic frozen-macros #{})
 
 (defn freeze-macro? [op env]
-  ;(prn "freeze-macro?" frozen-macros)
+  ;(prn "freeze-macro?" op)
   (boolean
     (when (symbol? op)
       (when-not (specials op)
@@ -234,10 +234,10 @@
                                          :else
                                          (fn [_ _ ast] 
                                            ;(prn (str "before normal " direction " pass" p))
-                                           ;(clojure.pprint/pprint ast)
+                                           ;(prn (:op ast) (emit-form/emit-form ast))
                                            (let [ast (p ast)]
                                              ;(prn (str "after normal " direction " pass" p))
-                                             ;(clojure.pprint/pprint ast)
+                                             ;(prn (:op ast) (emit-form/emit-form ast))
                                              ast)))]
                                  (fn [a s ast]
                                    (p a s (f a s ast)))))

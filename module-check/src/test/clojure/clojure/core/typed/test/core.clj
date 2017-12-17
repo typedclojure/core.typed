@@ -4034,6 +4034,16 @@
                  (.a (A. 1)))
              :expected-ret
              (ret (parse-clj `Num)))
+    ; ctor call in method
+    (is-tc-e (do (ann-datatype A [a :- Num])
+                 (deftype A [a]
+                   Object
+                   (toString [this]
+                     (A. 1)
+                     "foo"))
+                 (.a (A. 1)))
+             :expected-ret
+             (ret (parse-clj `Num)))
     (is-tc-err (do (ann-datatype A [a :- Num])
                  (deftype A [a])
                  (.a (A. 1)))
@@ -4760,16 +4770,16 @@
 (deftest recursive-defalias-test
   ;; List already refers to c.c.t/List
   (is (thrown?
-        java.lang.IllegalStateException
+        clojure.lang.Compiler$CompilerException
         (tc-e (do (defalias List
-              (U '{:op ':cons
-                   :car Any
-                   :cdr List}
-                 '{:op ':nil}))
-            (let [a :- List1, {:op :nil}
-                  b :- List1, {:op :cons 
-                               :car 1
-                               :cdr a}])))))
+                    (U '{:op ':cons
+                         :car Any
+                         :cdr List}
+                       '{:op ':nil}))
+                  (let [a :- List1, {:op :nil}
+                        b :- List1, {:op :cons 
+                                     :car 1
+                                     :cdr a}])))))
   (is-tc-e
     (do (defalias List1
           (U '{:op ':cons
