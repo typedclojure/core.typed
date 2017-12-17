@@ -78,3 +78,12 @@
         thawed-body-form (emit-form thawed-body)
         ]
     (is (= thawed-body-form '(identity a)))))
+
+(deftest deftype-test
+  (is (some?
+        (binding [*ns* *ns*]
+          (eval `(ns ~(gensym)))
+          (ast
+            (deftype A []
+              Object
+              (toString [_] (A.) "a")))))))

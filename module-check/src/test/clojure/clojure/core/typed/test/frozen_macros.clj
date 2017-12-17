@@ -10,8 +10,14 @@
     [clojure.tools.analyzer.jvm.utils :as ju]))
 
 (deftest ns-test
-  (is-tc-e (ns foo)))
+  (is-tc-e (ns foo) nil)
+  (is-tc-err (ns foo) Symbol))
 
 (deftest ann-form-test
   (is-tc-e (ann-form 1 Integer))
+  (is-tc-err (ann-form 1 Integer) nil)
   (is-tc-err (ann-form 1 nil)))
+
+(deftest tc-ignore-test
+  (is-tc-e (tc-ignore #(/ nil nil)))
+  (is-tc-err (tc-ignore #(/ nil nil)) nil))

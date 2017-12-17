@@ -398,7 +398,10 @@
   (typed-schedule ast))
 
 (def frozen-macros #{'clojure.core/ns
-                     'clojure.core.typed/ann-form})
+                     'clojure.core.typed/ann-form
+                     'clojure.core.typed.macros/ann-form
+                     'clojure.core.typed/tc-ignore
+                     'clojure.core.typed.macros/tc-ignore})
 
 ;; (All [x ...] [-> '{(Var x) x ...})])
 (defn thread-bindings []
@@ -543,7 +546,7 @@
   (let [frm (emit-form/emit-form ast)
         ;_ (prn "form" frm)
         #_#_
-        _ (binding [*print-meta* true
+        _ (binding [;*print-meta* true
                     ;*print-dup* true
                     ]
             (prn "form")
