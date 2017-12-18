@@ -309,17 +309,14 @@
                  (when (= (:op a) :if) 
                    a)))
          (ret (make-FnIntersection
-                (Function-maker
+                (make-Function
                     [(Un (make-HMap :mandatory {(-val :op) (-val :if)})
                          (make-HMap :mandatory {(-val :op) (-val :var)}))]
-                    (make-Result (Un -nil (make-HMap :mandatory {(-val :op) (-val :if)}))
-                                 (-FS (-and (-filter (-val :if) 0 [(-kpe :op)])
-                                            (-filter (make-HMap :mandatory {(-val :op) (-val :if)}) 0))
-                                      (-not-filter (-val :if) 0 [(-kpe :op)]))
-                                 -empty)
-                    nil nil nil nil nil))
-              (-FS -top -bot)
-              -empty))))
+                    (Un -nil (make-HMap :mandatory {(-val :op) (-val :if)}))
+                    :filter (-FS (-and (-filter (-val :if) 0 [(-kpe :op)])
+                                       (-filter (make-HMap :mandatory {(-val :op) (-val :if)}) 0))
+                                 (-not-filter (-val :if) 0 [(-kpe :op)]))))
+              (-true-filter)))))
 
 
 #_(deftest dotted-infer-test

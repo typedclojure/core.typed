@@ -27,7 +27,10 @@
              (when a (inc a))))
   (is-tc-e (fn [a :- (U nil Number)]
              (when a (inc a))))
+  (is-tc-e (fn [a :- Number] :- Number
+             (when a (inc a))))
   (is-tc-err (fn [a :- (U nil Number)] :- Number,
                (when a (inc a))))
+  ;; error msg
   (is-tc-err (fn [a :- (U nil Number)] :- Number,
                (when a))))
