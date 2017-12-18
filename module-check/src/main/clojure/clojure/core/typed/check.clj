@@ -703,63 +703,46 @@
 
 (add-invoke-frozen-method 'clojure.core/when
   [{:keys [form env] :as expr} expected]
-  (letfn [(tc [expr reachable?]
-            {:post [(-> % u/expr-type r/TCResult?)]}
-            (when-not reachable?
-              #_(prn "Unreachable code found.. " expr))
-            (cond
-              ;; if reachable? is #f, then we don't want to verify that this branch has the appropriate type
-              ;; in particular, it might be (void)
-              (and expected reachable?)
-              (check expr expected)
-              ;; this code is reachable, but we have no expected type
-              reachable? (check expr)
-              ;; otherwise, this code is unreachable
-              ;; and the resulting type should be the empty type
-              :else (do ;(prn "Not checking unreachable code")
-                        (assoc expr 
-                               u/expr-type (r/ret (c/Un))))))]
-    (let [[_ test-form & body-forms] form
-          test (impl/impl-case
-                 :clojure (ana-clj/thaw-form test-form env)
-                 :cljs (assert nil "TODO"))
-          ctest (binding [vs/*current-expr* test]
-                  (check test))
-          tst (u/expr-type ctest)
-          {fs+ :then fs- :else :as f1} (r/ret-f tst)
-          flag+ (atom true :validator con/boolean?)
-          flag- (atom true :validator con/boolean?)
+  (prn "when frozen check")
+  (let [[_ test-form & body-forms] form
+        test (impl/impl-case
+               :clojure (ana-clj/thaw-form test-form env)
+               :cljs (assert nil "TODO"))
+        ctest (binding [vs/*current-expr* test]
+                (check test))
+        tst (u/expr-type ctest)
+        {fs+ :then fs- :else :as f1} (r/ret-f tst)
 
-          env-thn (update/env+ (lex/lexical-env) [fs+] flag+)
-          env-els (update/env+ (lex/lexical-env) [fs-] flag-)
+        [env-thn then-reachable] (if/update-lex+reachable fs+)
+        [env-els else-reachable] (if/update-lex+reachable fs-)
 
-          thn (impl/impl-case
-                :clojure (ana-clj/thaw-form `(do ~@body-forms) env)
-                :cljs (assert nil "TODO"))
+        thn (impl/impl-case
+              :clojure (ana-clj/thaw-form `(do ~@body-forms) env)
+              :cljs (assert nil "TODO"))
 
-          cthen
-          (binding [vs/*current-expr* thn]
-            (var-env/with-lexical-env env-thn
-              (tc thn @flag+)))
-          test-out-form (ast-u/emit-form-fn ctest)
-          then-out-form (ast-u/emit-form-fn cthen)
-          out (assoc expr
-                     :form `(~(first form) ~test-out-form ~@(rest then-out-form)))
-          
-          else-reachable? @flag+
-          _ (when else-reachable?
-              (binding [vs/*current-expr* out
-                        vs/*current-env* env]
-                (below/maybe-check-below
-                  (r/ret r/-nil
-                         (fo/-false-filter))
-                  expected)))]
-      (assoc out
-             u/expr-type (binding [vs/*current-expr* out
-                                   vs/*current-env* env]
-                           (below/maybe-check-below
-                             (u/expr-type cthen)
-                             expected))))))
+        cthen (if/check-if-reachable check thn env-thn then-reachable expected)
+
+        test-out-form (ast-u/emit-form-fn ctest)
+        then-out-form (ast-u/emit-form-fn cthen)
+        _ (assert (and (seq? then-out-form)
+                       (= 'do (first then-out-form))))
+        out (assoc expr
+                   :form `(~(first form) ~test-out-form
+                                   ~@(when (seq body-forms) (rest then-out-form))))
+
+        else-ret (if (not else-reachable)
+                   (if/unreachable-ret)
+                   (binding [vs/*current-expr* out
+                             vs/*current-env* env]
+                     (below/maybe-check-below
+                       (r/ret r/-nil
+                              (fo/-false-filter))
+                       expected)))
+        ret (if/combine-rets f1
+                             (u/expr-type cthen) env-thn
+                             else-ret env-els)]
+    (assoc out
+           u/expr-type ret)))
 
 (add-check-method :frozen-macro
   [expr & [expected]]

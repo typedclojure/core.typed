@@ -13,6 +13,11 @@
             [clojure.core.typed.errors :as err]
             [clojure.core.typed.check-below :as below]))
 
+(defn update-lex+reachable [fs]
+  (let [reachable (atom true :validator con/boolean?)
+        env (update/env+ (lex/lexical-env) [fs] reachable)]
+    [env @reachable]))
+
 (defn combine-rets [{fs+ :then fs- :else :as tst-ret}
                     {ts :t fs2 :fl os2 :o flow2 :flow :as then-ret}
                     env-thn
@@ -59,41 +64,40 @@
         ]
     (r/ret type filter object flow)))
 
+(defn unreachable-ret []
+  (r/ret r/-nothing
+         (fo/-unreachable-filter)
+         obj/-empty
+         (r/-flow fl/-bot)))
+
+(defn check-if-reachable [check-fn expr lex-env reachable? expected]
+  (if (not reachable?)
+    (assoc expr 
+           u/expr-type (unreachable-ret))
+    (binding [vs/*current-expr* expr]
+      (var-env/with-lexical-env lex-env
+        (check-fn expr expected)))))
+
 ;[TCResult Expr Expr (Option Type) -> TCResult]
 (defn check-if [check-fn expr ctest thn els expected]
   {:pre [(-> ctest u/expr-type r/TCResult?)
          ((some-fn r/TCResult? nil?) expected)]
    :post [(-> % u/expr-type r/TCResult?)]}
-  (letfn [(check-if-reachable [expr lex-env reachable?]
-            (if (not reachable?)
-              (assoc expr 
-                     u/expr-type (r/ret r/-nothing
-                                        (fo/-unreachable-filter)
-                                        obj/-empty
-                                        (r/-flow fl/-bot)))
-              (binding [vs/*current-expr* expr]
-                (var-env/with-lexical-env lex-env
-                  (check-fn expr expected)))))]
-    (let [tst (u/expr-type ctest)
-          {fs+ :then fs- :else :as tst-f} (r/ret-f tst)
+  (let [tst (u/expr-type ctest)
+        {fs+ :then fs- :else :as tst-f} (r/ret-f tst)
 
-          update-with-reachable (fn [fs]
-                                  (let [reachable (atom true :validator con/boolean?)
-                                        env (update/env+ (lex/lexical-env) [fs] reachable)]
-                                    [env @reachable]))
+        [env-thn reachable+] (update-lex+reachable fs+)
+        [env-els reachable-] (update-lex+reachable fs-)
 
-          [env-thn reachable+] (update-with-reachable fs+)
-          [env-els reachable-] (update-with-reachable fs-)
+        cthen (check-if-reachable check-fn thn env-thn reachable+ expected)
+        then-ret (u/expr-type cthen)
 
-          cthen (check-if-reachable thn env-thn reachable+)
-          then-ret (u/expr-type cthen)
-
-          celse (check-if-reachable els env-els reachable-)
-          else-ret (u/expr-type celse)]
-      (let [if-ret (combine-rets tst-f then-ret env-thn else-ret env-els)]
-        (assoc expr
-               :test ctest
-               :then cthen
-               :else celse
-               ;; already called `check-below` down each branch
-               u/expr-type if-ret)))))
+        celse (check-if-reachable check-fn els env-els reachable- expected)
+        else-ret (u/expr-type celse)]
+    (let [if-ret (combine-rets tst-f then-ret env-thn else-ret env-els)]
+      (assoc expr
+             :test ctest
+             :then cthen
+             :else celse
+             ;; already called `check-below` down each branch
+             u/expr-type if-ret))))
