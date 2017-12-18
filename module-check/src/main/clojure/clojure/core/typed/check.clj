@@ -2237,6 +2237,7 @@
                      ;(prn "env-default" env-default)
                      (var-env/with-lexical-env env-default
                        (check default expected)))
+          ;; FIXME this is a duplicated expected test, already done able
           case-result (let [type (apply c/Un (map (comp :t u/expr-type) (cons cdefault cthens)))
                             ; TODO
                             filter (fo/-FS fl/-top fl/-top)

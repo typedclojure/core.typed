@@ -87,3 +87,13 @@
             (deftype A []
               Object
               (toString [_] (A.) "a")))))))
+
+(deftest uniquify-test
+  (let [ret (ast' (let [a 1]
+                    (let [a 2]
+                      a)))]
+    (is (= (let [sym (-> ret :body :ret :bindings first :name)]
+             (is (symbol? sym))
+             sym)
+           (-> ret :body :ret :body :ret :name)))
+    (is (not= 'a (-> ret :body :ret :body :ret :name)))))

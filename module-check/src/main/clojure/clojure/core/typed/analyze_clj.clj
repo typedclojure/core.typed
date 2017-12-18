@@ -398,7 +398,7 @@
   (typed-schedule ast))
 
 (def frozen-macros #{'clojure.core/ns
-										 ;'clojure.core/when
+                     ;'clojure.core/when
                      'clojure.core.typed/ann-form
                      'clojure.core.typed.macros/ann-form
                      'clojure.core.typed/tc-ignore
