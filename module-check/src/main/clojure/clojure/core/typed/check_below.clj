@@ -193,21 +193,13 @@
           (cu/expected-error t1 t2))
         (r/ret (choose-result-type t1 t2) f o))
 
-      ;FIXME
-      ;; erm.. ? What is (FilterSet: (list) (list))
-      ;; TODO this case goes here, but not sure what it means 
-      ;
-      ;[((? r/Type? t1) (tc-result1: t2 (FilterSet: (list) (list)) (Empty:)))
-      ; (unless (sub/subtype t1 t2)
-      ;   (tc-error/expr "Expected ~a, but got ~a" t2 t1))
-      ; t1]
-
       (and (r/Type? tr1)
            (r/TCResult? expected))
       (let [t1 tr1
             {t2 :t f :fl o :o} expected]
         (if (subtype? t1 t2)
-          (err/tc-delayed-error (str "Expected result with filter " (pr-str f) " and object " (pr-str o) ", got trivial filter and empty object."))
+          (err/tc-delayed-error (str "Expected result with filter " (pr-str f) " and object " (pr-str o)
+                                     ", got trivial filter and empty object."))
           (cu/expected-error t1 t2))
         t1)
 
@@ -228,7 +220,7 @@
   {:pre [(r/TCResult? tr1)
          ((some-fn nil? r/TCResult?) expected)]
    :post [(r/TCResult? %)]}
-  (or (when expected
-        (check-below tr1 expected))
-      tr1))
+  (if expected
+    (check-below tr1 expected)
+    tr1))
 
