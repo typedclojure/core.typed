@@ -704,43 +704,34 @@
 
 (add-invoke-frozen-method 'clojure.core/let
   [vsym {:keys [form env args] :as expr} expected]
-  (let [[bindings-paired body] args
+  (let [[bindings-info body] args
         is-reachable (atom true)
-        [env penv cbindings-paired binding-names]
+        [env penv cbindings-info binding-names]
         (reduce
-          (fn [[env penv cbindings-paired binding-names] [b-form init-expr]]
+          (fn [[env penv cbindings-info binding-names] {:keys [b-form init d-bindings]}]
             {:pre [@is-reachable
                    (map? env)
                    (lex/PropEnv? penv)
-                   (vector? cbindings-paired)
-                   (vector? binding-names)
-                   (map? init-expr)]
-             :post [((con/maybe-reduced-c? (con/hvector-c? map? lex/PropEnv? vector? vector?)) %)]}
-            (let [init-form (ast-u/emit-form-fn init-expr)
-                  ;; simulate destructuring of `b-form` to update env/penv
-                  [env penv binding-names]
-                  (reduce (fn [[env penv binding-names] [b-form init-form]]
+                   (set? binding-names)
+                   (vector? d-bindings)
+                   (map? init)]
+             :post [((con/maybe-reduced-c? (con/hvector-c? map? lex/PropEnv? vector? set?)) %)]}
+            (let [;; FIXME this check is duplicated when we walk through destructuring.
+                  cinit init #_(var-env/with-lexical-env penv
+                                 (check init))
+                  ;; walk through destructuring of `b-form` to update env/penv
+                  [env penv cd-bindings]
+                  (reduce (fn [[env penv d-bindings] expr]
                             {:pre [@is-reachable
                                    (map? env)
                                    (lex/PropEnv? penv)
-                                   (symbol? b-form)]
-                             :post [((con/maybe-reduced-c? (con/hvector-c? map? lex/PropEnv? vector?)) %)]}
-                            (let [;; FIXME this reanalysis has hygiene implications
-                                  ;; that are breaking things.
-                                  expr (jana2/rerun-passes
-                                         {:op :binding
-                                          :env env
-                                          :local :let
-                                          :init (pre/pre-analyze-child init-form env)
-                                          :form b-form
-                                          :name b-form
-                                          :children [:init]})
-                                  {unhygienic-name :form, nme :name, :keys [env]
+                                   (= :binding (:op expr))
+                                   (set? d-bindings)]
+                             :post [((con/maybe-reduced-c? (con/hvector-c? map? lex/PropEnv? set?)) %)]}
+                            (let [{unhygienic-name :form, nme :name, :keys [env]
                                    :as cexpr}
                                   (var-env/with-lexical-env penv
                                     (check expr))
-                                  _ (prn "unhygienic-name" unhygienic-name)
-                                  _ (prn "hygienic name" nme)
                                   ;; BEGIN SIDE-EFFECT! must go before `maybe-reduced` calculation
                                   penv (let/update-env penv nme (u/expr-type cexpr) is-reachable)
                                   ;; END SIDE-EFFECT!
@@ -748,23 +739,30 @@
                               (maybe-reduced
                                 [(assoc-in env [:locals unhygienic-name] (dissoc cexpr :env))
                                  penv
-                                 (conj binding-names nme)])))
-                          [env penv binding-names]
-                          (partition 2 (destructure [b-form init-form])))
+                                 (conj d-bindings cexpr)])))
+                          [env penv #{}]
+                          d-bindings)
+                  cd-bindings (into cd-bindings (subvec d-bindings (count cd-bindings)))
+                  _ (assert (= (count cd-bindings) (count d-bindings)))
                   maybe-reduced (if @is-reachable identity reduced)]
               (maybe-reduced
-                [env penv (conj cbindings-paired [b-form init-form]) binding-names])))
-          [env (lex/lexical-env) [] []]
-          bindings-paired)
+                [env
+                 penv 
+                 (conj cbindings-info {:b-form b-form
+                                       :init cinit
+                                       :d-bindings cd-bindings})
+                 (into binding-names (map :name) d-bindings)])))
+          [env (lex/lexical-env) [] #{}]
+          bindings-info)
         _ (assert (map? env))
         _ (assert (lex/PropEnv? penv))
-        _ (assert (vector? cbindings-paired))
+        _ (assert ((con/vec-c? map?) cbindings-info))
         ;; append any skipped bindings
-        cbindings-paired (into cbindings-paired (subvec bindings-paired (count cbindings-paired)))
-        _ (assert (= (count cbindings-paired) (count bindings-paired)))]
+        cbindings-info (into cbindings-info (subvec bindings-info (count cbindings-info)))
+        _ (assert (= (count cbindings-info) (count bindings-info)))]
       (cond
         (not @is-reachable) (let [ret (or expected (r/ret (c/Un)))
-                                  cargs [cbindings-paired body]]
+                                  cargs [cbindings-info body]]
                               (-> expr
                                   (assoc u/expr-type ret)
                                   (jana2/reconstruct-tag+form vsym form cargs)))
@@ -774,7 +772,7 @@
                       (binding [vs/*current-expr* body]
                         (check body expected)))
               unshadowed-ret (let/erase-objects binding-names (u/expr-type cbody))
-              cargs [cbindings-paired cbody]]
+              cargs [cbindings-info cbody]]
           (-> expr 
               (assoc u/expr-type unshadowed-ret)
               (jana2/reconstruct-tag+form vsym form cargs))))))

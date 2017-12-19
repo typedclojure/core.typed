@@ -54,4 +54,8 @@
                 (/ nil nil)))
   ;destructuring
   (is-tc-e (let [{:keys [a]} {:a 1}]
-             (inc a))))
+             (inc a)))
+
+  ;; locals shadow vars
+  (is-tc-e (let [identity identity]
+             (identity 1))))
