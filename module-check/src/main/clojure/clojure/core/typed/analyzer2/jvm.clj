@@ -58,16 +58,53 @@
 
 (defmulti -freeze-macro (fn [op form env] op))
 
+(defn reconstruct-tag+form [expr vsym form args]
+  {:pre [(vector? args)]}
+  (assoc expr
+         :args args
+         :tag  (reconstruct-tag vsym form args)
+         :form (reconstruct-form vsym form args)))
+
+(defmethod reconstruct-tag 'clojure.core/let
+  [_ _ [_ body :as args]]
+  (:tag body))
+
+(defn do-form? [form]
+  (and (seq? form)
+       (= 'do (first form))))
+
+(defn thaw-synthetic-body-forms [body-forms env]
+  (thaw-form `(do ~@body-forms) env))
+
+;; preserves empty bodies like (let []), even if
+;; they are expanded to (do nil), preventing (let [] nil)
+(defn splice-body-forms [original-body new-do-body]
+  {:pre [(do-form? new-do-body)]}
+  (when (seq original-body) (rest new-do-body)))
+
+(defmethod reconstruct-form 'clojure.core/let
+  [_ [mform bindings-form & old-body-forms :as form] [bindings-paired body :as args]]
+  (let [new-bindings-form (into (empty bindings-form) (mapcat identity) bindings-paired)
+        _ (assert (vector? new-bindings-form))
+        body-form (emit-form/emit-form body)
+        _ (assert (do-form? body-form))]
+    (list* mform new-bindings-form (splice-body-forms old-body-forms body-form))))
+
 (defmethod -freeze-macro 'clojure.core/let
-  [_ {:keys [form env] :as expr} expected]
-  (let [[_ bindings-form & body-forms] form
-        _ (assert (and (vector? bindings-form)
-                       (even? (count bindings-form))))
+  [vsym [_ bindings-form & body-forms :as form] env]
+  (let [_ (assert (and (vector? bindings-form) (even? (count bindings-form))))
         [env bindings-paired]
         (reduce
-          (fn [[env bindings-paired] [b-form init-form]]
-            (let [init-form (emit-form/emit-form (thaw-form init-form env))
+          (fn [[env bindings-paired] [b-form old-init-form]]
+            (let [;; macroexpand up to frozen macros
+                  init (thaw-form old-init-form env)
+                  ;; emit to plug into `destructure`
+                  init-form (emit-form/emit-form init)
+                  ;; simulate the destructuring of b-form to gather :tag
+                  ;; and :locals information.
                   env (reduce (fn [env [b-form init-form]]
+                                {:pre [(map? env)]
+                                 :post [(map? %)]}
                                 (let [{unhygienic-name :form :keys [env] :as expr}
                                       (rerun-passes
                                         {:op :binding
@@ -79,33 +116,27 @@
                                          :children [:init]})]
                                   ;; FIXME many of these names will pollute the local environment
                                   ;; we eventually return, since we return forms that
-                                  ;; undo the expansion of `destructure`.
+                                  ;; undo the expansion of this simulated `destructure`.
                                   (assoc-in env [:locals unhygienic-name] (dissoc expr :env))))
                               env
                               (partition 2 (destructure [b-form init-form])))]
-              [env (conj bindings-paired [b-form init-form])]))
+              ;; remember original destructuring lhs (b-form) and analyzed rhs (init)
+              [env (conj bindings-paired [b-form init])]))
           [env []]
           (partition 2 bindings-form))
-        new-bindings-form (into (empty bindings-form) (mapcat identity) bindings-paired)
-        _ (assert (vector? new-bindings-form))
-        body (thaw-form `(do ~@body-forms) env)
-        body-form (emit-form/emit-form body)
-        _ (assert (and (seq? body-form)
-                       (= 'do (first body-form))))]
-    (assoc expr
-           :tag (:tag body)
-           :args [bindings-paired body]
-           :form (list* (first form) new-bindings-form (rest body-form)))))
+        body (thaw-synthetic-body-forms body-forms env)
+        args [bindings-paired body]]
+    (-> 
+      {:op :frozen-macro
+       :env env}
+      (reconstruct-tag+form vsym form args))))
 
 (defmethod reconstruct-form 'clojure.core/when
-  [op [_ test-form & then-forms :as form] [test then :as args]]
+  [op [mform test-form & then-forms :as form] [test then :as args]]
   (let [test-out-form (emit-form/emit-form test)
         then-out-form (emit-form/emit-form then)
-        _ (assert (and (seq? then-out-form)
-                       (= 'do (first then-out-form))))]
-    (list* (first form)
-           test-out-form
-           (when (seq then-forms) (rest then-out-form)))))
+        _ (assert (do-form? then-out-form))]
+    (list* mform test-out-form (splice-body-forms then-forms then-out-form))))
 
 (defmethod reconstruct-tag 'clojure.core/when
   [_ _ [_ then :as args]]
@@ -116,13 +147,12 @@
   ;; TODO spec check macro first
   (assert (<= 2 (count form)))
   (let [test (thaw-form test-form (u/ctx env :ctx/expr))
-        then (thaw-form `(do ~@then-forms) env)
+        then (thaw-synthetic-body-forms then-forms env)
         args [test then]]
-    {:op :frozen-macro
-     :env env
-     :args args
-     :tag  (reconstruct-tag op form args)
-     :form (reconstruct-form op form args)}))
+    (-> 
+      {:op :frozen-macro
+       :env env}
+      (reconstruct-tag+form op form args))))
 
 (defn freeze-macro [op form env]
   (let [^Var v (u/resolve-sym op env)
