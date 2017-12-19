@@ -702,26 +702,32 @@
   [_ expr expected]
   (frozen-ann-form expr expected))
 
-#_
 (add-invoke-frozen-method 'clojure.core/let
-  [_ {:keys [form env args] :as expr} expected]
+  [vsym {:keys [form env args] :as expr} expected]
   (let [[bindings-paired body] args
         is-reachable (atom true)
-        [penv cbindings-paired binding-names]
+        [env penv cbindings-paired binding-names]
         (reduce
           (fn [[env penv cbindings-paired binding-names] [b-form init-expr]]
             {:pre [@is-reachable
+                   (map? env)
                    (lex/PropEnv? penv)
+                   (vector? cbindings-paired)
+                   (vector? binding-names)
                    (map? init-expr)]
              :post [((con/maybe-reduced-c? (con/hvector-c? map? lex/PropEnv? vector? vector?)) %)]}
             (let [init-form (ast-u/emit-form-fn init-expr)
+                  ;; simulate destructuring of `b-form` to update env/penv
                   [env penv binding-names]
                   (reduce (fn [[env penv binding-names] [b-form init-form]]
                             {:pre [@is-reachable
+                                   (map? env)
                                    (lex/PropEnv? penv)
                                    (symbol? b-form)]
                              :post [((con/maybe-reduced-c? (con/hvector-c? map? lex/PropEnv? vector?)) %)]}
-                            (let [expr (jana2/rerun-passes
+                            (let [;; FIXME this reanalysis has hygiene implications
+                                  ;; that are breaking things.
+                                  expr (jana2/rerun-passes
                                          {:op :binding
                                           :env env
                                           :local :let
@@ -729,9 +735,12 @@
                                           :form b-form
                                           :name b-form
                                           :children [:init]})
-                                  {unhygienic-name :form nme :name :keys [init env] :as cexpr}
+                                  {unhygienic-name :form, nme :name, :keys [env]
+                                   :as cexpr}
                                   (var-env/with-lexical-env penv
                                     (check expr))
+                                  _ (prn "unhygienic-name" unhygienic-name)
+                                  _ (prn "hygienic name" nme)
                                   ;; BEGIN SIDE-EFFECT! must go before `maybe-reduced` calculation
                                   penv (let/update-env penv nme (u/expr-type cexpr) is-reachable)
                                   ;; END SIDE-EFFECT!
@@ -746,38 +755,32 @@
               (maybe-reduced
                 [env penv (conj cbindings-paired [b-form init-form]) binding-names])))
           [env (lex/lexical-env) [] []]
-          (partition 2 bindings-form))
+          bindings-paired)
         _ (assert (map? env))
         _ (assert (lex/PropEnv? penv))
         _ (assert (vector? cbindings-paired))
-        new-bindings-form ;; update forms we've iterated over, otherwise keep
-        (into (empty (second form))
-              (concat (mapcat identity cbindings-paired)
-                      (subvec bindings-form (* 2 (count cbindings-paired)))))
-        _ (assert (vector? new-bindings-form))
-        new-form-updated-binding (list* (first form) new-bindings-form (nthrest form 2))]
+        ;; append any skipped bindings
+        cbindings-paired (into cbindings-paired (subvec bindings-paired (count cbindings-paired)))
+        _ (assert (= (count cbindings-paired) (count bindings-paired)))]
       (cond
-        (not @is-reachable) (assoc expr
-                                   :form new-form-updated-binding
-                                   u/expr-type (or expected (r/ret (c/Un))))
+        (not @is-reachable) (let [ret (or expected (r/ret (c/Un)))
+                                  cargs [cbindings-paired body]]
+                              (-> expr
+                                  (assoc u/expr-type ret)
+                                  (jana2/reconstruct-tag+form vsym form cargs)))
 
         :else
         (let [cbody (var-env/with-lexical-env penv
                       (binding [vs/*current-expr* body]
                         (check body expected)))
-              cbody-form (ast-u/emit-form-fn cbody)
-              _ (assert (and (seq? cbody-form)
-                             (= 'do (first cbody-form))))
-              unshadowed-ret (let/erase-objects binding-names (u/expr-type cbody))]
-          ;(prn (:tag cbody) `(do ~@body-forms))
-          (assoc expr
-                 :form (list* (concat (take 2 new-form-updated-binding)
-                                      (rest cbody-form)))
-                 :tag (:tag cbody)
-                 u/expr-type unshadowed-ret)))))
+              unshadowed-ret (let/erase-objects binding-names (u/expr-type cbody))
+              cargs [cbindings-paired cbody]]
+          (-> expr 
+              (assoc u/expr-type unshadowed-ret)
+              (jana2/reconstruct-tag+form vsym form cargs))))))
 
 (add-invoke-frozen-method 'clojure.core/when
-  [vsym {:keys [args env] :as expr} expected]
+  [vsym {:keys [form args env] :as expr} expected]
   (let [[test thn] args
         ctest (binding [vs/*current-expr* test]
                 (check test))
@@ -801,11 +804,9 @@
                              (u/expr-type cthen) env-thn
                              else-ret env-els)
         cargs [ctest cthen]]
-    (assoc expr
-           :args cargs
-           :form (jana2/reconstruct-form vsym (:form expr) cargs)
-           :tag  (jana2/reconstruct-tag vsym (:form expr) cargs)
-           u/expr-type ret)))
+    (-> expr
+        (assoc u/expr-type ret)
+        (jana2/reconstruct-tag+form vsym form cargs))))
 
 (add-check-method :frozen-macro
   [{:keys [macro] :as expr} & [expected]]
