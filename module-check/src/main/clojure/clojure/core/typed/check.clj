@@ -7,6 +7,8 @@
             [clojure.core.typed.check-below :as below]
             [clojure.core.typed.abo :as abo]
             [clojure.core.typed.analyze-clj :as ana-clj]
+            [clojure.core.typed.analyzer2.jvm :as jana2]
+            [clojure.core.typed.analyzer2.pre-analyze :as pre]
             [clojure.tools.analyzer.passes.jvm.validate :as validate]
             [clojure.tools.analyzer.passes.jvm.analyze-host-expr :as ana-host]
             [clojure.core.typed.array-ops :as arr-ops]
@@ -701,9 +703,72 @@
   [expr expected]
   (frozen-ann-form expr expected))
 
+(add-invoke-frozen-method 'clojure.core/let
+  [{:keys [form env] :as expr} expected]
+  (let [[_ bindings-form & body-forms] form
+        _ (assert (and (vector? bindings-form)
+                       (even? (count bindings-form))))
+        is-reachable (atom true)
+        [env penv cbindings-paired binding-names]
+        (reduce
+          (fn [[env penv cbindings-paired binding-names] [b-form init-form]]
+            {:pre [@is-reachable
+                   (lex/PropEnv? penv)
+                   (symbol? b-form)]
+             :post [((con/maybe-reduced-c? (con/hvector-c? map? lex/PropEnv? vector? vector?)) %)]}
+            (let [; check rhs
+                  destructured (destructure [b-form init-form])
+                  expr (jana2/rerun-passes
+                         {:op :binding
+                          :env env
+                          :local :let
+                          :init (pre/pre-analyze-child init-form env)
+                          :form b-form
+                          :name b-form
+                          :children [:init]})
+                  {unhygienic-name :form nme :name :keys [init env] :as cexpr}
+                  (var-env/with-lexical-env penv
+                    (check expr))
+                  ;; side-effect! must go before `maybe-reduced` calculation
+                  penv (let/update-env penv nme (u/expr-type cexpr) is-reachable)
+                  maybe-reduced (if @is-reachable identity reduced)]
+              (maybe-reduced
+                [(assoc-in env [:locals unhygienic-name] (dissoc cexpr :env))
+                 penv
+                 (conj cbindings-paired [b-form (ast-u/emit-form-fn init)])
+                 (conj binding-names nme)])))
+          [env (lex/lexical-env) [] []]
+          (partition 2 bindings-form))
+        _ (assert (map? env))
+        _ (assert (lex/PropEnv? penv))
+        _ (assert (vector? cbindings-paired))
+        new-bindings-form ;; update forms we've iterated over, otherwise keep
+        (into (vec (mapcat identity cbindings-paired))
+              (subvec bindings-form (* 2 (count cbindings-paired))))
+        _ (assert (vector? new-bindings-form))
+        new-form-updated-binding (list* (first form) new-bindings-form (nthrest form 2))]
+      (cond
+        (not @is-reachable) (assoc expr
+                                   :form new-form-updated-binding
+                                   u/expr-type (or expected (r/ret (c/Un))))
+
+        :else
+        (let [_ (prn "thawing body" body-forms (keys (-> env :locals)))
+              body  (ana-clj/thaw-form `(do ~@body-forms) env)
+              _ (prn "thawed body")
+              cbody (var-env/with-lexical-env penv
+                      (binding [vs/*current-expr* body]
+                        (check body expected)))
+              unshadowed-ret (let/erase-objects binding-names (u/expr-type cbody))]
+          (prn new-form-updated-binding)
+          (assoc expr
+                 :form (list* (concat (take 2 new-form-updated-binding)
+                                      (rest (ast-u/emit-form-fn cbody))))
+                 u/expr-type unshadowed-ret)))))
+
 (add-invoke-frozen-method 'clojure.core/when
   [{:keys [form env] :as expr} expected]
-  (prn "when frozen check")
+  ;(prn "when frozen check")
   (let [[_ test-form & body-forms] form
         test (impl/impl-case
                :clojure (ana-clj/thaw-form test-form env)
@@ -1974,6 +2039,14 @@
   [{args :exprs :keys [env] :as expr} & [expected]]
   {:post [(vector? (:exprs %))]}
   (recur/check-recur args env expr expected check))
+
+(add-check-method :binding
+  [{:keys [init] :as expr} & [expected]]
+  (let [cinit (binding [vs/*current-expr* init]
+                (check init expected))]
+    (assoc expr
+           :init cinit
+           u/expr-type (u/expr-type cinit))))
 
 (add-check-method :loop
   [{binding-inits :bindings :keys [body] :as expr} & [expected]]

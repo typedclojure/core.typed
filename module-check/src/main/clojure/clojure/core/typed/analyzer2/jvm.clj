@@ -394,8 +394,7 @@
                             #'*ns*              (the-ns (:ns env))}
                            (:bindings opts))
        (env/ensure (taj/global-env)
-         (doto (env/with-env (u/mmerge (env/deref-env)
-                                     {:passes-opts (get opts :passes-opts default-passes-opts)})
+         (doto (env/with-env (u/mmerge (env/deref-env) {:passes-opts (get opts :passes-opts default-passes-opts)})
                  (run-passes (preana/pre-analyze-child form env)))
            (do (taj/update-ns-map!)))))))
 
@@ -411,6 +410,13 @@
   {:pre []}
   (analyze form (dissoc env :thread-bindings)
            {:bindings (:thread-bindings env)}))
+
+(defn rerun-passes [{:keys [env] :as ast}]
+  (let [thread-bindings (:thread-bindings env)]
+    (assert (map? thread-bindings))
+    (with-bindings thread-bindings
+      (doto (run-passes ast)
+        (do (taj/update-ns-map!))))))
 
 (deftype ExceptionThrown [e ast])
 

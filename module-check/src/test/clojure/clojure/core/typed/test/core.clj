@@ -5579,6 +5579,93 @@
                (defmethod f :foo [a]
                  1))))
 
+(deftest let-occurrence-typing-test
+  ;; unreachable branches
+  (is-tc-e #(let [a (ann-form 'a Any)
+                  _ (assert (symbol? a))
+                  _ (assert (not (symbol? a)))]
+              (/ nil nil)))
+  (is-tc-e #(let [a (ann-form 'a Any)
+                  _ (assert (and (symbol? a) (not (symbol? a))))]
+              (/ nil nil)))
+  (is-tc-e #(let [a (ann-form 'a Any)
+                  _ (assert (and (symbol? a) (not (symbol? a))))
+                  _ (/ nil nil)]))
+  (is-tc-err #(let [a (ann-form 'a Any)
+                    _ (/ nil nil)
+                    _ (assert (and (symbol? a) (not (symbol? a))))]))
+  ;; propagating objects
+  (is-tc-e #(let [a (ann-form 1 Any)]
+              (let [b a]
+                (assert (number? b)))
+              (ann-form a Number)))
+  (is-tc-e #(let [a (ann-form 1 Any)]
+              (let [b a]
+                (assert (number? a)))
+              (ann-form a Number)))
+  (is-tc-e #(let [a (ann-form 1 Any)
+                  _ (let [b a]
+                      (assert (number? b)))]
+              (ann-form a Number)))
+  (is-tc-e #(let [a (ann-form 1 Any)
+                  _ (let [b a]
+                      (assert (number? a)))]
+              (ann-form a Number)))
+  (is-tc-err #(let [a (ann-form 1 Any)]
+                (let [b a]
+                  (assert (not (number? b))))
+                (ann-form a Number)))
+  (is-tc-err #(let [a (ann-form 1 Any)
+                    _ (let [b a]
+                        (assert (not (number? b))))]
+                (ann-form a Number)))
+  ;; propagating complicated objects
+  (is-tc-e #(let [m {:a (ann-form 1 Any)}]
+              (let [b (:a m)]
+                (assert (number? b)))
+              (ann-form (:a m) Number)))
+  (is-tc-e #(let [m {:a (ann-form 1 Any)}
+                  _ (let [b (:a m)]
+                      (assert (number? b)))]
+              (ann-form (:a m) Number)))
+  (is-tc-err #(let [m {:a (ann-form 1 Any)}]
+                (let [b (:a m)]
+                  (assert (not (number? b))))
+                (ann-form (:a m) Number)))
+  (is-tc-err #(let [m {:a (ann-form 1 Any)}
+                    _ (let [b (:a m)]
+                        (assert (not (number? b))))]
+                (ann-form (:a m) Number)))
+  ;; erased/uniquified shadowed bindings
+  (is-tc-err #(let [a (ann-form 1 Any)
+                    _ (let [a (ann-form 1 Number)]
+                        a)]
+                (ann-form a Number)))
+  (is-tc-e #(let [; test if aliasing gets confused
+                  m {:a (ann-form 1 Any)}
+                  a (:a m)
+                  m {:a (ann-form 1 Any)}
+                  _ (assert (number? a))]
+              (ann-form a Number)))
+  (is-tc-err #(let [m {:a (ann-form 1 Any)}
+                    a (:a m)
+                    m {:a (ann-form 1 Any)}
+                    _ (assert (number? a))]
+                (ann-form (:a m) Number)))
+  ;; uniquify let+do (gilardi scenario)
+  (is-tc-err (do (let [m (ann-form 1 Any)]
+                   (assert (number? m))
+                   m)
+                 (let [m (ann-form 1 Any)]
+                   (ann-form m Number))))
+  ;; uniquify let+do (non-gilardi scenario)
+  (is-tc-err #(do (let [m (ann-form 1 Any)]
+                    (assert (number? m))
+                    m)
+                  (let [m (ann-form 1 Any)]
+                    (ann-form m Number))))
+)
+
 ;    (is-tc-e 
 ;      (let [f (fn [{:keys [a] :as m} :- '{:a (U nil Num)}] :- '{:a Num} 
 ;                {:pre [(number? a)]} 

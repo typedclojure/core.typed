@@ -5,8 +5,6 @@
             [clojure.core.typed.current-impl :as impl]
             [clojure.core.typed.ast-utils :as ast-u]))
 
-(alter-meta! *ns* assoc :skip-wiki true)
-
 (def int-error-kw ::internal-error)
 (def nyi-error-kw ::nyi-error)
 

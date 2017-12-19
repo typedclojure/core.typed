@@ -39,9 +39,7 @@
 ;  https://github.com/clojure/clojure/commit/7f79ac9ee85fe305e4d9cbb76badf3a8bad24ea0
 (T/ann ^:no-check *typed-macros* (T/Map T/Any T/Any))
 (def ^:dynamic *typed-macros*
-  {
-   #_#_
-   #'clojure.core/ns 
+  {#'clojure.core/ns 
    (fn [&form &env name & references]
      (let [process-reference
            (fn [[kname & args]]
@@ -399,6 +397,7 @@
 
 (def frozen-macros #{'clojure.core/ns
                      'clojure.core/when
+                     ;'clojure.core/let
                      'clojure.core.typed/ann-form
                      'clojure.core.typed.macros/ann-form
                      'clojure.core.typed/tc-ignore
