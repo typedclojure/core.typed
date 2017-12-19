@@ -160,9 +160,6 @@
                                       (when rest-param
                                         [rest-param]))))))
 
-(defn let-body-kw []
-  :body)
-
 (defn def-var-name [expr]
   {:post [(symbol? %)]}
   (impl/impl-case

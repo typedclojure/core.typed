@@ -34,3 +34,24 @@
   ;; error msg
   (is-tc-err (fn [a :- (U nil Number)] :- Number,
                (when a))))
+
+(deftest let-test
+  (is-tc-e (let [a 1]
+             (inc a)))
+  (is-tc-e #(let [a (throw (Exception.))]
+              (/ nil nil)))
+  (is-tc-e #(let [a 1
+                  b 2]
+              (/ a b)))
+  (is-tc-e #(let [a (throw (Exception.))
+                  b (/ nil nil)]))
+  (is-tc-err #(let [a (/ nil nil)
+                    b (throw (Exception.))]
+                (/ a b)))
+  (is-tc-err #(let [a (/ nil nil)]
+                (inc a)))
+  (is-tc-err #(let [a 1]
+                (/ nil nil)))
+  ;destructuring
+  (is-tc-e (let [{:keys [a]} {:a 1}]
+             (inc a))))
