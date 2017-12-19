@@ -713,30 +713,39 @@
         (reduce
           (fn [[env penv cbindings-paired binding-names] [b-form init-form]]
             {:pre [@is-reachable
-                   (lex/PropEnv? penv)
-                   (symbol? b-form)]
+                   (lex/PropEnv? penv)]
              :post [((con/maybe-reduced-c? (con/hvector-c? map? lex/PropEnv? vector? vector?)) %)]}
-            (let [; check rhs
-                  destructured (destructure [b-form init-form])
-                  expr (jana2/rerun-passes
-                         {:op :binding
-                          :env env
-                          :local :let
-                          :init (pre/pre-analyze-child init-form env)
-                          :form b-form
-                          :name b-form
-                          :children [:init]})
-                  {unhygienic-name :form nme :name :keys [init env] :as cexpr}
-                  (var-env/with-lexical-env penv
-                    (check expr))
-                  ;; side-effect! must go before `maybe-reduced` calculation
-                  penv (let/update-env penv nme (u/expr-type cexpr) is-reachable)
+            (let [init-form (ast-u/emit-form-fn (jana2/rerun-passes (pre/pre-analyze-child init-form env)))
+                  [env penv binding-names]
+                  (reduce (fn [[env penv binding-names] [b-form init-form]]
+                            {:pre [@is-reachable
+                                   (lex/PropEnv? penv)
+                                   (symbol? b-form)]
+                             :post [((con/maybe-reduced-c? (con/hvector-c? map? lex/PropEnv? vector?)) %)]}
+                            (let [expr (jana2/rerun-passes
+                                         {:op :binding
+                                          :env env
+                                          :local :let
+                                          :init (pre/pre-analyze-child init-form env)
+                                          :form b-form
+                                          :name b-form
+                                          :children [:init]})
+                                  _ (prn b-form (:tag expr))
+                                  {unhygienic-name :form nme :name :keys [init env] :as cexpr}
+                                  (var-env/with-lexical-env penv
+                                    (check expr))
+                                  ;; side-effect! must go before `maybe-reduced` calculation
+                                  penv (let/update-env penv nme (u/expr-type cexpr) is-reachable)
+                                  maybe-reduced (if @is-reachable identity reduced)]
+                              (maybe-reduced
+                                [(assoc-in env [:locals unhygienic-name] (dissoc cexpr :env))
+                                 penv
+                                 (conj binding-names nme)])))
+                          [env penv binding-names]
+                          (partition 2 (destructure [b-form init-form])))
                   maybe-reduced (if @is-reachable identity reduced)]
               (maybe-reduced
-                [(assoc-in env [:locals unhygienic-name] (dissoc cexpr :env))
-                 penv
-                 (conj cbindings-paired [b-form (ast-u/emit-form-fn init)])
-                 (conj binding-names nme)])))
+                [env penv (conj cbindings-paired [b-form init-form]) binding-names])))
           [env (lex/lexical-env) [] []]
           (partition 2 bindings-form))
         _ (assert (map? env))
@@ -753,26 +762,22 @@
                                    u/expr-type (or expected (r/ret (c/Un))))
 
         :else
-        (let [_ (prn "thawing body" body-forms (keys (-> env :locals)))
-              body  (ana-clj/thaw-form `(do ~@body-forms) env)
-              _ (prn "thawed body")
+        (let [body  (ana-clj/thaw-form `(do ~@body-forms) env)
               cbody (var-env/with-lexical-env penv
                       (binding [vs/*current-expr* body]
                         (check body expected)))
               unshadowed-ret (let/erase-objects binding-names (u/expr-type cbody))]
-          (prn new-form-updated-binding)
+          (prn (:tag cbody) `(do ~@body-forms))
           (assoc expr
                  :form (list* (concat (take 2 new-form-updated-binding)
                                       (rest (ast-u/emit-form-fn cbody))))
+                 :tag (:tag cbody)
                  u/expr-type unshadowed-ret)))))
 
 (add-invoke-frozen-method 'clojure.core/when
-  [{:keys [form env] :as expr} expected]
+  [{:keys [args env] :as expr} expected]
   ;(prn "when frozen check")
-  (let [[_ test-form & body-forms] form
-        test (impl/impl-case
-               :clojure (ana-clj/thaw-form test-form env)
-               :cljs (assert nil "TODO"))
+  (let [[test thn] args
         ctest (binding [vs/*current-expr* test]
                 (check test))
         tst (u/expr-type ctest)
@@ -781,23 +786,11 @@
         [env-thn then-reachable] (if/update-lex+reachable fs+)
         [env-els else-reachable] (if/update-lex+reachable fs-)
 
-        thn (impl/impl-case
-              :clojure (ana-clj/thaw-form `(do ~@body-forms) env)
-              :cljs (assert nil "TODO"))
-
         cthen (if/check-if-reachable check thn env-thn then-reachable expected)
-
-        test-out-form (ast-u/emit-form-fn ctest)
-        then-out-form (ast-u/emit-form-fn cthen)
-        _ (assert (and (seq? then-out-form)
-                       (= 'do (first then-out-form))))
-        out (assoc expr
-                   :form `(~(first form) ~test-out-form
-                                   ~@(when (seq body-forms) (rest then-out-form))))
 
         else-ret (if (not else-reachable)
                    (if/unreachable-ret)
-                   (binding [vs/*current-expr* out
+                   (binding [vs/*current-expr* expr
                              vs/*current-env* env]
                      (below/maybe-check-below
                        (r/ret r/-nil
@@ -806,7 +799,7 @@
         ret (if/combine-rets f1
                              (u/expr-type cthen) env-thn
                              else-ret env-els)]
-    (assoc out
+    (assoc expr
            u/expr-type ret)))
 
 (add-check-method :frozen-macro
@@ -1704,7 +1697,7 @@
 (defn check-host
   [{:keys [m-or-f target args] :as expr} expected]
   {:post [(-> % u/expr-type r/TCResult?)]}
-  ;(prn "host-interop")
+  ;(prn "host-interop" (:op expr))
   (let [ctarget (check target)
         cargs (when args
                 (mapv check args))
@@ -1943,6 +1936,7 @@
   [{cls :class :keys [args env] :as expr} & [expected]]
   {:post [(vector? (:args %))
           (-> % u/expr-type r/TCResult?)]}
+  ;(prn ":new" (mapv (juxt :op :tag) args))
   (u/trace 
     (let [inline? (-> expr
                       ast-u/new-op-class 

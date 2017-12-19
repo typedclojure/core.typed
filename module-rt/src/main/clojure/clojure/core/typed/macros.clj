@@ -130,7 +130,10 @@
 (defmacro ann-form 
   "Annotate a form with an expected type."
   [form ty]
-  form)
+  `(do ~spec/special-form
+       ~(core-kw :ann-form)
+       {:type '~ty}
+       ~form))
 
 (defmacro defprotocol
   "Like defprotocol, but with optional type annotations.
@@ -181,7 +184,9 @@
 (defmacro tc-ignore 
   "Ignore forms in body during type checking"
   [& body]
-  `(do ~@body))
+  `(do ~spec/special-form
+       ~(core-kw :tc-ignore)
+       ~@(or body [nil])))
 
 (defmacro when-let-fail 
   "Like when-let, but fails if the binding yields a false value."

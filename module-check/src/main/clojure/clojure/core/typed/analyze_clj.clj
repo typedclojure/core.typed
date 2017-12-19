@@ -395,13 +395,13 @@
 (defn run-passes [ast]
   (typed-schedule ast))
 
-(def frozen-macros #{'clojure.core/ns
+(def frozen-macros #{#_'clojure.core/ns
                      'clojure.core/when
-                     ;'clojure.core/let
-                     'clojure.core.typed/ann-form
-                     'clojure.core.typed.macros/ann-form
-                     'clojure.core.typed/tc-ignore
-                     'clojure.core.typed.macros/tc-ignore})
+                     #_'clojure.core/let
+                     #_'clojure.core.typed/ann-form
+                     #_'clojure.core.typed.macros/ann-form
+                     #_'clojure.core.typed/tc-ignore
+                     #_'clojure.core.typed.macros/tc-ignore})
 
 ;; (All [x ...] [-> '{(Var x) x ...})])
 (defn thread-bindings []

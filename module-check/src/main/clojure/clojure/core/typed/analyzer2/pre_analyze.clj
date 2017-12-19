@@ -230,7 +230,8 @@
                       (merge {:form form}
                              (u/-source-info form env)))))
     (cond
-      (ana/freeze-macro? op env) (do
+      (ana/freeze-macro? op env) (ana/freeze-macro op form env)
+      #_(do
                                    ;(prn "freezing macro")
                                    {:op   :frozen-macro
                                     :macro (u/resolve-sym op env)

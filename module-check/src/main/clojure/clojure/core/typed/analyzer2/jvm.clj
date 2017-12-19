@@ -51,6 +51,37 @@
                                (str (.sym v)))]
               (contains? frozen-macros vsym))))))))
 
+(declare thaw-form)
+
+(defmulti -freeze-macro (fn [op form env] op))
+
+(defmethod -freeze-macro 'clojure.core/when
+  [_ [_ test-form & body-forms :as form] env]
+  ;; TODO spec check macro first
+  (assert (<= 2 (count form)))
+  (let [test (thaw-form test-form (u/ctx env :ctx/expr))
+        test-out-form (emit-form/emit-form test)
+
+        body (thaw-form `(do ~@body-forms) env)
+        then-out-form (emit-form/emit-form body)
+        _ (assert (and (seq? then-out-form)
+                       (= 'do (first then-out-form))))]
+    {:op :frozen-macro
+     :env env
+     :args [test body]
+     :tag (:tag body)
+     :form (list* (first form)
+                  test-out-form
+                  (when (seq body-forms) (rest then-out-form)))}))
+
+(defn freeze-macro [op form env]
+  (let [^Var v (u/resolve-sym op env)
+        _ (assert (var? v))
+        sym (symbol (-> v .ns ns-name str)
+                    (-> v .sym str))]
+    (assoc (-freeze-macro sym form (assoc env :thread-bindings (get-thread-bindings)))
+           :macro v)))
+
 (defn macroexpand-1
   "If form represents a macro form or an inlineable function, returns its expansion,
    else returns form."
@@ -387,6 +418,7 @@
      (with-bindings (merge {Compiler/LOADER     (RT/makeClassLoader)
                             #'ana/macroexpand-1 macroexpand-1
                             #'ana/freeze-macro? freeze-macro?
+                            #'ana/freeze-macro  freeze-macro
                             #'ana/create-var    taj/create-var
                             ;#'ana/parse         parse
                             #'preana/pre-parse  pre/pre-parse

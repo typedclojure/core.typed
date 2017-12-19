@@ -22,6 +22,11 @@
   freeze-macro?)
 
 (def ^{:dynamic  true
+       :arglists '([op form env])
+       :doc      "Custom logic to freeze a macro call."}
+  freeze-macro)
+
+(def ^{:dynamic  true
        :arglists '([sym env])
        :doc      "Creates a var for sym and returns it"}
   create-var)
