@@ -279,11 +279,10 @@
                                   (fo/-true-filter))
                            expected)))))
 
-(defmulti invoke-frozen (fn [{:keys [op macro] :as expr} expected] 
-                           {:pre [(#{:frozen-macro} op)
-                                  (var? macro)]
+(defmulti invoke-frozen (fn [vsym {:keys [op] :as expr} expected] 
+                           {:pre [(#{:frozen-macro} op)]
                             :post [(symbol? %)]}
-                           (coerce/var->symbol macro)))
+                           vsym))
 (u/add-defmethod-generator invoke-frozen)
 
 (defmulti invoke-special (fn [{fexpr :fn :keys [op] :as expr} & args] 
@@ -647,7 +646,7 @@
                              expected)))))
 
 (add-invoke-frozen-method 'clojure.core/ns
-  [{:keys [form env] :as expr} expected]
+  [_ {:keys [form env] :as expr} expected]
   (assoc expr
          u/expr-type (below/maybe-check-below
                        (r/ret r/-nil
@@ -661,11 +660,11 @@
                        expected)))
 
 (add-invoke-frozen-method 'clojure.core.typed/tc-ignore
-  [expr expected]
+  [_ expr expected]
   (frozen-tc-ignore expr expected))
 
 (add-invoke-frozen-method 'clojure.core.typed.macros/tc-ignore
-  [expr expected]
+  [_ expr expected]
   (frozen-tc-ignore expr expected))
 
 (defn frozen-ann-form
@@ -696,26 +695,26 @@
                            expected)))))
 
 (add-invoke-frozen-method 'clojure.core.typed/ann-form
-  [expr expected]
+  [_ expr expected]
   (frozen-ann-form expr expected))
 
 (add-invoke-frozen-method 'clojure.core.typed.macros/ann-form
-  [expr expected]
+  [_ expr expected]
   (frozen-ann-form expr expected))
 
+#_
 (add-invoke-frozen-method 'clojure.core/let
-  [{:keys [form env] :as expr} expected]
-  (let [[_ bindings-form & body-forms] form
-        _ (assert (and (vector? bindings-form)
-                       (even? (count bindings-form))))
+  [_ {:keys [form env args] :as expr} expected]
+  (let [[bindings-paired body] args
         is-reachable (atom true)
-        [env penv cbindings-paired binding-names]
+        [penv cbindings-paired binding-names]
         (reduce
-          (fn [[env penv cbindings-paired binding-names] [b-form init-form]]
+          (fn [[env penv cbindings-paired binding-names] [b-form init-expr]]
             {:pre [@is-reachable
-                   (lex/PropEnv? penv)]
+                   (lex/PropEnv? penv)
+                   (map? init-expr)]
              :post [((con/maybe-reduced-c? (con/hvector-c? map? lex/PropEnv? vector? vector?)) %)]}
-            (let [init-form (ast-u/emit-form-fn (jana2/rerun-passes (pre/pre-analyze-child init-form env)))
+            (let [init-form (ast-u/emit-form-fn init-expr)
                   [env penv binding-names]
                   (reduce (fn [[env penv binding-names] [b-form init-form]]
                             {:pre [@is-reachable
@@ -730,12 +729,12 @@
                                           :form b-form
                                           :name b-form
                                           :children [:init]})
-                                  _ (prn b-form (:tag expr))
                                   {unhygienic-name :form nme :name :keys [init env] :as cexpr}
                                   (var-env/with-lexical-env penv
                                     (check expr))
-                                  ;; side-effect! must go before `maybe-reduced` calculation
+                                  ;; BEGIN SIDE-EFFECT! must go before `maybe-reduced` calculation
                                   penv (let/update-env penv nme (u/expr-type cexpr) is-reachable)
+                                  ;; END SIDE-EFFECT!
                                   maybe-reduced (if @is-reachable identity reduced)]
                               (maybe-reduced
                                 [(assoc-in env [:locals unhygienic-name] (dissoc cexpr :env))
@@ -752,8 +751,9 @@
         _ (assert (lex/PropEnv? penv))
         _ (assert (vector? cbindings-paired))
         new-bindings-form ;; update forms we've iterated over, otherwise keep
-        (into (vec (mapcat identity cbindings-paired))
-              (subvec bindings-form (* 2 (count cbindings-paired))))
+        (into (empty (second form))
+              (concat (mapcat identity cbindings-paired)
+                      (subvec bindings-form (* 2 (count cbindings-paired)))))
         _ (assert (vector? new-bindings-form))
         new-form-updated-binding (list* (first form) new-bindings-form (nthrest form 2))]
       (cond
@@ -762,21 +762,22 @@
                                    u/expr-type (or expected (r/ret (c/Un))))
 
         :else
-        (let [body  (ana-clj/thaw-form `(do ~@body-forms) env)
-              cbody (var-env/with-lexical-env penv
+        (let [cbody (var-env/with-lexical-env penv
                       (binding [vs/*current-expr* body]
                         (check body expected)))
+              cbody-form (ast-u/emit-form-fn cbody)
+              _ (assert (and (seq? cbody-form)
+                             (= 'do (first cbody-form))))
               unshadowed-ret (let/erase-objects binding-names (u/expr-type cbody))]
-          (prn (:tag cbody) `(do ~@body-forms))
+          ;(prn (:tag cbody) `(do ~@body-forms))
           (assoc expr
                  :form (list* (concat (take 2 new-form-updated-binding)
-                                      (rest (ast-u/emit-form-fn cbody))))
+                                      (rest cbody-form)))
                  :tag (:tag cbody)
                  u/expr-type unshadowed-ret)))))
 
 (add-invoke-frozen-method 'clojure.core/when
-  [{:keys [args env] :as expr} expected]
-  ;(prn "when frozen check")
+  [vsym {:keys [args env] :as expr} expected]
   (let [[test thn] args
         ctest (binding [vs/*current-expr* test]
                 (check test))
@@ -798,14 +799,18 @@
                        expected)))
         ret (if/combine-rets f1
                              (u/expr-type cthen) env-thn
-                             else-ret env-els)]
+                             else-ret env-els)
+        cargs [ctest cthen]]
     (assoc expr
+           :args cargs
+           :form (jana2/reconstruct-form vsym (:form expr) cargs)
+           :tag  (jana2/reconstruct-tag vsym (:form expr) cargs)
            u/expr-type ret)))
 
 (add-check-method :frozen-macro
-  [expr & [expected]]
+  [{:keys [macro] :as expr} & [expected]]
   (binding [vs/*current-expr* expr]
-    (invoke-frozen expr expected)))
+    (invoke-frozen (coerce/var->symbol macro) expr expected)))
 
 (defn swap!-dummy-arg-expr [env [target-expr & [f-expr & args]]]
   (assert f-expr)

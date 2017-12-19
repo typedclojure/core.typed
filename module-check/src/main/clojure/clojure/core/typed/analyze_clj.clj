@@ -397,7 +397,7 @@
 
 (def frozen-macros #{#_'clojure.core/ns
                      'clojure.core/when
-                     #_'clojure.core/let
+                     ;'clojure.core/let
                      #_'clojure.core.typed/ann-form
                      #_'clojure.core.typed.macros/ann-form
                      #_'clojure.core.typed/tc-ignore

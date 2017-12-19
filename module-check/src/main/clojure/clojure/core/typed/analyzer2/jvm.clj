@@ -28,8 +28,8 @@
             [clojure.tools.analyzer.passes.jvm.classify-invoke :as classify-invoke]
             [clojure.core.typed.analyzer2.passes.uniquify :as uniquify2]
             [clojure.core.typed.analyzer2 :as ana]
-            [clojure.core.typed.analyzer2.pre-analyze :as preana]
-            [clojure.core.typed.analyzer2.jvm.pre-analyze :as pre]
+            [clojure.core.typed.analyzer2.pre-analyze :as pre]
+            [clojure.core.typed.analyzer2.jvm.pre-analyze :as jpre]
             [clojure.core.memoize :as memo])
   (:import (clojure.lang IObj RT Var)))
 
@@ -51,28 +51,78 @@
                                (str (.sym v)))]
               (contains? frozen-macros vsym))))))))
 
-(declare thaw-form)
+(declare thaw-form rerun-passes)
+
+(defmulti reconstruct-form (fn [op original-form new-args] op))
+(defmulti reconstruct-tag (fn [op original-form new-args] op))
 
 (defmulti -freeze-macro (fn [op form env] op))
 
+(defmethod -freeze-macro 'clojure.core/let
+  [_ {:keys [form env] :as expr} expected]
+  (let [[_ bindings-form & body-forms] form
+        _ (assert (and (vector? bindings-form)
+                       (even? (count bindings-form))))
+        [env bindings-paired]
+        (reduce
+          (fn [[env bindings-paired] [b-form init-form]]
+            (let [init-form (emit-form/emit-form (thaw-form init-form env))
+                  env (reduce (fn [env [b-form init-form]]
+                                (let [{unhygienic-name :form :keys [env] :as expr}
+                                      (rerun-passes
+                                        {:op :binding
+                                         :env env
+                                         :local :let
+                                         :init (pre/pre-analyze-child init-form env)
+                                         :form b-form
+                                         :name b-form
+                                         :children [:init]})]
+                                  ;; FIXME many of these names will pollute the local environment
+                                  ;; we eventually return, since we return forms that
+                                  ;; undo the expansion of `destructure`.
+                                  (assoc-in env [:locals unhygienic-name] (dissoc expr :env))))
+                              env
+                              (partition 2 (destructure [b-form init-form])))]
+              [env (conj bindings-paired [b-form init-form])]))
+          [env []]
+          (partition 2 bindings-form))
+        new-bindings-form (into (empty bindings-form) (mapcat identity) bindings-paired)
+        _ (assert (vector? new-bindings-form))
+        body (thaw-form `(do ~@body-forms) env)
+        body-form (emit-form/emit-form body)
+        _ (assert (and (seq? body-form)
+                       (= 'do (first body-form))))]
+    (assoc expr
+           :tag (:tag body)
+           :args [bindings-paired body]
+           :form (list* (first form) new-bindings-form (rest body-form)))))
+
+(defmethod reconstruct-form 'clojure.core/when
+  [op [_ test-form & then-forms :as form] [test then :as args]]
+  (let [test-out-form (emit-form/emit-form test)
+        then-out-form (emit-form/emit-form then)
+        _ (assert (and (seq? then-out-form)
+                       (= 'do (first then-out-form))))]
+    (list* (first form)
+           test-out-form
+           (when (seq then-forms) (rest then-out-form)))))
+
+(defmethod reconstruct-tag 'clojure.core/when
+  [_ _ [_ then :as args]]
+  (:tag then))
+
 (defmethod -freeze-macro 'clojure.core/when
-  [_ [_ test-form & body-forms :as form] env]
+  [op [_ test-form & then-forms :as form] env]
   ;; TODO spec check macro first
   (assert (<= 2 (count form)))
   (let [test (thaw-form test-form (u/ctx env :ctx/expr))
-        test-out-form (emit-form/emit-form test)
-
-        body (thaw-form `(do ~@body-forms) env)
-        then-out-form (emit-form/emit-form body)
-        _ (assert (and (seq? then-out-form)
-                       (= 'do (first then-out-form))))]
+        then (thaw-form `(do ~@then-forms) env)
+        args [test then]]
     {:op :frozen-macro
      :env env
-     :args [test body]
-     :tag (:tag body)
-     :form (list* (first form)
-                  test-out-form
-                  (when (seq body-forms) (rest then-out-form)))}))
+     :args args
+     :tag  (reconstruct-tag op form args)
+     :form (reconstruct-form op form args)}))
 
 (defn freeze-macro [op form env]
   (let [^Var v (u/resolve-sym op env)
@@ -325,7 +375,7 @@
              {post-passes :passes :as post}
              :as ps]
             (-> (passes/schedule-passes info)
-                (update-in [0 :passes] #(vec (cons #'pre/pre-analyze %))))
+                (update-in [0 :passes] #(vec (cons #'jpre/pre-analyze %))))
 
             _ (assert (= 2 (count ps)))
             _ (assert (= :pre (:walk pre)))
@@ -421,13 +471,13 @@
                             #'ana/freeze-macro  freeze-macro
                             #'ana/create-var    taj/create-var
                             ;#'ana/parse         parse
-                            #'preana/pre-parse  pre/pre-parse
+                            #'pre/pre-parse  jpre/pre-parse
                             #'ana/var?          var?
                             #'*ns*              (the-ns (:ns env))}
                            (:bindings opts))
        (env/ensure (taj/global-env)
          (doto (env/with-env (u/mmerge (env/deref-env) {:passes-opts (get opts :passes-opts default-passes-opts)})
-                 (run-passes (preana/pre-analyze-child form env)))
+                 (run-passes (pre/pre-analyze-child form env)))
            (do (taj/update-ns-map!)))))))
 
 (defn thaw-frozen-macro [{:keys [op form env] :as expr}]
