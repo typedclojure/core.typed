@@ -83,8 +83,12 @@
   (when (seq original-body) (rest new-do-body)))
 
 (defmethod reconstruct-form 'clojure.core/let
-  [_ [mform bindings-form & old-body-forms :as form] [bindings-paired body :as args]]
-  (let [new-bindings-form (into (empty bindings-form) (mapcat identity) bindings-paired)
+  [_ [mform bindings-form & old-body-forms :as form] [bindings-info body :as args]]
+  (let [;; throw away precalculated destructuring
+        new-bindings-form (into (empty bindings-form)
+                                (mapcat (juxt :b-form
+                                              (comp emit-form/emit-form :init)))
+                                bindings-info)
         _ (assert (vector? new-bindings-form))
         body-form (emit-form/emit-form body)
         _ (assert (do-form? body-form))]
@@ -93,39 +97,45 @@
 (defmethod -freeze-macro 'clojure.core/let
   [vsym [_ bindings-form & body-forms :as form] env]
   (let [_ (assert (and (vector? bindings-form) (even? (count bindings-form))))
-        [env bindings-paired]
+        [env bindings-info]
         (reduce
-          (fn [[env bindings-paired] [b-form old-init-form]]
+          (fn [[env bindings-info] [b-form old-init-form]]
             (let [;; macroexpand up to frozen macros
                   init (thaw-form old-init-form env)
                   ;; emit to plug into `destructure`
                   init-form (emit-form/emit-form init)
                   ;; simulate the destructuring of b-form to gather :tag
                   ;; and :locals information.
-                  env (reduce (fn [env [b-form init-form]]
-                                {:pre [(map? env)]
-                                 :post [(map? %)]}
-                                (let [{unhygienic-name :form :keys [env] :as expr}
-                                      (rerun-passes
-                                        {:op :binding
-                                         :env env
-                                         :local :let
-                                         :init (pre/pre-analyze-child init-form env)
-                                         :form b-form
-                                         :name b-form
-                                         :children [:init]})]
-                                  ;; FIXME many of these names will pollute the local environment
-                                  ;; we eventually return, since we return forms that
-                                  ;; undo the expansion of this simulated `destructure`.
-                                  (assoc-in env [:locals unhygienic-name] (dissoc expr :env))))
-                              env
-                              (partition 2 (destructure [b-form init-form])))]
+                  [env d-bindings] (reduce (fn [[env d-bindings] [b-form init-form]]
+                                             {:pre [(map? env)
+                                                    (vector? d-bindings)]
+                                              :post [(vector? %)]}
+                                             (let [{unhygienic-name :form :keys [env] :as expr}
+                                                   (rerun-passes
+                                                     {:op :binding
+                                                      :env env
+                                                      :local :let
+                                                      :init (pre/pre-analyze-child init-form env)
+                                                      :form b-form
+                                                      :name b-form
+                                                      :children [:init]})]
+                                               ;; FIXME many of these names will pollute the local environment
+                                               ;; we eventually return, since we return forms that
+                                               ;; undo the expansion of this simulated `destructure`.
+                                               [(assoc-in env [:locals unhygienic-name] (dissoc expr :env))
+                                                (conj d-bindings expr)]))
+                                           [env []]
+                                           (partition 2 (destructure [b-form init-form])))
+                  _ (assert (map? env))
+                  _ (assert (vector? d-bindings))]
               ;; remember original destructuring lhs (b-form) and analyzed rhs (init)
-              [env (conj bindings-paired [b-form init])]))
+              [env (conj bindings-info {:init init
+                                        :b-form b-form 
+                                        :d-bindings d-bindings})]))
           [env []]
           (partition 2 bindings-form))
         body (thaw-synthetic-body-forms body-forms env)
-        args [bindings-paired body]]
+        args [bindings-info body]]
     (-> 
       {:op :frozen-macro
        :env env}
