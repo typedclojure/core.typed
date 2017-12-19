@@ -4776,7 +4776,7 @@
 (deftest recursive-defalias-test
   ;; List already refers to c.c.t/List
   (is (thrown?
-        clojure.lang.Compiler$CompilerException
+        Throwable
         (tc-e (do (defalias List
                     (U '{:op ':cons
                          :car Any
