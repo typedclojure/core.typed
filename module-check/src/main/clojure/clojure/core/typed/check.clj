@@ -737,7 +737,7 @@
                                   ;; END SIDE-EFFECT!
                                   maybe-reduced (if @is-reachable identity reduced)]
                               (maybe-reduced
-                                [(assoc-in env [:locals unhygienic-name] (dissoc cexpr :env))
+                                [env #_(assoc-in env [:locals unhygienic-name] (dissoc cexpr :env))
                                  penv
                                  (conj d-bindings cexpr)])))
                           [env penv #{}]
@@ -764,8 +764,9 @@
         (not @is-reachable) (let [ret (or expected (r/ret (c/Un)))
                                   cargs [cbindings-info body]]
                               (-> expr
-                                  (assoc u/expr-type ret)
-                                  (jana2/reconstruct-tag+form vsym form cargs)))
+                                  (assoc u/expr-type ret
+                                         :args cargs)
+                                  jana2/reconstruct-tag+form))
 
         :else
         (let [cbody (var-env/with-lexical-env penv
@@ -774,8 +775,9 @@
               unshadowed-ret (let/erase-objects binding-names (u/expr-type cbody))
               cargs [cbindings-info cbody]]
           (-> expr 
-              (assoc u/expr-type unshadowed-ret)
-              (jana2/reconstruct-tag+form vsym form cargs))))))
+              (assoc u/expr-type unshadowed-ret
+                     :args cargs)
+              jana2/reconstruct-tag+form)))))
 
 (add-invoke-frozen-method 'clojure.core/when
   [vsym {:keys [form args env] :as expr} expected]
@@ -803,8 +805,39 @@
                              else-ret env-els)
         cargs [ctest cthen]]
     (-> expr
-        (assoc u/expr-type ret)
-        (jana2/reconstruct-tag+form vsym form cargs))))
+        (assoc u/expr-type ret
+               :args cargs)
+        jana2/reconstruct-tag+form)))
+
+(add-invoke-frozen-method 'clojure.core/when-let
+  [vsym {:keys [form args env] :as expr} expected]
+  (let [[wlet] args
+        cwlet (check wlet expected)
+        cargs [cwlet]]
+    (-> expr
+        (assoc u/expr-type (u/expr-type cwlet)
+               :args cargs)
+        jana2/reconstruct-tag+form)))
+
+(add-invoke-frozen-method 'clojure.core/if-let
+  [vsym {:keys [form args env] :as expr} expected]
+  (let [[ilet] args
+        cilet (check ilet expected)
+        cargs [cilet]]
+    (-> expr
+        (assoc u/expr-type (u/expr-type cilet)
+               :args cargs)
+        jana2/reconstruct-tag+form)))
+
+(add-invoke-frozen-method 'clojure.core/with-open
+  [vsym {:keys [form args env] :as expr} expected]
+  (let [[wopen] args
+        cwopen (check wopen expected)
+        cargs [cwopen]]
+    (-> expr
+        (assoc u/expr-type (u/expr-type cwopen)
+               :args cargs)
+        jana2/reconstruct-tag+form)))
 
 (add-check-method :frozen-macro
   [{:keys [macro] :as expr} & [expected]]

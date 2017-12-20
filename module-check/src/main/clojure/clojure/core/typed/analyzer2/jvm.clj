@@ -53,20 +53,21 @@
 
 (declare thaw-form rerun-passes)
 
-(defmulti reconstruct-form (fn [op original-form new-args] op))
-(defmulti reconstruct-tag (fn [op original-form new-args] op))
+(defmulti -reconstruct-form (fn [{:keys [vsym]}] vsym))
+(defmulti -reconstruct-tag (fn [{:keys [vsym]}] vsym))
+
+(def reconstruct-form -reconstruct-form)
+(def reconstruct-tag -reconstruct-tag)
 
 (defmulti -freeze-macro (fn [op form env] op))
 
-(defn reconstruct-tag+form [expr vsym form args]
-  {:pre [(vector? args)]}
+(defn reconstruct-tag+form [expr]
   (assoc expr
-         :args args
-         :tag  (reconstruct-tag vsym form args)
-         :form (reconstruct-form vsym form args)))
+         :tag  (reconstruct-tag expr)
+         :form (reconstruct-form expr)))
 
-(defmethod reconstruct-tag 'clojure.core/let
-  [_ _ [_ body :as args]]
+(defmethod -reconstruct-tag 'clojure.core/let
+  [{[_ body] :args}]
   (:tag body))
 
 (defn do-form? [form]
@@ -82,17 +83,38 @@
   {:pre [(do-form? new-do-body)]}
   (when (seq original-body) (rest new-do-body)))
 
-(defmethod reconstruct-form 'clojure.core/let
-  [_ [mform bindings-form & old-body-forms :as form] [bindings-info body :as args]]
-  (let [;; throw away precalculated destructuring
-        new-bindings-form (into (empty bindings-form)
-                                (mapcat (juxt :b-form
-                                              (comp emit-form/emit-form :init)))
-                                bindings-info)
-        _ (assert (vector? new-bindings-form))
-        body-form (emit-form/emit-form body)
-        _ (assert (do-form? body-form))]
-    (list* mform new-bindings-form (splice-body-forms old-body-forms body-form))))
+(defn let-bindings-info [{:keys [args op vsym]}]
+  {:pre [(= :frozen-macro op)
+         (= 'clojure.core/let vsym)]
+   :post [(vector? %)
+          (every? map? %)]}
+  (first args))
+
+(defn let-body [{:keys [args op vsym]}]
+  {:pre [(= :frozen-macro op)
+         (= 'clojure.core/let vsym)]
+   :post [(map? %)
+          (= :do (:op %))]}
+  (second args))
+
+;; throw away precalculated destructuring
+(defn emit-bindings-info [bindings-form bindings-info]
+  {:pre [(vector? bindings-form)
+         (vector? bindings-info)]
+   :post [(vector? %)]}
+  (into (empty bindings-form)
+        (mapcat (juxt :b-form (comp emit-form/emit-form :init)))
+        bindings-info))
+
+(defn emit+splice-body-forms [old-body-forms body]
+  (splice-body-forms old-body-forms (emit-form/emit-form body)))
+
+(defmethod -reconstruct-form 'clojure.core/let
+  [{[mform bindings-form & body-forms] :form
+    [bindings-info body] :args}]
+  (list* mform
+         (emit-bindings-info bindings-form bindings-info)
+         (emit+splice-body-forms body-forms body)))
 
 (defmethod -freeze-macro 'clojure.core/let
   [vsym [_ bindings-form & body-forms :as form] env]
@@ -138,22 +160,35 @@
         args [bindings-info body]]
     (-> 
       {:op :frozen-macro
-       :env env}
-      (reconstruct-tag+form vsym form args))))
+       :env env
+       :args args
+       :vsym vsym
+       :form form}
+      reconstruct-tag+form)))
 
-(defmethod reconstruct-form 'clojure.core/when
-  [op [mform test-form & then-forms :as form] [test then :as args]]
+(defn when-test [{:keys [args]}]
+  {:post [(vector? %)]}
+  (first args))
+
+(defn when-then-body [{:keys [args op]}]
+  {:pre [(= :frozen-macro op)]
+   :post [(= :do (:op %))]}
+  (second args))
+
+(defmethod -reconstruct-form 'clojure.core/when
+  [{[mform test-form & then-forms] :form
+    [test then] :args}]
   (let [test-out-form (emit-form/emit-form test)
         then-out-form (emit-form/emit-form then)
         _ (assert (do-form? then-out-form))]
     (list* mform test-out-form (splice-body-forms then-forms then-out-form))))
 
-(defmethod reconstruct-tag 'clojure.core/when
-  [_ _ [_ then :as args]]
+(defmethod -reconstruct-tag 'clojure.core/when
+  [{[_ then] :args}]
   (:tag then))
 
 (defmethod -freeze-macro 'clojure.core/when
-  [op [_ test-form & then-forms :as form] env]
+  [vsym [_ test-form & then-forms :as form] env]
   ;; TODO spec check macro first
   (assert (<= 2 (count form)))
   (let [test (thaw-form test-form (u/ctx env :ctx/expr))
@@ -161,8 +196,158 @@
         args [test then]]
     (-> 
       {:op :frozen-macro
-       :env env}
-      (reconstruct-tag+form op form args))))
+       :env env
+       :args args
+       :vsym vsym
+       :form form}
+      reconstruct-tag+form)))
+
+(declare freeze-macro)
+
+(defn when-let-bindings-info [wlet]
+  (let [binding-info (-> wlet let-bindings-info first)
+        inner-binding-info (-> wlet let-body :ret when-then-body :ret let-bindings-info first)]
+    [(assoc inner-binding-info
+            :init (:init binding-info))]))
+
+(defn when-let-then [wlet]
+  {:post [(map? %)]}
+  (-> wlet let-body :ret when-then-body :ret let-body))
+
+(defmethod -reconstruct-form 'clojure.core/when-let
+  [{[mform bindings-form & body-forms] :form
+    [wlet] :args}]
+  (list* mform
+         (emit-bindings-info bindings-form (when-let-bindings-info wlet))
+         (emit+splice-body-forms body-forms (when-let-then wlet))))
+
+(defmethod -reconstruct-tag 'clojure.core/when-let
+  [{[wlet] :args}]
+  (:tag wlet))
+
+(defmethod -freeze-macro 'clojure.core/when-let
+  [vsym [_ [b-form tst-form :as bindings-form] & then-forms :as form] env]
+  (let [_ (assert (and (vector? bindings-form) (= 2 (count bindings-form))))
+				wlet (thaw-form `(let [temp# ~tst-form]
+                           (when temp#
+                             (let [~b-form temp#]
+                               ~@then-forms)))
+                        env)
+        args [wlet]]
+    (-> 
+      {:op :frozen-macro
+       :env env
+       :args args
+       :vsym vsym
+       :form form}
+      reconstruct-tag+form)))
+
+(defn if-let-bindings-info [ilet]
+  (let [binding-info (-> ilet let-bindings-info first)
+        inner-binding-info (-> ilet let-body :ret :then let-bindings-info first)]
+    [(assoc inner-binding-info
+            :init (:init binding-info))]))
+
+(defn if-let-then [ilet]
+  {:post [(map? %)]}
+  (-> ilet let-body :ret :then let-body :ret))
+
+(defn if-let-else [ilet]
+  {:post [(map? %)]}
+  (-> ilet let-body :ret :else))
+
+(defmethod -reconstruct-form 'clojure.core/if-let
+  [{[mform bindings-form & then+else-forms :as form] :form
+    [wlet] :args}]
+  (list* mform
+         (emit-bindings-info bindings-form (if-let-bindings-info wlet))
+         (emit-form/emit-form (if-let-then wlet))
+         (when (= 4 (count form))
+           [(emit-form/emit-form (if-let-else wlet))])))
+
+(defmethod -reconstruct-tag 'clojure.core/if-let
+  [{[ilet] :args}]
+  (:tag ilet))
+
+(defmethod -freeze-macro 'clojure.core/if-let
+  [vsym [_ [b-form tst-form :as bindings-form] then-form else-form :as form] env]
+  (let [_ (assert (#{3 4} (count form)))
+        else-provided? (= 4 (count form))
+				_ (assert (and (vector? bindings-form) (= 2 (count bindings-form))))
+        ilet (thaw-form `(let [temp# ~tst-form]
+                           (if temp#
+                             (let [~b-form temp#]
+                               ~then-form)
+                             ~else-form))
+                        env)
+        args [ilet]]
+    (-> 
+      {:op :frozen-macro
+       :env env
+       :args args
+       :vsym vsym
+       :form form}
+      reconstruct-tag+form)))
+
+(defn with-open-bindings-info+body [{:keys [form] :as wopen}]
+  {:pre [(map? wopen)]
+   :post [(vector? (first %))
+          (every? map? (first %))
+          (= :do (-> % second :op)) (-> % second ((juxt :vsym :op)))]}
+  (assert form form)
+  (let [bindings-form (second form)
+        _ (assert (and (vector? bindings-form)
+                       (even? (count bindings-form))))]
+    (loop [bindings-info []
+           wopen wopen
+           nbinds (/ (count bindings-form) 2)]
+      (if (zero? nbinds)
+        [bindings-info (-> wopen :args first)]
+        (recur (into bindings-info (-> wopen :args first let-bindings-info))
+               (-> wopen :args first let-body :ret :body :ret)
+               (dec nbinds))))))
+
+(defn with-open-bindings-info [wopen]
+  (first (with-open-bindings-info+body wopen)))
+
+(defn with-open-body [wopen]
+  (second (with-open-bindings-info+body wopen)))
+
+(defmethod -reconstruct-form 'clojure.core/with-open
+  [{[mform bindings-form & body-forms] :form
+    :as wopen}]
+  (let [[bindings-info body] (with-open-bindings-info+body wopen)]
+    (list* mform
+           (emit-bindings-info bindings-form bindings-info)
+           (emit+splice-body-forms body-forms body))))
+
+(defmethod -reconstruct-tag 'clojure.core/with-open
+  [{[wopen] :args}]
+  (:tag wopen))
+
+(defmethod -freeze-macro 'clojure.core/with-open
+  [vsym [_ bindings-form & body-forms :as form] env]
+  (let [_ (assert (<= 2 (count form)))
+				_ (assert (and (vector? bindings-form) (even? (count bindings-form))))
+        wopen (thaw-form 
+                (if (zero? (count bindings-form))
+                  `(do ~@body-forms)
+                  (let [b-form (subvec bindings-form 0 2)
+                        _ (assert (symbol? (b-form 0)))]
+                    `(let ~b-form
+                       (try
+                         (with-open ~(subvec bindings-form 2) ~@body-forms)
+                         (finally
+                           (. ~(bindings-form 0) close))))))
+                env)
+        args [wopen]]
+    (->
+      {:op :frozen-macro
+       :env env
+       :args args
+       :vsym vsym
+       :form form}
+      reconstruct-tag+form)))
 
 (defn freeze-macro [op form env]
   (let [^Var v (u/resolve-sym op env)

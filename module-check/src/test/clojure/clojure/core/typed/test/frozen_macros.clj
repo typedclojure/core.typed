@@ -59,3 +59,36 @@
   ;; locals shadow vars
   (is-tc-e (let [identity identity]
              (identity 1))))
+
+(deftest when-let-test
+  (is-tc-e (when-let [_ 1]
+             (inc 1)))
+  (is-tc-e (when-let [a 1]
+             (inc a)))
+  (is-tc-e (when-let [a (ann-form 1 (U nil Number))]
+             (inc a)))
+  (is-tc-err (when-let [a (ann-form 1 (U nil Number String))]
+               (inc a)))
+  (is-tc-err (when-let [a "a"]
+               (inc a)))
+  )
+
+(deftest if-let-test
+  (is-tc-e (if-let [_ 1]
+             (inc 1)))
+  (is-tc-e (if-let [a 1]
+             (inc a)))
+  (is-tc-e (if-let [a (ann-form 1 (U nil Number))]
+             (inc a)))
+  (is-tc-e (if-let [{:keys [a]} {:a 1}]
+             (inc a)
+             1))
+  (is-tc-err (if-let [a (ann-form 1 (U nil Number String))]
+               (inc a)))
+  (is-tc-err (if-let [a "a"]
+               (inc a)))
+  )
+
+(deftest with-open-test
+	(is-tc-e #(with-open [r (java.io.FileInputStream. "some/dir")] 
+              (.available r))))
