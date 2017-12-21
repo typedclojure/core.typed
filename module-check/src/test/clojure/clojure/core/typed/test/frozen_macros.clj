@@ -35,6 +35,19 @@
   (is-tc-err (fn [a :- (U nil Number)] :- Number,
                (when a))))
 
+(deftest when-not-test
+  (is-tc-e (fn [a :- (U nil Number)]
+             (when-not (not a) (inc a))))
+  (is-tc-e (fn [a :- (U nil Number)]
+             (when-not (not a) (inc a))))
+  (is-tc-e (fn [a :- Number] :- Number
+             (when-not (not a) (inc a))))
+  (is-tc-err (fn [a :- (U nil Number)] :- Number,
+               (when-not (not a) (inc a))))
+  ;; error msg
+  (is-tc-err (fn [a :- (U nil Number)] :- Number,
+               (when-not (not a)))))
+
 (deftest let-test
   (is-tc-e (let [a 1]
              (inc a)))
@@ -89,6 +102,23 @@
                (inc a)))
   )
 
+(deftest assert-test
+  (binding [*assert* true]
+    (is-tc-e #(assert 1)))
+  (binding [*assert* true]
+    (is-tc-e #(assert 1 "foo")))
+  (binding [*assert* false]
+    (is-tc-e #(assert (/ nil nil) "foo")))
+  (binding [*assert* false]
+    (is-tc-e #(assert (/ nil nil "foo"))))
+  (is-tc-err #(assert (/ nil) "foo"))
+  ;; unreachable message
+  (is-tc-e #(assert "foo" (/ nil)))
+  (is-tc-err #(assert nil (/ nil))))
+
 (deftest with-open-test
 	(is-tc-e #(with-open [r (java.io.FileInputStream. "some/dir")] 
               (.available r))))
+
+(deftest fn-test
+  (is-tc-e (clojure.core/fn [a] a)))

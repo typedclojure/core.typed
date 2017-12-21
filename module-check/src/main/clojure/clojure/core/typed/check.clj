@@ -781,31 +781,11 @@
 
 (add-invoke-frozen-method 'clojure.core/when
   [vsym {:keys [form args env] :as expr} expected]
-  (let [[test thn] args
-        ctest (binding [vs/*current-expr* test]
-                (check test))
-        tst (u/expr-type ctest)
-        {fs+ :then fs- :else :as f1} (r/ret-f tst)
-
-        [env-thn then-reachable] (if/update-lex+reachable fs+)
-        [env-els else-reachable] (if/update-lex+reachable fs-)
-
-        cthen (if/check-if-reachable check thn env-thn then-reachable expected)
-
-        else-ret (if (not else-reachable)
-                   (if/unreachable-ret)
-                   (binding [vs/*current-expr* expr
-                             vs/*current-env* env]
-                     (below/maybe-check-below
-                       (r/ret r/-nil
-                              (fo/-false-filter))
-                       expected)))
-        ret (if/combine-rets f1
-                             (u/expr-type cthen) env-thn
-                             else-ret env-els)
-        cargs [ctest cthen]]
+  (let [[wexpr] args
+        cwexpr (check wexpr expected)
+        cargs [cwexpr]]
     (-> expr
-        (assoc u/expr-type ret
+        (assoc u/expr-type (u/expr-type cwexpr)
                :args cargs)
         jana2/reconstruct-tag+form)))
 
@@ -836,6 +816,26 @@
         cargs [cwopen]]
     (-> expr
         (assoc u/expr-type (u/expr-type cwopen)
+               :args cargs)
+        jana2/reconstruct-tag+form)))
+
+(add-invoke-frozen-method 'clojure.core/assert
+  [vsym {:keys [form args env] :as expr} expected]
+  (let [[erase-assert? wopen] args
+        cwopen (check wopen expected)
+        cargs [erase-assert? cwopen]]
+    (-> expr
+        (assoc u/expr-type (u/expr-type cwopen)
+               :args cargs)
+        jana2/reconstruct-tag+form)))
+
+(add-invoke-frozen-method 'clojure.core/when-not
+  [vsym {:keys [form args env] :as expr} expected]
+  (let [[wnot-expand] args
+        cwnot-expand (check wnot-expand expected)
+        cargs [cwnot-expand]]
+    (-> expr
+        (assoc u/expr-type (u/expr-type cwnot-expand)
                :args cargs)
         jana2/reconstruct-tag+form)))
 
