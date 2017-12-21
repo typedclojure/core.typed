@@ -62,9 +62,11 @@
 (defmulti -freeze-macro (fn [op form env] op))
 
 (defn reconstruct-tag+form [expr]
-  (assoc expr
-         :tag  (reconstruct-tag expr)
-         :form (reconstruct-form expr)))
+  (let [tag (reconstruct-tag expr)
+        form (reconstruct-form expr)]
+    (merge (assoc expr :form form)
+           (when tag
+             {:tag tag}))))
 
 (defmethod -reconstruct-tag 'clojure.core/let
   [{[_ body] :args}]
@@ -166,34 +168,64 @@
        :form form}
       reconstruct-tag+form)))
 
-(defn when-test [{:keys [args]}]
-  {:post [(vector? %)]}
-  (first args))
+(defn when-test [{[wexpr] :args}]
+  {:post [(map? %)]}
+  (:test wexpr))
 
-(defn when-then-body [{:keys [args op]}]
-  {:pre [(= :frozen-macro op)]
-   :post [(= :do (:op %))]}
-  (second args))
+(defn when-then-body [{[wexpr] :args}]
+  {:post [(= :do (:op %))]}
+  (:then wexpr))
 
 (defmethod -reconstruct-form 'clojure.core/when
-  [{[mform test-form & then-forms] :form
-    [test then] :args}]
-  (let [test-out-form (emit-form/emit-form test)
-        then-out-form (emit-form/emit-form then)
-        _ (assert (do-form? then-out-form))]
-    (list* mform test-out-form (splice-body-forms then-forms then-out-form))))
+  [{[mform test-form & then-forms] :form :as wexpr}]
+  (list* mform 
+         (emit-form/emit-form (when-test wexpr))
+         (splice-body-forms then-forms
+                            (emit-form/emit-form
+                              (when-then-body wexpr)))))
 
 (defmethod -reconstruct-tag 'clojure.core/when
-  [{[_ then] :args}]
-  (:tag then))
+  [{[wexpr] :args}]
+  (:tag wexpr))
 
 (defmethod -freeze-macro 'clojure.core/when
-  [vsym [_ test-form & then-forms :as form] env]
+  [vsym [_ test-form & body-form :as form] env]
   ;; TODO spec check macro first
   (assert (<= 2 (count form)))
-  (let [test (thaw-form test-form (u/ctx env :ctx/expr))
-        then (thaw-synthetic-body-forms then-forms env)
-        args [test then]]
+  (let [wexpr (thaw-form `(if ~test-form (do ~@body-form)) env)
+        args [wexpr]]
+    (-> 
+      {:op :frozen-macro
+       :env env
+       :args args
+       :vsym vsym
+       :form form}
+      reconstruct-tag+form)))
+
+(defn when-not-test [{[wnot-expand] :args}]
+  {:pre [(= :if (:op wnot-expand))]}
+  (:test wnot-expand))
+
+(defn when-not-then-body [{[wnot-expand] :args}]
+  ;; branches are flipped
+  (:else wnot-expand))
+
+(defmethod -reconstruct-form 'clojure.core/when-not
+  [{[mform test-form & body] :form :as wnot}]
+  (list* mform
+         (emit-form/emit-form (when-not-test wnot))
+         (splice-body-forms body (emit-form/emit-form (when-not-then-body wnot)))))
+
+(defmethod -reconstruct-tag 'clojure.core/when-not
+  [{[wnot-expand] :args}]
+  (:tag wnot-expand))
+
+(defmethod -freeze-macro 'clojure.core/when-not
+  [vsym [_ test-form & body-form :as form] env]
+  ;; TODO spec check macro first
+  (assert (<= 2 (count form)))
+  (let [wnot-expand (thaw-form `(if ~test-form nil (do ~@body-form)) env)
+        args [wnot-expand]]
     (-> 
       {:op :frozen-macro
        :env env
@@ -228,7 +260,7 @@
 (defmethod -freeze-macro 'clojure.core/when-let
   [vsym [_ [b-form tst-form :as bindings-form] & then-forms :as form] env]
   (let [_ (assert (and (vector? bindings-form) (= 2 (count bindings-form))))
-				wlet (thaw-form `(let [temp# ~tst-form]
+        wlet (thaw-form `(let [temp# ~tst-form]
                            (when temp#
                              (let [~b-form temp#]
                                ~@then-forms)))
@@ -273,7 +305,7 @@
   [vsym [_ [b-form tst-form :as bindings-form] then-form else-form :as form] env]
   (let [_ (assert (#{3 4} (count form)))
         else-provided? (= 4 (count form))
-				_ (assert (and (vector? bindings-form) (= 2 (count bindings-form))))
+        _ (assert (and (vector? bindings-form) (= 2 (count bindings-form))))
         ilet (thaw-form `(let [temp# ~tst-form]
                            (if temp#
                              (let [~b-form temp#]
@@ -328,7 +360,7 @@
 (defmethod -freeze-macro 'clojure.core/with-open
   [vsym [_ bindings-form & body-forms :as form] env]
   (let [_ (assert (<= 2 (count form)))
-				_ (assert (and (vector? bindings-form) (even? (count bindings-form))))
+        _ (assert (and (vector? bindings-form) (even? (count bindings-form))))
         wopen (thaw-form 
                 (if (zero? (count bindings-form))
                   `(do ~@body-forms)
@@ -348,6 +380,230 @@
        :vsym vsym
        :form form}
       reconstruct-tag+form)))
+
+(defn erased-assert? [{[erase-assert?] :args}]
+  erase-assert?)
+
+(defn assert-has-message? [{:keys [form]}]
+  (= 3 (count form)))
+
+(defn assert-test [{[_ exp] :args :as aexpr}]
+  {:pre [(not (erased-assert? aexpr))]
+   :post [(map? %)]}
+  (when-not-test exp))
+
+(defn assert-message [{[_ exp] :args :as aexpr}]
+  {:pre [(not (erased-assert? aexpr))
+         (assert-has-message? aexpr)]
+   :post [(map? %)]}
+  (-> exp when-not-then-body :ret :exception :args first :args second))
+
+(defmethod -reconstruct-form 'clojure.core/assert
+  [{[mform x message :as form] :form :as aexpr}]
+  (if (erased-assert? aexpr)
+    form
+    (list* mform
+           (emit-form/emit-form (assert-test aexpr))
+           (when (assert-has-message? aexpr)
+             [(emit-form/emit-form (assert-message aexpr))]))))
+
+(defmethod -reconstruct-tag 'clojure.core/assert
+  [{[exp] :args}]
+  (:tag exp))
+
+(defmethod -freeze-macro 'clojure.core/assert
+  [vsym [_ x message :as form] env]
+  (let [_ (assert (#{2 3} (count form)))
+        msg? (= 3 (count form))
+        erase-assert? (not *assert*)
+        assert-expand (fn
+                        ([x]
+                         (when-not erase-assert?
+                           `(when-not ~x
+                              (throw (new AssertionError (str "Assert failed: " (pr-str '~x)))))))
+                        ([x message]
+                         (when-not erase-assert?
+                           `(when-not ~x
+                              (throw (new AssertionError (str "Assert failed: " ~message "\n" (pr-str '~x))))))))
+        exp (thaw-form (apply assert-expand (rest form)) env)
+        args [erase-assert? exp]]
+    (->
+      {:op :frozen-macro
+       :env env
+       :args args
+       :vsym vsym
+       :form form}
+      reconstruct-tag+form)))
+
+(defn fn-methods [{[fnexpr] :args}]
+  {:post [(vector? %)
+          (every? (comp #{:fn-method} :op) %)]}
+  (:methods fnexpr))
+
+(defn fn-method-body [fn-method]
+  (-> fn-method :body :ret))
+
+
+(defn parse-fn-sigs [sigs]
+	(let [name (if (symbol? (first sigs)) (first sigs) nil)
+				sigs (if name (next sigs) sigs)
+        single-arity-syntax? (vector? (first sigs))
+				sigs (if (vector? (first sigs))
+							 (list sigs)
+							 (if (seq? (first sigs))
+								 sigs
+								 ;; Assume single arity syntax
+								 (throw (IllegalArgumentException.
+													(if (seq sigs)
+														(str "Parameter declaration "
+																 (first sigs)
+																 " should be a vector")
+														(str "Parameter declaration missing"))))))
+        process-sigs (fn [[params & body]]
+                       (assert (vector? params))
+                       (let [conds (when (and (next body) (map? (first body)))
+                                     (first body))
+                             body (if conds (next body) body)
+                             conds-from-params-meta? (boolean conds)
+                             conds (or conds (meta params))
+                             pre (:pre conds)
+                             post (:post conds)]
+                         {:pre pre
+                          :post post
+                          :conds-from-params-meta? conds
+                          :params params
+                          :body body}))]
+    {:single-arity-syntax? single-arity-syntax?
+     :sigs (mapv process-sigs sigs)
+     :name name}))
+
+(defmethod -reconstruct-form 'clojure.core/fn
+  [{[mform & sigs :as form] :form
+    [fnexpr] :args
+    :as fmap}]
+  (let [{:keys [single-arity-syntax? sigs name]} (parse-fn-sigs sigs)
+        _ (when single-arity-syntax?
+            (assert (= 1 (count sigs))))
+        sigs (map (fn [method {:keys [pre post params body conds-from-params-meta?]}]
+                    (let [[pre-forms body-no-pre-form] (split-at (count pre) (emit-form/emit-form (fn-method-body method)))
+                          [post-forms body-no-pre+post-form] (if post
+                                                               [(mapv emit-form/emit-form (-> body-no-pre-form let-body :statements butlast))
+                                                                (-> body-no-pre-form let-bindings-info first :init)]
+                                                               [[] body-no-pre-form])
+                          new-meta-map (merge (when pre-form
+                                                {:pre pre-form})
+                                              (when post-form
+                                                {:post post-form}))
+                          params (if conds-from-params-meta?
+                                   (vary-meta params merge new-meta-map)
+                                   params)]
+                      (prn "params" params)
+                      (prn "body-no-pre+post-form" body-no-pre+post-form)
+                      `(~params
+                         ~@(when-not conds-from-params-meta?
+                             [new-meta-map])
+                         ~@(splice-body-forms body (emit-form/emit-form body-no-pre+post-form)))))
+                  (fn-methods fmap)
+                  sigs)]
+    (list* mform
+           (concat (when name [name])
+                   (if single-arity-syntax?
+                     (first sigs)
+                     [sigs])))))
+
+(defmethod -reconstruct-tag 'clojure.core/fn
+  [_]
+  clojure.lang.AFunction)
+
+(defmethod -freeze-macro 'clojure.core/fn
+  [vsym [_ & sigs :as form] env]
+;; TODO clojure.spec check 
+  (let [{:keys [sigs name]} (parse-fn-sigs sigs)
+        process-sig (fn [{:keys [pre post params body]}]
+                      (assert (vector? params))
+                      (let [gsyms (mapv (fn [a]
+                                          (if (= '& a)
+                                            a
+                                            (gensym "a")))
+                                        params)]
+                      `([~@gsyms]
+                         ~@(map (fn [p] `(assert ~p)) pre)
+                         (let [~@(mapcat (fn [param gsym]
+                                           (when-not (= '& param)
+                                             [param gsym]))
+                                         params
+                                         gsyms)]
+                           ~@(if post
+                              `((let [~'% (do ~@body)]
+                                 ~@(map (fn* [c] `(assert ~c)) post)
+                                 ~'%))
+                               body)))))
+         fnexpr (thaw-form `(fn* ~@(when name [name])
+                              ~@(map process-sig sigs))
+                           env)
+         args [fnexpr]]
+    (->
+      {:op :frozen-macro
+       :env env
+       :args args
+       :vsym vsym
+       :form form}
+      reconstruct-tag+form)))
+
+;(defn for-seq-bindings-info+body [{[fexpand] :args
+;                                   [_ seq-forms] :form}]
+;  (loop [seq-forms (seq seq-forms)
+;         seq-bindings-info []
+;         fexpand fexpand]
+;    (if-not seq-forms
+;      [seq-bindings-info fexpand]
+;      (let [[binding expr & seq-forms]
+;            [seq-bindings-info fexpand]
+;            (case binding
+;              :let [(conj seq-bindings-info
+;                          {:for-op :let 
+;                           :bindings-info (let-bindings-info fexpand)})
+;                    (let-body fexpand)]
+;              (:when :while) [(conj seq-bindings-info
+;                                    {:for-op binding 
+;                                     :test (:test fexpand)})
+;                              (:then fexpand)]
+;              [(conj seq-bindings-info
+;                     {:for-op binding 
+;                      :binding-info {
+;                      :test (:test fexpand)})
+;               (:then fexpand)]
+;
+;
+;            seq-bindings-info (conj seq-bindings-info
+;                                    )]
+;        (recur seq-forms
+
+
+;(defmethod -freeze-macro 'clojure.core/for
+;  [vsym [_ seq-forms body-form :as form] env]
+;  (let [acc (gensym "acc")
+;        out-form (reduce
+;                   (fn [body [expr binding]]
+;                     (case b
+;                       :let `(let ~expr ~body)
+;                       :when `(if ~expr ~body ~acc)
+;                       :while `(if ~expr ~body (reduced ~acc))
+;                       (if (keyword? b)
+;                         (err/int-error (str "Invalid 'for' keyword: " b))
+;                         `(reduce (fn [~acc ~binding] ~body) ~acc ~expr))))
+;                   body-form
+;                   (partition 2 (rseq seq-forms)))
+;        thawed (thaw-form out-form env)
+;        args [thawed]]
+;    (->
+;      {:op :frozen-macro
+;       :env env
+;       :args args
+;       :vsym vsym
+;       :form form}
+;      reconstruct-tag+form)))
+
 
 (defn freeze-macro [op form env]
   (let [^Var v (u/resolve-sym op env)
