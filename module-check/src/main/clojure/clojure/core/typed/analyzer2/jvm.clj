@@ -440,10 +440,6 @@
           (every? (comp #{:fn-method} :op) %)]}
   (:methods fnexpr))
 
-(defn fn-method-body [fn-method]
-  (-> fn-method :body :ret))
-
-
 (defn parse-fn-sigs [sigs]
 	(let [name (if (symbol? (first sigs)) (first sigs) nil)
 				sigs (if name (next sigs) sigs)
@@ -485,24 +481,27 @@
         _ (when single-arity-syntax?
             (assert (= 1 (count sigs))))
         sigs (map (fn [method {:keys [pre post params body conds-from-params-meta?]}]
-                    (let [[pre-forms body-no-pre-form] (split-at (count pre) (emit-form/emit-form (fn-method-body method)))
-                          [post-forms body-no-pre+post-form] (if post
-                                                               [(mapv emit-form/emit-form (-> body-no-pre-form let-body :statements butlast))
-                                                                (-> body-no-pre-form let-bindings-info first :init)]
-                                                               [[] body-no-pre-form])
-                          new-meta-map (merge (when pre-form
-                                                {:pre pre-form})
-                                              (when post-form
-                                                {:post post-form}))
+                    (let [{pre-exprs :statements body-no-pre-expr :ret} (:body method)
+                          _ (assert (= (count pre) (count pre-exprs)))
+                          body-no-pre-expr (let-body body-no-pre-expr)
+                          [post-exprs body-no-pre+post-expr] (if post
+                                                               [(-> body-no-pre-expr let-body :statements butlast)
+                                                                (-> body-no-pre-expr first :init)]
+                                                               [[] body-no-pre-expr])
+                          _ (assert (= (count post) (count post-exprs)))
+                          new-meta-map (merge (when pre
+                                                {:pre (mapv (comp emit-form/emit-form assert-test) pre-exprs)})
+                                              (when post
+                                                {:post (mapv (comp emit-form/emit-form assert-test) post-exprs)}))
                           params (if conds-from-params-meta?
                                    (vary-meta params merge new-meta-map)
-                                   params)]
-                      (prn "params" params)
-                      (prn "body-no-pre+post-form" body-no-pre+post-form)
+                                   params)
+                          new-body-form (emit-form/emit-form body-no-pre+post-expr)]
+                      (prn "new-body-form" new-body-form)
                       `(~params
                          ~@(when-not conds-from-params-meta?
                              [new-meta-map])
-                         ~@(splice-body-forms body (emit-form/emit-form body-no-pre+post-form)))))
+                         ~@(splice-body-forms body new-body-form))))
                   (fn-methods fmap)
                   sigs)]
     (list* mform
@@ -535,7 +534,7 @@
                                          gsyms)]
                            ~@(if post
                               `((let [~'% (do ~@body)]
-                                 ~@(map (fn* [c] `(assert ~c)) post)
+                                 ~@(map (fn [c] `(assert ~c)) post)
                                  ~'%))
                                body)))))
          fnexpr (thaw-form `(fn* ~@(when name [name])
