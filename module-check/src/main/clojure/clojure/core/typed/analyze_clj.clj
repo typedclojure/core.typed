@@ -404,6 +404,7 @@
                      'clojure.core/with-open
                      'clojure.core/assert
                      'clojure.core/fn
+                     'clojure.core/for
                      #_'clojure.core.typed/ann-form
                      #_'clojure.core.typed.macros/ann-form
                      #_'clojure.core.typed/tc-ignore

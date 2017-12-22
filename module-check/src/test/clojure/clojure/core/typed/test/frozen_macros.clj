@@ -121,4 +121,14 @@
               (.available r))))
 
 (deftest fn-test
-  (is-tc-e (clojure.core/fn [a] a)))
+  (is-tc-e (clojure.core/fn [a] a))
+  (is-tc-e (clojure.core/fn [a]
+             {:pre [(-> a identity)]}
+             a))
+  (is-tc-e (clojure.core/fn [a]
+             {:post [(symbol? %)]}
+             a)))
+
+(deftest for-test
+  (is-tc-e (clojure.core/for [a [1 2]] a))
+  (is-tc-e (clojure.core/for [a [1 2] b [2 3]] [a b])))
