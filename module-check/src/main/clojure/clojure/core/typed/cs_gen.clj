@@ -33,8 +33,6 @@
            (clojure.core.typed.filter_rep TypeFilter)
            (clojure.lang ISeq IPersistentList APersistentVector)))
 
-(alter-meta! *ns* assoc :skip-wiki true)
-
 (t/typed-deps clojure.core.typed.free-ops
               clojure.core.typed.promote-demote)
 
@@ -2268,6 +2266,33 @@
        true)))))
 
 (ind-u/add-indirection ind/infer infer)
+
+(defmacro unify-or-nil [{:keys [fresh out]} s t]
+  (assert (every? simple-symbol? fresh))
+  (assert (apply distinct? fresh))
+  (assert (some #{out} fresh))
+  (let [fresh-names (map (juxt identity gensym) fresh)
+        name-lookup (into {} fresh-names)]
+    `(let [[lhs# rhs#] (let ~(vec
+                               (mapcat (fn [[fresh name]]
+                                         [fresh `(r/make-F '~name)])
+                                       fresh-names))
+                         [~s ~t])
+           _# (assert (r/Type? lhs#))
+           _# (assert (r/Type? rhs#))
+           substitution#
+           (handle-failure
+             (infer
+               (zipmap '~(map second fresh-names) (repeat r/no-bounds))
+               {}
+               [lhs#]
+               [rhs#]
+               r/-any))
+           res# (when substitution#
+                  (when-let [s# (get substitution# '~(name-lookup out))]
+                    (:type s#)))
+           _# (assert ((some-fn nil? r/Type?) res#))]
+       res#)))
 
 (comment
          (let [x (gensym)]

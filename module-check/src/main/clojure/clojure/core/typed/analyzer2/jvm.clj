@@ -435,8 +435,19 @@
        :form form}
       reconstruct-tag+form)))
 
-(defn fn-methods [{[fnexpr] :args}]
-  {:post [(vector? %)
+(defn fn-method-pre [method]
+  {:pre [(= :fn-method (:op method))]
+   :post [(vector? %)
+          (every? (comp #{'clojure.core/assert} :vsym) %)]}
+  (-> method :body :ret let-body :statements))
+
+(defn fn-method-body [method]
+  {:pre [(= :fn-method (:op method))]}
+  (-> method :body :ret let-body :ret))
+
+(defn fn-methods [{[fnexpr] :args :as fexpr}]
+  {:pre [(= 'clojure.core/fn (:vsym fexpr))]
+   :post [(vector? %)
           (every? (comp #{:fn-method} :op) %)]}
   (:methods fnexpr))
 
@@ -456,7 +467,7 @@
 																 " should be a vector")
 														(str "Parameter declaration missing"))))))
         process-sigs (fn [[params & body]]
-                       (assert (vector? params))
+                       (assert (vector? params) params)
                        (let [conds (when (and (next body) (map? (first body)))
                                      (first body))
                              body (if conds (next body) body)
@@ -481,12 +492,12 @@
         _ (when single-arity-syntax?
             (assert (= 1 (count sigs))))
         sigs (map (fn [method {:keys [pre post params body conds-from-params-meta?]}]
-                    (let [{pre-exprs :statements body-no-pre-expr :ret} (:body method)
+                    (let [pre-exprs (fn-method-pre method)
+                          body-no-pre-expr (fn-method-body method)
                           _ (assert (= (count pre) (count pre-exprs)))
-                          body-no-pre-expr (let-body body-no-pre-expr)
                           [post-exprs body-no-pre+post-expr] (if post
-                                                               [(-> body-no-pre-expr let-body :statements butlast)
-                                                                (-> body-no-pre-expr first :init)]
+                                                               [(-> body-no-pre-expr :ret let-body :statements)
+                                                                (-> body-no-pre-expr :ret let-bindings-info first :init)]
                                                                [[] body-no-pre-expr])
                           _ (assert (= (count post) (count post-exprs)))
                           new-meta-map (merge (when pre
@@ -497,10 +508,10 @@
                                    (vary-meta params merge new-meta-map)
                                    params)
                           new-body-form (emit-form/emit-form body-no-pre+post-expr)]
-                      (prn "new-body-form" new-body-form)
                       `(~params
                          ~@(when-not conds-from-params-meta?
-                             [new-meta-map])
+                             (when (seq new-meta-map)
+                               [new-meta-map]))
                          ~@(splice-body-forms body new-body-form))))
                   (fn-methods fmap)
                   sigs)]
@@ -525,21 +536,22 @@
                                             a
                                             (gensym "a")))
                                         params)]
-                      `([~@gsyms]
-                         ~@(map (fn [p] `(assert ~p)) pre)
-                         (let [~@(mapcat (fn [param gsym]
-                                           (when-not (= '& param)
-                                             [param gsym]))
-                                         params
-                                         gsyms)]
-                           ~@(if post
-                              `((let [~'% (do ~@body)]
-                                 ~@(map (fn [c] `(assert ~c)) post)
-                                 ~'%))
-                               body)))))
-         fnexpr (thaw-form `(fn* ~@(when name [name])
-                              ~@(map process-sig sigs))
-                           env)
+                        `([~@gsyms]
+                          (let [~@(mapcat (fn [param gsym]
+                                            (when-not (= '& param)
+                                              [param gsym]))
+                                          params
+                                          gsyms)]
+                            ~@(map (fn [p] `(assert ~p)) pre)
+                            (do
+                              ~@(if post
+                                  `((let [~'% (do ~@body)]
+                                      ~@(map (fn [c] `(assert ~c)) post)
+                                      ~'%))
+                                  body))))))
+         expand `(fn* ~@(when name [name])
+                      ~@(map process-sig sigs))
+         fnexpr (thaw-form expand env)
          args [fnexpr]]
     (->
       {:op :frozen-macro
@@ -549,60 +561,81 @@
        :form form}
       reconstruct-tag+form)))
 
-;(defn for-seq-bindings-info+body [{[fexpand] :args
-;                                   [_ seq-forms] :form}]
-;  (loop [seq-forms (seq seq-forms)
-;         seq-bindings-info []
-;         fexpand fexpand]
-;    (if-not seq-forms
-;      [seq-bindings-info fexpand]
-;      (let [[binding expr & seq-forms]
-;            [seq-bindings-info fexpand]
-;            (case binding
-;              :let [(conj seq-bindings-info
-;                          {:for-op :let 
-;                           :bindings-info (let-bindings-info fexpand)})
-;                    (let-body fexpand)]
-;              (:when :while) [(conj seq-bindings-info
-;                                    {:for-op binding 
-;                                     :test (:test fexpand)})
-;                              (:then fexpand)]
-;              [(conj seq-bindings-info
-;                     {:for-op binding 
-;                      :binding-info {
-;                      :test (:test fexpand)})
-;               (:then fexpand)]
-;
-;
-;            seq-bindings-info (conj seq-bindings-info
-;                                    )]
-;        (recur seq-forms
+(defn for-seq-bindings-info+body [{[fexpand] :args
+                                   [_ seq-forms] :form}]
+  (loop [seq-forms (seq seq-forms)
+         seq-bindings-info []
+         fexpand (-> fexpand let-body :ret)]
+    (if-not seq-forms
+      [seq-bindings-info (-> fexpand :args second :args first)]
+      (let [[binding expr & seq-forms] seq-forms
+            [seq-bindings-info fexpand]
+            (case binding
+              :let [(conj seq-bindings-info
+                          {:seq-op :let
+                           :bindings-info (let-bindings-info fexpand)})
+                    (-> fexpand let-body :ret)]
+              (:when :while) [(conj seq-bindings-info
+                                    {:seq-op binding 
+                                     :test (:test fexpand)})
+                              (:then fexpand)]
+              [(conj seq-bindings-info
+                     {:seq-op binding
+                      :expr (-> fexpand :args (nth 2))})
+               (-> fexpand :args first fn-methods first fn-method-body :ret)])]
+        (recur seq-forms
+               seq-bindings-info
+               fexpand)))))
 
+(defn emit-seq-binding-info [{:keys [seq-op] :as seq-binding-info}]
+  (case seq-op
+    :let (let [{:keys [bindings-info]} seq-binding-info]
+           [seq-op (emit-bindings-info (:b-form seq-binding-info) seq-binding-info)])
+    (:while :when) [seq-op (emit-form/emit-form (:test seq-binding-info))]
+    [seq-op (emit-form/emit-form (:expr seq-binding-info))]))
 
-;(defmethod -freeze-macro 'clojure.core/for
-;  [vsym [_ seq-forms body-form :as form] env]
-;  (let [acc (gensym "acc")
-;        out-form (reduce
-;                   (fn [body [expr binding]]
-;                     (case b
-;                       :let `(let ~expr ~body)
-;                       :when `(if ~expr ~body ~acc)
-;                       :while `(if ~expr ~body (reduced ~acc))
-;                       (if (keyword? b)
-;                         (err/int-error (str "Invalid 'for' keyword: " b))
-;                         `(reduce (fn [~acc ~binding] ~body) ~acc ~expr))))
-;                   body-form
-;                   (partition 2 (rseq seq-forms)))
-;        thawed (thaw-form out-form env)
-;        args [thawed]]
-;    (->
-;      {:op :frozen-macro
-;       :env env
-;       :args args
-;       :vsym vsym
-;       :form form}
-;      reconstruct-tag+form)))
+(defn emit-seq-bindings-info [bs]
+  (into [] (mapcat emit-seq-binding-info) bs))
 
+(defmethod -reconstruct-form 'clojure.core/for
+  [{[mform seq-forms body-form :as form] :form
+    [forexpr] :args
+    :as formap}]
+  (let [[seq-bindings-info body] (for-seq-bindings-info+body formap)
+        form (list mform
+                   (emit-seq-bindings-info seq-bindings-info)
+                   (emit-form/emit-form body))]
+    form))
+
+(defmethod -reconstruct-tag 'clojure.core/for
+  [_]
+  nil)
+
+(defmethod -freeze-macro 'clojure.core/for
+  [vsym [_ seq-forms body-form :as form] env]
+  (let [acc (gensym "acc")
+        out-form (reduce
+                   (fn [body [expr binding]]
+                     (case binding
+                       :let `(let ~expr ~body)
+                       :when `(if ~expr ~body ~acc)
+                       :while `(if ~expr ~body (reduced ~acc))
+                       (if (keyword? binding)
+                         (throw (Exception. (str "Invalid 'for' keyword: " binding)))
+                         `(reduce (fn [~acc ~binding] ~body) ~acc ~expr))))
+                   `(concat ~acc (list ~body-form))
+                   (partition 2 (rseq seq-forms)))
+        thawed (thaw-form `(let [~acc '()]
+                             ~out-form)
+                          env)
+        args [thawed]]
+    (->
+      {:op :frozen-macro
+       :env env
+       :args args
+       :vsym vsym
+       :form form}
+      reconstruct-tag+form)))
 
 (defn freeze-macro [op form env]
   (let [^Var v (u/resolve-sym op env)
