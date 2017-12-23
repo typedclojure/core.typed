@@ -232,13 +232,16 @@
     (cond
       (ana/freeze-macro? op env) (ana/freeze-macro op form env)
       #_(do
-                                   ;(prn "freezing macro")
-                                   {:op   :frozen-macro
-                                    :macro (u/resolve-sym op env)
-                                    :form form
-                                    :env  (assoc env :thread-bindings (get-thread-bindings))})
+          ;(prn "freezing macro")
+          {:op   :frozen-macro
+           :macro (u/resolve-sym op env)
+           :form form
+           :env  (assoc env :thread-bindings (get-thread-bindings))})
       :else
-      (let [mform (ana/macroexpand-1 form env)]
+      (let [_ (when (-> form meta ::freeze)
+                (throw (Exception. (str "Required frozen macro " op
+                                        " was not frozen."))))
+            mform (ana/macroexpand-1 form env)]
         (if (= form mform) ;; function/special-form invocation
           (pre-parse mform env)
           (-> (pre-analyze-form mform env)

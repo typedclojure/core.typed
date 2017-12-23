@@ -131,4 +131,5 @@
 
 (deftest for-test
   (is-tc-e (clojure.core/for [a [1 2]] a))
-  (is-tc-e (clojure.core/for [a [1 2] b [2 3]] [a b])))
+  (is-tc-e (clojure.core/for [a [1 2] b [2 3]] [a b]))
+  (is-tc-e (clojure.core/for [a [1 2] b [2 3]] [a b]) (Seq '[Num Num])))

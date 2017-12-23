@@ -917,7 +917,7 @@
                    (partition 2 (rseq seq-forms)))
         {:keys [expr-type form]} (check out-form)
 
-        {res-memt :x :as solved?} (solve-subtype [x]
+        {res-memt :x :as solved?} (solve-subtype '[x]
                                                  (fn [x]
                                                    [t `(t/U '[~x] nil)]))
         _ (when-not solved?
@@ -962,6 +962,151 @@
            :exprs [1]})]
   )
 );end comment
+
+(defn TCResult->map [ret]
+  {:pre [(r/TCResult? ret)]}
+  {:type (prs/unparse-type (:t ret))
+   :filters (prs/unparse-filter-set (:fl ret))
+   :object (prs/unparse-object (:o ret))
+   :flow (prs/unparse-filter (-> ret :flow :normal))})
+                                   
+(defn map->TCResult [expected]
+  {:pre [(map? expected)]
+   :post [(r/TCResult? %)]}
+  (r/ret (if-let [[_ t] (find expected :type)]
+           (prs/parse-type t)
+           (throw (Exception. "Must provide type")))
+         (if-let [[_ fl] (find expected :filters)]
+           (fo/-FS
+             (if-let [[_ f] (find fl :then)]
+               (prs/parse-filter f)
+               fl/-top)
+             (if-let [[_ f] (find fl :else)]
+               (prs/parse-filter f)
+               fl/-top))
+           (fo/-simple-filter))
+         (if-let [[_ o] (find expected :object)]
+           (prs/parse-object o)
+           obj/-empty)
+         (r/-flow
+           (if-let [[_ flow] (find expected :flow)]
+             (prs/parse-filter flow)
+             fl/-top))))
+
+(defn for-typing-rule [{[_ seq-forms body-form :as original-form] :form
+                        :keys [expected check solve-subtype delayed-error internal-error]}]
+  (let [{memt :x :as add-inner-expected?}
+        (when expected
+          (solve-subtype
+            '[x]
+            (fn [x]
+              [`(t/Seq ~x) (:type expected)])))
+        _ (when expected
+            (when-not add-inner-expected?
+              (delayed-error "for comprehension return type is incompatible with expected type"
+                             :expected (:type expected)
+                             :actual   `(t/Seq t/Any))))
+        out-form (reduce
+                   (fn [body [expr binding]]
+                     (-> 
+                       (case binding
+                         :let `(let ~expr ~body)
+                         (:while :when) `(when ~expr ~body)
+                         `(let [~binding (rand-nth (seq ~expr))]
+                            ~body))
+                       (with-meta {::pre/freeze true})))
+                   `[~(if add-inner-expected? `^::pre/freeze (t/ann-form ~body-form ~memt) body-form)]
+                   (partition 2 (rseq seq-forms)))
+        _ (prn "out-form" out-form)
+        {:keys [expr-type form]} (check out-form)
+        _ (prn "checked form" form)
+        _ (prn "expr-type" expr-type)
+        _ (assert (map? expr-type))
+        {res-memt :x :as solved?} (solve-subtype '[x]
+                                                 (fn [x]
+                                                   [(:type expr-type) `(t/U '[~x] nil)]))
+        _ (when-not solved?
+            (internal-error "Something went wrong in for comprehension typing rule"
+                            :expected `(t/U '[t/Any] nil)
+                            :actual   `t))
+        new-form (loop [seq-forms (seq seq-forms)
+                        new-seq-forms []
+                        form form]
+                   (if (empty? seq-forms)
+                     (list (first original-form)
+                           new-seq-forms
+                           (let [[form :as _singleton-vec_] form]
+                             (if add-inner-expected?
+                               (second form)
+                               form)))
+                     (let [[binding _ & seq-forms] seq-forms
+                           [new-seq-forms form]
+                           (case binding
+                             :let (let [[_let_ expr body] form]
+                                    [(conj new-seq-forms :let expr) body])
+                             (:while :when) (let [[_when_ expr body] form]
+                                              [(conj new-seq-forms binding expr) body])
+                             (let [[_let_ [binding [_rand-nth_ [_seq_ expr]]] body] form]
+                               [(conj new-seq-forms binding expr) body]))]
+                       (recur seq-forms
+                              new-seq-forms
+                              form))))]
+    (prn "new-form" new-form)
+    (prn "res-memt" res-memt)
+    {:form new-form
+     :expr-type `{:type (t/Seq ~res-memt)
+                  :filters {:then ~'tt
+                            :else ~'ff}
+                  :object ~'empty
+                  :flow ~'tt}}))
+
+(add-invoke-frozen-method 'clojure.core/for
+  [vsym {:keys [form args env] :as expr} expected]
+  (let [rule-args {:expected (some-> expected TCResult->map)
+                   :form form
+                   :check (fn check-fn
+                            ([form] (check-fn form {}))
+                            ([form {:keys [expected] :as opt}]
+                             {:pre [(map? opt)
+                                    ((some-fn nil? map?) expected)]}
+                             (let [ret (some-> expected map->TCResult)
+                                   ;; TODO do we want to accept an :env option in this function?
+                                   expr (ana-clj/thaw-form form env)
+                                   cexpr (check expr ret)]
+                               {:form (ast-u/emit-form-fn cexpr)
+                                :expr-type (TCResult->map (u/expr-type cexpr))})))
+                   :solve-subtype (fn [vs f]
+                                    {:pre [(every? symbol? vs)]}
+                                    (let [gvs (map gensym vs)
+                                          syns (apply f gvs)
+                                          [lhs rhs] (tvar-env/with-extended-tvars gvs
+                                                      (mapv prs/parse-type syns))
+                                          substitution
+                                          (cgen/handle-failure
+                                            (cgen/infer
+                                              (zipmap gvs (repeat r/no-bounds))
+                                              {}
+                                              [lhs]
+                                              [rhs]
+                                              r/-any))]
+                                      (when substitution
+                                        (into {}
+                                              (comp (filter (comp crep/t-subst? val))
+                                                    (map (fn [[k v]]
+                                                           [k (:type v)])))
+                                              (select-keys substitution gvs)))))
+                   :delayed-error (fn [s & args]
+                                    ;; TODO args
+                                    (err/tc-delayed-error s))
+                   :internal-error (fn [s & args]
+                                     ;; TODO args
+                                     (err/int-error s))}
+
+        {out-expr-type :expr-type
+         out-form :form}
+        (for-typing-rule rule-args)]
+    (-> (jana2/-freeze-macro vsym out-form env)
+        (assoc u/expr-type (map->TCResult out-expr-type)))))
 
 ;(add-invoke-frozen-method 'clojure.core/for
 ;  [vsym {:keys [form args env] :as expr} expected]
