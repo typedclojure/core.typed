@@ -118,6 +118,7 @@
          (emit-bindings-info bindings-form bindings-info)
          (emit+splice-body-forms body-forms body)))
 
+
 (defmethod -freeze-macro 'clojure.core/let
   [vsym [_ bindings-form & body-forms :as form] env]
   (let [_ (assert (and (vector? bindings-form) (even? (count bindings-form))))
@@ -175,6 +176,17 @@
 (defn when-then-body [{[wexpr] :args}]
   {:post [(= :do (:op %))]}
   (:then wexpr))
+
+(comment
+  (defmethod -expand-macro [[_ test & bodys]]
+    `(if ~test
+       (do ~@bodys)
+       nil))
+
+  (defmethod -unexpand-macro 'clojure.core/when
+    [old-unexpanded-form [_if_ test [_do_ & bodys] :as expanded-form]]
+    `(~(first old-form) ~test ~@bodys))
+  )
 
 (defmethod -reconstruct-form 'clojure.core/when
   [{[mform test-form & then-forms] :form :as wexpr}]
