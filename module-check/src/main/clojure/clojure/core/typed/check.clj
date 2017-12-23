@@ -937,11 +937,11 @@
                      (let [[binding _ & seq-forms] seq-forms
                            [new-seq-forms form]
                            (case binding
-                             :let (let [[_ expr body] form]
+                             :let (let [[_let_ expr body] form]
                                     [(conj new-seq-forms :let expr) body])
-                             (:while :when) (let [[_ expr body] form]
+                             (:while :when) (let [[_when_ expr body] form]
                                               [(conj new-seq-forms binding expr) body])
-                             (let [[_ [_ _ {{:keys expr} :expr}] body] form]
+                             (let [[_let_ [binding [_type-rule_ _ {{:keys [expr]} :expr}]] body] form]
                                [(conj new-seq-forms binding expr) body]))]
                        (recur seq-forms
                               new-seq-forms
@@ -952,26 +952,6 @@
                             :else '~tt}
                   :object '~empty
                   :flow '~tt}}))
-
-  #_
-(type-rule
-  ::for-return
-  {:exprs [(let [a (type-rule
-                     ::for-should-have-seqs
-                     {:syntax [a]
-                      :exprs [[1 2 3]]})]
-             (let [b (type-rule
-                       ::for-should-have-seqs
-                       {:syntax [b]
-                        :exprs [[3 4 5]]})]
-               (let [c (type-rule
-                         ::for-should-have-seqs
-                         {:syntax [c]
-                          :exprs [[5 6 7]]})]
-                 (let [d 1]
-                   (when a
-                     (when b
-                       [(+ a d)]))))))]})
 
 (let [a 1]
   )
