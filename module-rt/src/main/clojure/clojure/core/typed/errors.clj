@@ -76,17 +76,24 @@
   (assert (not (instance? clojure.lang.ExceptionInfo exdata)))
   (isa? (:type-error exdata) tc-error-parent))
 
-(defn tc-delayed-error [msg & {:keys [return form] :as opt}]
-  (let [e (ex-info msg (merge {:type-error tc-error-parent}
+(defn tc-delayed-error [msg & {:keys [return form expected] :as opt}]
+  (let [form (cond
+               (contains? (:opts expected) :blame-form) (-> expected :opts :blame-form)
+               (contains? opt :form) form
+               :else (ast-u/emit-form-fn uvs/*current-expr*))
+        msg (str (when-let [msg-fn (some-> (-> expected :opts :msg-fn) eval)]
+                   (str (msg-fn {}) "\n"))
+                 msg)
+        e (ex-info msg (merge {:type-error tc-error-parent}
                               (when (or (contains? opt :form)
                                         uvs/*current-expr*)
-                                {:form (if (contains? opt :form)
-                                         form
-                                         (ast-u/emit-form-fn uvs/*current-expr*))})
+                                {:form form})
                               {:env (env-for-error
-                                      (or (when uvs/*current-expr*
-                                            (:env uvs/*current-expr*))
-                                          *current-env*))}))]
+                                      (merge (when (contains? (:opts expected) :blame-form)
+                                               (meta (-> expected :opts :blame-form)))
+                                             (or (when uvs/*current-expr*
+                                                   (:env uvs/*current-expr*))
+                                                 *current-env*)))}))]
     (cond
       ;can't delay here
       (not uvs/*delayed-errors*)

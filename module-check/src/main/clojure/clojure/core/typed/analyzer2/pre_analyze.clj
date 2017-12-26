@@ -110,6 +110,14 @@
        :doc      "Multimethod that dispatches on op, should default to -pre-parse"}
   pre-parse)
 
+(def ^{:dynamic  true
+       :arglists '([form opts])}
+  expand-macro)
+
+(def ^{:dynamic  true
+       :arglists '([expanded-form opts])}
+  unexpand-macro)
+
 ;; this node wraps non-quoted collections literals with metadata attached
 ;; to them, the metadata will be evaluated at run-time, not treated like a constant
 (defn pre-wrapping-meta
@@ -230,18 +238,9 @@
                       (merge {:form form}
                              (u/-source-info form env)))))
     (cond
-      (ana/freeze-macro? op env) (ana/freeze-macro op form env)
-      #_(do
-          ;(prn "freezing macro")
-          {:op   :frozen-macro
-           :macro (u/resolve-sym op env)
-           :form form
-           :env  (assoc env :thread-bindings (get-thread-bindings))})
+      (ana/freeze-macro? op form env) (ana/freeze-macro op form env)
       :else
-      (let [_ (when (-> form meta ::freeze)
-                (throw (Exception. (str "Required frozen macro " op
-                                        " was not frozen."))))
-            mform (ana/macroexpand-1 form env)]
+      (let [mform (ana/macroexpand-1 form env)]
         (if (= form mform) ;; function/special-form invocation
           (pre-parse mform env)
           (-> (pre-analyze-form mform env)

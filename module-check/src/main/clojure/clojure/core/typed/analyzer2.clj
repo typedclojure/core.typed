@@ -17,7 +17,7 @@
   parse)
 
 (def ^{:dynamic  true
-       :arglists '([sym env])
+       :arglists '([sym form env])
        :doc      "True if a macro call should be frozen."}
   freeze-macro?)
 

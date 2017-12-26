@@ -108,7 +108,7 @@
       (let [{t1 :t f1 :fl o1 :o flow1 :flow} tr1
             {t2 :t f2 :fl o2 :o flow2 :flow} expected]
         (cond
-          (not (subtype? t1 t2)) (cu/expected-error t1 t2)
+          (not (subtype? t1 t2)) (cu/expected-error t1 t2 :expected expected)
 
           :else
           (let [better-fs? (filter-better? f1 f2)
@@ -119,19 +119,23 @@
                 ]
             (cond
               (not better-flow?) (err/tc-delayed-error (str "Expected result with flow filter " (pr-str flow2) 
-                                                            ", got flow filter "  (pr-str flow1)))
+                                                            ", got flow filter "  (pr-str flow1))
+                                                       :expected expected)
               (and (not better-fs?)
                    better-obj?)
-              (err/tc-delayed-error (str "Expected result with filter " (pr-str f2) ", got filter "  (pr-str f1)))
+              (err/tc-delayed-error (str "Expected result with filter " (pr-str f2) ", got filter "  (pr-str f1))
+                                    :expected expected)
 
               (and better-fs? 
                    (not better-obj?))
-              (err/tc-delayed-error (str "Expected result with object " (pr-str o2) ", got object " (pr-str o1)))
+              (err/tc-delayed-error (str "Expected result with object " (pr-str o2) ", got object " (pr-str o1))
+                                    :expected expected)
 
               (and (not better-fs?)
                    (not better-obj?))
               (err/tc-delayed-error (str "Expected result with object " (pr-str o2) ", got object"  o1 " and filter "
-                                         (pr-str f2) " got filter " (pr-str f1))))))
+                                         (pr-str f2) " got filter " (pr-str f1)))
+                                    :expected expected)))
         (construct-ret tr1 expected))
 
       (and (r/TCResult? tr1)

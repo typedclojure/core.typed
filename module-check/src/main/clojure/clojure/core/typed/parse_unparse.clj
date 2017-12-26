@@ -1028,6 +1028,7 @@
   (cond
     (= 'tt f) f/-top
     (= 'ff f) f/-bot
+    (= 'no-filter f) f/-no-filter
     (not ((some-fn seq? list?) f)) (err/int-error (str "Malformed filter expression: " (pr-str f)))
     :else (parse-filter* f)))
 
@@ -1039,6 +1040,7 @@
 (defn parse-object [obj]
   (case obj
     empty orep/-empty
+    no-object orep/-no-object
     (parse-object-path obj)))
 
 (defn parse-filter-set [{:keys [then else] :as fsyn}]
