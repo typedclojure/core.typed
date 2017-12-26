@@ -552,11 +552,12 @@
 (defn TCResult->map [ret]
   {:pre [(r/TCResult? ret)]
    :post [(map? %)]}
-  {:type (prs/unparse-type (:t ret))
-   :filters (prs/unparse-filter-set (:fl ret))
-   :object (prs/unparse-object (:o ret))
-   :flow (prs/unparse-filter (-> ret :flow :normal))
-   :opts (not-empty (:opts ret))})
+  (binding [vs/*verbose-types* true]
+    {:type (prs/unparse-type (:t ret))
+     :filters (prs/unparse-filter-set (:fl ret))
+     :object (prs/unparse-object (:o ret))
+     :flow (prs/unparse-filter (-> ret :flow :normal))
+     :opts (not-empty (:opts ret))}))
                                    
 (defn map->TCResult [expected]
   {:pre [(not (r/TCResult? expected))

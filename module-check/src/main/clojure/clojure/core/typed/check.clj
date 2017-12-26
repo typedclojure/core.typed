@@ -765,8 +765,7 @@
          out-form :form}
         (typing-rule rule-args)
         unexpanded-form (jana2/unexpand-macro out-form {:vsym vsym
-                                                        :original-form unexpanded-form})
-        ]
+                                                        :original-form unexpanded-form})]
     {:op :frozen-macro
      :env env
      :form unexpanded-form
