@@ -40,428 +40,334 @@
 
 (def ^:dynamic frozen-macros #{})
 
-(defn freeze-macro? [op env]
-  ;(prn "freeze-macro?" op)
+(defn freeze-macro? [op form env]
   (boolean
-    (when (symbol? op)
-      (when-not (specials op)
-        (let [^Var v (u/resolve-sym op env)]
-          (when (var? v)
-            (let [vsym (symbol (str (ns-name (.ns v)))
-                               (str (.sym v)))]
-              (contains? frozen-macros vsym))))))))
+    (or (-> form meta ::freeze)
+        (when (symbol? op)
+          (when-not (specials op)
+            (let [^Var v (u/resolve-sym op env)]
+              (when (var? v)
+                (let [vsym (symbol (str (ns-name (.ns v)))
+                                   (str (.sym v)))]
+                  (contains? frozen-macros vsym)))))))))
 
 (declare thaw-form rerun-passes)
 
-(defmulti -reconstruct-form (fn [{:keys [vsym]}] vsym))
-(defmulti -reconstruct-tag (fn [{:keys [vsym]}] vsym))
+(defmulti -expand-macro (fn [form {:keys [vsym]}] vsym))
+(defmulti -unexpand-macro (fn [form {:keys [vsym]}] vsym))
 
-(def reconstruct-form -reconstruct-form)
-(def reconstruct-tag -reconstruct-tag)
+(def expand-macro -expand-macro)
+(defn unexpand-macro [form opts]
+  (let [out (-unexpand-macro form opts)]
+    (vary-meta out #(merge (meta form) %))))
 
-(defmulti -freeze-macro (fn [op form env] op))
-
-(defn reconstruct-tag+form [expr]
-  (let [tag (reconstruct-tag expr)
-        form (reconstruct-form expr)]
-    (merge (assoc expr :form form)
-           (when tag
-             {:tag tag}))))
-
-(defmethod -reconstruct-tag 'clojure.core/let
-  [{[_ body] :args}]
-  (:tag body))
-
-(defn do-form? [form]
-  (and (seq? form)
-       (= 'do (first form))))
-
-(defn thaw-synthetic-body-forms [body-forms env]
-  (thaw-form `(do ~@body-forms) env))
+(defn do-form? [b]
+  (and (seq? b) (= 'do (first b))))
 
 ;; preserves empty bodies like (let []), even if
 ;; they are expanded to (do nil), preventing (let [] nil)
 (defn splice-body-forms [original-body new-do-body]
-  {:pre [(do-form? new-do-body)]}
+  (assert (do-form? new-do-body) (pr-str new-do-body))
   (when (seq original-body) (rest new-do-body)))
 
-(defn let-bindings-info [{:keys [args op vsym]}]
-  {:pre [(= :frozen-macro op)
-         (= 'clojure.core/let vsym)]
-   :post [(vector? %)
-          (every? map? %)]}
-  (first args))
+(defn splice-checked-body-forms
+  [[_check-if-empty-body_ new-do-body {:keys [original-body]} :as checked-body]]
+  (splice-body-forms original-body new-do-body))
 
-(defn let-body [{:keys [args op vsym]}]
-  {:pre [(= :frozen-macro op)
-         (= 'clojure.core/let vsym)]
-   :post [(map? %)
-          (= :do (:op %))]}
-  (second args))
+(defmacro check-let-destructure [{:keys [expression]}] expression)
+(defmacro check-let-destructure-no-op [_] nil)
 
-;; throw away precalculated destructuring
-(defn emit-bindings-info [bindings-form bindings-info]
-  {:pre [(vector? bindings-form)
-         (vector? bindings-info)]
-   :post [(vector? %)]}
-  (into (empty bindings-form)
-        (mapcat (juxt :b-form (comp emit-form/emit-form :init)))
-        bindings-info))
+(defn expand-ann-form
+  [[_ e ty :as form] _]
+  e)
 
-(defn emit+splice-body-forms [old-body-forms body]
-  (splice-body-forms old-body-forms (emit-form/emit-form body)))
+(defn unexpand-ann-form
+  [e {[mop _ ty] :original-form}]
+  (list mop e ty))
 
-(defmethod -reconstruct-form 'clojure.core/let
-  [{[mform bindings-form & body-forms] :form
-    [bindings-info body] :args}]
-  (list* mform
-         (emit-bindings-info bindings-form bindings-info)
-         (emit+splice-body-forms body-forms body)))
+(defmethod -expand-macro 'clojure.core.typed/ann-form [& args] (apply expand-ann-form args))
+(defmethod -expand-macro 'clojure.core.typed.macros/ann-form [& args] (apply expand-ann-form args))
+(defmethod -unexpand-macro 'clojure.core.typed/ann-form [& args] (apply unexpand-ann-form args))
+(defmethod -unexpand-macro 'clojure.core.typed.macros/ann-form [& args] (apply unexpand-ann-form args))
 
+(defn expand-tc-ignore
+  [[_ & body] _]
+  `(do ~@body))
 
-(defmethod -freeze-macro 'clojure.core/let
-  [vsym [_ bindings-form & body-forms :as form] env]
-  (let [_ (assert (and (vector? bindings-form) (even? (count bindings-form))))
-        [env bindings-info]
-        (reduce
-          (fn [[env bindings-info] [b-form old-init-form]]
-            (let [;; macroexpand up to frozen macros
-                  init (thaw-form old-init-form env)
-                  ;; emit to plug into `destructure`
-                  init-form (emit-form/emit-form init)
-                  ;; simulate the destructuring of b-form to gather :tag
-                  ;; and :locals information.
-                  [env d-bindings] (reduce (fn [[env d-bindings] [b-form init-form]]
-                                             {:pre [(map? env)
-                                                    (vector? d-bindings)]
-                                              :post [(vector? %)]}
-                                             (let [{unhygienic-name :form :keys [env] :as expr}
-                                                   (rerun-passes
-                                                     {:op :binding
-                                                      :env env
-                                                      :local :let
-                                                      :init (pre/pre-analyze-child init-form env)
-                                                      :form b-form
-                                                      :name b-form
-                                                      :children [:init]})]
-                                               ;; FIXME many of these names will pollute the local environment
-                                               ;; we eventually return, since we return forms that
-                                               ;; undo the expansion of this simulated `destructure`.
-                                               [(assoc-in env [:locals unhygienic-name] (dissoc expr :env))
-                                                (conj d-bindings expr)]))
-                                           [env []]
-                                           (partition 2 (destructure [b-form init-form])))
-                  _ (assert (map? env))
-                  _ (assert (vector? d-bindings))]
-              ;; remember original destructuring lhs (b-form) and analyzed rhs (init)
-              [env (conj bindings-info {:init init
-                                        :b-form b-form 
-                                        :d-bindings d-bindings})]))
-          [env []]
-          (partition 2 bindings-form))
-        body (thaw-synthetic-body-forms body-forms env)
-        args [bindings-info body]]
-    (-> 
-      {:op :frozen-macro
-       :env env
-       :args args
-       :vsym vsym
-       :form form}
-      reconstruct-tag+form)))
+(defn unexpand-tc-ignore
+  [[_do_ & body] {[mop] :original-form}]
+  (list* mop body))
 
-(defn when-test [{[wexpr] :args}]
-  {:post [(map? %)]}
-  (:test wexpr))
+(defmethod -expand-macro 'clojure.core.typed/tc-ignore [& args] (apply expand-tc-ignore args))
+(defmethod -expand-macro 'clojure.core.typed.macros/tc-ignore [& args] (apply expand-tc-ignore args))
+(defmethod -unexpand-macro 'clojure.core.typed/tc-ignore [& args] (apply unexpand-tc-ignore args))
+(defmethod -unexpand-macro 'clojure.core.typed.macros/tc-ignore [& args] (apply unexpand-tc-ignore args))
 
-(defn when-then-body [{[wexpr] :args}]
-  {:post [(= :do (:op %))]}
-  (:then wexpr))
+(defmethod -expand-macro `check-let-destructure [[_ {:keys [expression]} :as form] _] expression)
+(defmethod -unexpand-macro `check-let-destructure [expression {[mop opts] :original-form}] (list mop (assoc opts :expression expression)))
 
-(comment
-  (defmethod -expand-macro [[_ test & bodys]]
-    `(if ~test
+(defmethod -expand-macro `check-let-destructure-no-op [_ _] nil)
+(defmethod -unexpand-macro `check-let-destructure-no-op [_ {:keys [original-form]}] original-form)
+
+(def clojure-core-let-expansions
+  {:plain {:expand-macro 
+           (fn [[_ bindings-form & body-forms :as form] _]
+             (let [gs (gensym "b")]
+               (reduce
+                 (fn [form [expression binding]]
+                   `(let* [~gs ~expression
+                           ~@(destructure [binding gs])]
+                      ~form))
+                 [`(do ~@body-forms)]
+                 (partition 2 (rseq bindings-form)))))
+           :unexpand-macro
+           (fn [[_ bindings-form & body-forms :as form] {:keys [original-form]}]
+             (let [bindings (loop [original-bindings (second original-form)
+                                   form form
+                                   bindings []]
+                              (if (empty? original-bindings)
+                                bindings
+                                (let [[binding _ & original-bindings] original-bindings
+                                      [_let*_ [_gs_ expression & _dstruct_] form] form]
+                                  (recur original-bindings
+                                         form
+                                         (conj bindings-form binding expression)))))
+                   [_ _ & original-body] original-form]
+               (list* (first original-form)
+                      bindings
+                      (splice-body-forms original-body (list* 'do body-forms)))))}
+   :typed {:expand-macro 
+           (fn [[_ bindings-form & body-forms :as form] _]
+             (let [gs (gensym "b")]
+               (reduce
+                 (fn [form [expression binding]]
+                   `(let* [~gs ^::freeze (check-let-destructure
+                                           {:binding ~binding
+                                            :expression ~expression})
+                           ~@(destructure [binding gs])]
+                      ~form))
+                 `^::freeze
+                 (check-if-empty-body
+                    (do ~@body-forms)
+                    {:msg-fn (fn [_#]
+                               "This 'let' expression returns nil with an empty body, which does not agree with the expected type")
+                     :blame-form ~form
+                     :original-body ~body-forms})
+                 (partition 2 (rseq bindings-form)))))
+           :unexpand-macro
+           (fn [form {:keys [original-form]}]
+             ;(prn "start of let :unexpand-macro" form original-form)
+             (let [[mop original-bindings & original-body] original-form
+                   ;_ (prn "original-body" original-body)
+                   [bindings body] (loop [original-bindings original-bindings
+                                          form form
+                                          bindings []]
+                                     ;(prn "form" form)
+                                     (if (empty? original-bindings)
+                                       [bindings form]
+                                       (let [[_ _ & original-bindings] original-bindings
+                                             [_let*_ [_gs_ [_check-let-destructure_ {:keys [binding expression]}] & _dstruct_] form] form]
+                                         (recur original-bindings
+                                                form
+                                                (conj bindings binding expression)))))]
+               ;(prn "end of let :unexpand-macro" body)
+               (list* (first original-form)
+                      bindings
+                      (splice-checked-body-forms body))))}})
+
+(defmethod -expand-macro 'clojure.core/let
+  [& args]
+  (apply (-> clojure-core-let-expansions :typed :expand-macro) args))
+
+(defmethod -unexpand-macro 'clojure.core/let
+  [& args]
+  (apply (-> clojure-core-let-expansions :typed :unexpand-macro) args))
+
+(defmacro check-if-empty-body [e opts]
+  e)
+
+(defmethod -expand-macro `check-if-empty-body
+  [[_ e {:keys [msg blame-form]} :as form] {{:keys [expected]} :clojure.core.typed/type-opts}]
+  e)
+
+(defmethod -unexpand-macro `check-if-empty-body
+  [e {[mop _ opt] :original-form}]
+  (list mop e opt))
+
+(defmacro check-expected [e opts]
+  e)
+
+(defmethod -expand-macro `check-expected
+  [[_ e {:keys [msg blame-form]} :as form] {{:keys [expected]} :clojure.core.typed/type-opts}]
+  e)
+
+(defmethod -unexpand-macro `check-expected
+  [e {[mop _ opt] :original-form}]
+  (list mop e opt))
+
+(defmethod -expand-macro 'clojure.core/when
+  [[_ test & bodys :as form] _]
+  `(if ~test
+     ^::freeze
+     (check-if-empty-body
        (do ~@bodys)
-       nil))
+       {:msg-fn (fn [_#]
+                  "This 'when' expression returns nil if the test is true, which does not agree with the expected type.")
+        :blame-form ~form
+        :original-body ~bodys})
+     ^::freeze
+     (check-expected
+       nil
+       {:msg-fn (fn [_#]
+                  "This 'when' expression returns nil if the test is false, which does not agree with the expected type.")
+        :blame-form ~form})))
 
-  (defmethod -unexpand-macro 'clojure.core/when
-    [old-unexpanded-form [_if_ test [_do_ & bodys] :as expanded-form]]
-    `(~(first old-form) ~test ~@bodys))
-  )
+(defmethod -unexpand-macro 'clojure.core/when
+  [[_if_ test then-checked-body :as form]
+   {[mop _ & original-bodys :as original-form] :original-form}]
+  (list* mop test (splice-checked-body-forms then-checked-body)))
 
-(defmethod -reconstruct-form 'clojure.core/when
-  [{[mform test-form & then-forms] :form :as wexpr}]
-  (list* mform 
-         (emit-form/emit-form (when-test wexpr))
-         (splice-body-forms then-forms
-                            (emit-form/emit-form
-                              (when-then-body wexpr)))))
+(defmethod -expand-macro 'clojure.core/when-not
+  [[_ test & bodys :as form] _]
+  `(if ~test
+     ^::freeze
+     (check-expected
+       nil
+       {:msg-fn (fn [_#]
+                  "This 'when-not' expression returns nil if the test is true, which does not agree with the expected type.")
+        :blame-form ~form})
+     ^::freeze
+     (check-if-empty-body
+       (do ~@bodys)
+       {:msg-fn (fn [_#]
+                  "This 'when-not' expression returns nil if the test is false, which does not agree with the expected type.")
+        :blame-form ~form
+        :original-body ~bodys})))
 
-(defmethod -reconstruct-tag 'clojure.core/when
-  [{[wexpr] :args}]
-  (:tag wexpr))
+(defmethod -unexpand-macro 'clojure.core/when-not
+  [[_if_ test _ else-checked-body :as form]
+   {[mop _ & original-bodys :as original-form] :original-form}]
+  (list* mop test (splice-checked-body-forms else-checked-body)))
 
-(defmethod -freeze-macro 'clojure.core/when
-  [vsym [_ test-form & body-form :as form] env]
-  ;; TODO spec check macro first
-  (assert (<= 2 (count form)))
-  (let [wexpr (thaw-form `(if ~test-form (do ~@body-form)) env)
-        args [wexpr]]
-    (-> 
-      {:op :frozen-macro
-       :env env
-       :args args
-       :vsym vsym
-       :form form}
-      reconstruct-tag+form)))
+(defmethod -expand-macro 'clojure.core/if-let
+  [[_ bindings then else :as original-form] _]
+	(let [form (bindings 0) tst (bindings 1)]
+		`^::freeze
+     (let [temp# ~tst]
+			 (if temp#
+				 ^::freeze
+         (let [_# ^::freeze (check-let-destructure-no-op
+                              {:binding ~form
+                               :expression ~tst})
+               ;TODO avoid repeated destructuring checks ^::no-check-destructure
+               ~form temp#]
+					 ~then)
+         ~(if (= 3 (count original-form))
+            `^::freeze
+            (check-expected
+               nil
+               {:msg-fn (fn [_#]
+                          "This 'if-let' expression returns nil if the test is false, which does not agree with the expected type.")
+                :blame-form ~original-form})
+            else)))))
 
-(defn when-not-test [{[wnot-expand] :args}]
-  {:pre [(= :if (:op wnot-expand))]}
-  (:test wnot-expand))
+(defmethod -unexpand-macro 'clojure.core/if-let
+  [form {:keys [original-form]}]
+	(let [[_let_ [_tmp_ tst]
+         [_if _tmp
+          [_let_ [_ _no-op_ binding _tmp_]
+           then]
+          else]]
+        form
+        [mop] original-form]
+    (list* mop [binding tst] then
+           (when (= 4 (count original-form))
+             [else]))))
 
-(defn when-not-then-body [{[wnot-expand] :args}]
-  ;; branches are flipped
-  (:else wnot-expand))
+(defmethod -expand-macro 'clojure.core/when-let
+  [[_ test & bodys :as form] _]
+  ^::freeze
+  `(if-let ~test
+     ^::freeze
+     (check-if-empty-body
+       (do ~@bodys)
+       {:msg-fn (fn [_#]
+                  "This 'when-let' expression returns nil if the test is true, which does not agree with the expected type.")
+        :blame-form ~form
+        :original-body ~bodys})
+     ^::freeze
+     (check-expected
+       nil
+       {:msg-fn (fn [_#]
+                  "This 'when-let' expression returns nil if the test is false, which does not agree with the expected type.")
+        :blame-form ~form})))
 
-(defmethod -reconstruct-form 'clojure.core/when-not
-  [{[mform test-form & body] :form :as wnot}]
-  (list* mform
-         (emit-form/emit-form (when-not-test wnot))
-         (splice-body-forms body (emit-form/emit-form (when-not-then-body wnot)))))
+(defmethod -unexpand-macro 'clojure.core/when-let
+  [[_if-let_ test then-checked-body :as form]
+   {[mop] :original-form}]
+  (list* mop test (splice-checked-body-forms then-checked-body)))
 
-(defmethod -reconstruct-tag 'clojure.core/when-not
-  [{[wnot-expand] :args}]
-  (:tag wnot-expand))
+(defmethod -expand-macro 'clojure.core/with-open
+  [[_ bindings & body :as form] _]
+	(let [expand-with-open (fn expand-with-open [bindings body]
+                           (cond
+                             (= (count bindings) 0) `^::freeze (check-if-empty-body
+                                                                 (do ~@body)
+                                                                 {:msg-fn (fn [_#]
+                                                                            (str "This 'with-open' expression returns nil, "
+                                                                                 "which does not agree with the expected type."))
+                                                                  :blame-form ~form
+                                                                  :original-body ~body})
+                             (symbol? (bindings 0)) `^:freeze (let ~(subvec bindings 0 2)
+                                                                (try
+                                                                  ~(expand-with-open (subvec bindings 2) body)
+                                                                  (finally
+                                                                    (. ~(bindings 0) close))))
+                             :else (throw (IllegalArgumentException. "with-open only allows Symbols in bindings"))))]
+    (expand-with-open bindings body)))
 
-(defmethod -freeze-macro 'clojure.core/when-not
-  [vsym [_ test-form & body-form :as form] env]
-  ;; TODO spec check macro first
-  (assert (<= 2 (count form)))
-  (let [wnot-expand (thaw-form `(if ~test-form nil (do ~@body-form)) env)
-        args [wnot-expand]]
-    (-> 
-      {:op :frozen-macro
-       :env env
-       :args args
-       :vsym vsym
-       :form form}
-      reconstruct-tag+form)))
+(defmethod -unexpand-macro 'clojure.core/with-open
+  [form {[mop original-bindings & original-body] :original-form}]
+  (let [[bindings body] (loop [bindings-left (/ (count original-bindings) 2)
+                               form form
+                               bindings []]
+                          (if (zero? bindings-left)
+                            [bindings form]
+                            (let [[_let_ [binding expression]
+                                   [_try form]] form]
+                              (recur (dec bindings-left)
+                                     form
+                                     (conj bindings binding expression)))))]
+    (list* mop bindings (splice-checked-body-forms body))))
 
-(declare freeze-macro)
-
-(defn when-let-bindings-info [wlet]
-  (let [binding-info (-> wlet let-bindings-info first)
-        inner-binding-info (-> wlet let-body :ret when-then-body :ret let-bindings-info first)]
-    [(assoc inner-binding-info
-            :init (:init binding-info))]))
-
-(defn when-let-then [wlet]
-  {:post [(map? %)]}
-  (-> wlet let-body :ret when-then-body :ret let-body))
-
-(defmethod -reconstruct-form 'clojure.core/when-let
-  [{[mform bindings-form & body-forms] :form
-    [wlet] :args}]
-  (list* mform
-         (emit-bindings-info bindings-form (when-let-bindings-info wlet))
-         (emit+splice-body-forms body-forms (when-let-then wlet))))
-
-(defmethod -reconstruct-tag 'clojure.core/when-let
-  [{[wlet] :args}]
-  (:tag wlet))
-
-(defmethod -freeze-macro 'clojure.core/when-let
-  [vsym [_ [b-form tst-form :as bindings-form] & then-forms :as form] env]
-  (let [_ (assert (and (vector? bindings-form) (= 2 (count bindings-form))))
-        wlet (thaw-form `(let [temp# ~tst-form]
-                           (when temp#
-                             (let [~b-form temp#]
-                               ~@then-forms)))
-                        env)
-        args [wlet]]
-    (-> 
-      {:op :frozen-macro
-       :env env
-       :args args
-       :vsym vsym
-       :form form}
-      reconstruct-tag+form)))
-
-(defn if-let-bindings-info [ilet]
-  (let [binding-info (-> ilet let-bindings-info first)
-        inner-binding-info (-> ilet let-body :ret :then let-bindings-info first)]
-    [(assoc inner-binding-info
-            :init (:init binding-info))]))
-
-(defn if-let-then [ilet]
-  {:post [(map? %)]}
-  (-> ilet let-body :ret :then let-body :ret))
-
-(defn if-let-else [ilet]
-  {:post [(map? %)]}
-  (-> ilet let-body :ret :else))
-
-(defmethod -reconstruct-form 'clojure.core/if-let
-  [{[mform bindings-form & then+else-forms :as form] :form
-    [wlet] :args}]
-  (list* mform
-         (emit-bindings-info bindings-form (if-let-bindings-info wlet))
-         (emit-form/emit-form (if-let-then wlet))
-         (when (= 4 (count form))
-           [(emit-form/emit-form (if-let-else wlet))])))
-
-(defmethod -reconstruct-tag 'clojure.core/if-let
-  [{[ilet] :args}]
-  (:tag ilet))
-
-(defmethod -freeze-macro 'clojure.core/if-let
-  [vsym [_ [b-form tst-form :as bindings-form] then-form else-form :as form] env]
-  (let [_ (assert (#{3 4} (count form)))
-        else-provided? (= 4 (count form))
-        _ (assert (and (vector? bindings-form) (= 2 (count bindings-form))))
-        ilet (thaw-form `(let [temp# ~tst-form]
-                           (if temp#
-                             (let [~b-form temp#]
-                               ~then-form)
-                             ~else-form))
-                        env)
-        args [ilet]]
-    (-> 
-      {:op :frozen-macro
-       :env env
-       :args args
-       :vsym vsym
-       :form form}
-      reconstruct-tag+form)))
-
-(defn with-open-bindings-info+body [{:keys [form] :as wopen}]
-  {:pre [(map? wopen)]
-   :post [(vector? (first %))
-          (every? map? (first %))
-          (= :do (-> % second :op)) (-> % second ((juxt :vsym :op)))]}
-  (assert form form)
-  (let [bindings-form (second form)
-        _ (assert (and (vector? bindings-form)
-                       (even? (count bindings-form))))]
-    (loop [bindings-info []
-           wopen wopen
-           nbinds (/ (count bindings-form) 2)]
-      (if (zero? nbinds)
-        [bindings-info (-> wopen :args first)]
-        (recur (into bindings-info (-> wopen :args first let-bindings-info))
-               (-> wopen :args first let-body :ret :body :ret)
-               (dec nbinds))))))
-
-(defn with-open-bindings-info [wopen]
-  (first (with-open-bindings-info+body wopen)))
-
-(defn with-open-body [wopen]
-  (second (with-open-bindings-info+body wopen)))
-
-(defmethod -reconstruct-form 'clojure.core/with-open
-  [{[mform bindings-form & body-forms] :form
-    :as wopen}]
-  (let [[bindings-info body] (with-open-bindings-info+body wopen)]
-    (list* mform
-           (emit-bindings-info bindings-form bindings-info)
-           (emit+splice-body-forms body-forms body))))
-
-(defmethod -reconstruct-tag 'clojure.core/with-open
-  [{[wopen] :args}]
-  (:tag wopen))
-
-(defmethod -freeze-macro 'clojure.core/with-open
-  [vsym [_ bindings-form & body-forms :as form] env]
-  (let [_ (assert (<= 2 (count form)))
-        _ (assert (and (vector? bindings-form) (even? (count bindings-form))))
-        wopen (thaw-form 
-                (if (zero? (count bindings-form))
-                  `(do ~@body-forms)
-                  (let [b-form (subvec bindings-form 0 2)
-                        _ (assert (symbol? (b-form 0)))]
-                    `(let ~b-form
-                       (try
-                         (with-open ~(subvec bindings-form 2) ~@body-forms)
-                         (finally
-                           (. ~(bindings-form 0) close))))))
-                env)
-        args [wopen]]
-    (->
-      {:op :frozen-macro
-       :env env
-       :args args
-       :vsym vsym
-       :form form}
-      reconstruct-tag+form)))
-
-(defn erased-assert? [{[erase-assert?] :args}]
-  erase-assert?)
-
-(defn assert-has-message? [{:keys [form]}]
-  (= 3 (count form)))
-
-(defn assert-test [{[_ exp] :args :as aexpr}]
-  {:pre [(not (erased-assert? aexpr))]
-   :post [(map? %)]}
-  (when-not-test exp))
-
-(defn assert-message [{[_ exp] :args :as aexpr}]
-  {:pre [(not (erased-assert? aexpr))
-         (assert-has-message? aexpr)]
-   :post [(map? %)]}
-  (-> exp when-not-then-body :ret :exception :args first :args second))
-
-(defmethod -reconstruct-form 'clojure.core/assert
-  [{[mform x message :as form] :form :as aexpr}]
-  (if (erased-assert? aexpr)
-    form
-    (list* mform
-           (emit-form/emit-form (assert-test aexpr))
-           (when (assert-has-message? aexpr)
-             [(emit-form/emit-form (assert-message aexpr))]))))
-
-(defmethod -reconstruct-tag 'clojure.core/assert
-  [{[exp] :args}]
-  (:tag exp))
-
-(defmethod -freeze-macro 'clojure.core/assert
-  [vsym [_ x message :as form] env]
-  (let [_ (assert (#{2 3} (count form)))
-        msg? (= 3 (count form))
+(defmethod -expand-macro 'clojure.core/assert
+  [[_ x message :as form] _]
+	(let [msg? (= 3 (count form))
         erase-assert? (not *assert*)
         assert-expand (fn
                         ([x]
                          (when-not erase-assert?
-                           `(when-not ~x
+													 `^::freeze
+                            (when-not ~x
                               (throw (new AssertionError (str "Assert failed: " (pr-str '~x)))))))
                         ([x message]
                          (when-not erase-assert?
-                           `(when-not ~x
-                              (throw (new AssertionError (str "Assert failed: " ~message "\n" (pr-str '~x))))))))
-        exp (thaw-form (apply assert-expand (rest form)) env)
-        args [erase-assert? exp]]
-    (->
-      {:op :frozen-macro
-       :env env
-       :args args
-       :vsym vsym
-       :form form}
-      reconstruct-tag+form)))
+													 `^::freeze
+                            (when-not ~x
+                              (throw (new AssertionError (str "Assert failed: " ~message "\n" (pr-str '~x))))))))]
+		(apply assert-expand (rest form))))
 
-(defn fn-method-pre [method]
-  {:pre [(= :fn-method (:op method))]
-   :post [(vector? %)
-          (every? (comp #{'clojure.core/assert} :vsym) %)]}
-  (-> method :body :ret let-body :statements))
-
-(defn fn-method-body [method]
-  {:pre [(= :fn-method (:op method))]}
-  (-> method :body :ret let-body :ret))
-
-(defn fn-methods [{[fnexpr] :args :as fexpr}]
-  {:pre [(= 'clojure.core/fn (:vsym fexpr))]
-   :post [(vector? %)
-          (every? (comp #{:fn-method} :op) %)]}
-  (:methods fnexpr))
+(defmethod -unexpand-macro 'clojure.core/assert
+  [form {:keys [original-form]}]
+	(if (some? form)
+    (let [msg? (= 3 (count original-form))
+          [mop] original-form]
+      (if msg?
+        (let [[_when-not_ x [_throw_ [_new _AssertionError_ [_str_ _ message]]]] form]
+          (list mop x message))
+        (let [[_when-not_ x] form]
+          (list mop x))))
+    original-form))
 
 (defn parse-fn-sigs [sigs]
 	(let [name (if (symbol? (first sigs)) (first sigs) nil)
@@ -478,16 +384,18 @@
 																 (first sigs)
 																 " should be a vector")
 														(str "Parameter declaration missing"))))))
-        process-sigs (fn [[params & body]]
+        process-sigs (fn [[params & body :as sig]]
                        (assert (vector? params) params)
                        (let [conds (when (and (next body) (map? (first body)))
                                      (first body))
                              body (if conds (next body) body)
-                             conds-from-params-meta? (boolean conds)
+                             conds-from-params-meta? (not conds)
                              conds (or conds (meta params))
                              pre (:pre conds)
                              post (:post conds)]
-                         {:pre pre
+                         {;; inherit positional information from params
+                          :sig-form (with-meta sig (meta params))
+                          :pre pre
                           :post post
                           :conds-from-params-meta? conds
                           :params params
@@ -496,166 +404,176 @@
      :sigs (mapv process-sigs sigs)
      :name name}))
 
-(defmethod -reconstruct-form 'clojure.core/fn
-  [{[mform & sigs :as form] :form
-    [fnexpr] :args
-    :as fmap}]
-  (let [{:keys [single-arity-syntax? sigs name]} (parse-fn-sigs sigs)
-        _ (when single-arity-syntax?
-            (assert (= 1 (count sigs))))
-        sigs (map (fn [method {:keys [pre post params body conds-from-params-meta?]}]
-                    (let [pre-exprs (fn-method-pre method)
-                          body-no-pre-expr (fn-method-body method)
-                          _ (assert (= (count pre) (count pre-exprs)))
-                          [post-exprs body-no-pre+post-expr] (if post
-                                                               [(-> body-no-pre-expr :ret let-body :statements)
-                                                                (-> body-no-pre-expr :ret let-bindings-info first :init)]
-                                                               [[] body-no-pre-expr])
-                          _ (assert (= (count post) (count post-exprs)))
-                          new-meta-map (merge (when pre
-                                                {:pre (mapv (comp emit-form/emit-form assert-test) pre-exprs)})
-                                              (when post
-                                                {:post (mapv (comp emit-form/emit-form assert-test) post-exprs)}))
-                          params (if conds-from-params-meta?
-                                   (vary-meta params merge new-meta-map)
-                                   params)
-                          new-body-form (emit-form/emit-form body-no-pre+post-expr)]
-                      `(~params
-                         ~@(when-not conds-from-params-meta?
-                             (when (seq new-meta-map)
-                               [new-meta-map]))
-                         ~@(splice-body-forms body new-body-form))))
-                  (fn-methods fmap)
-                  sigs)]
-    (list* mform
+(defmethod -unexpand-macro 'clojure.core/fn
+  [[_fn*_ & sigs] {:keys [original-form]}]
+  (let [name (first sigs)
+        sigs (if (symbol? sigs) (next sigs) sigs)
+        {original-sigs :sigs, :keys [single-arity-syntax?]} (parse-fn-sigs (next original-form))
+        unexpand-sig (fn [[params [_let_ dbindings & body]] old-sig]
+                       (let [rest-arg? (boolean
+                                         (when (<= 2 (count params))
+                                           (= '& (nth params (- count 2)))))
+                             [dbindings rst-dparam] (if rest-arg?
+                                                      [(-> dbindings pop pop) (peek dbindings)]
+                                                      [dbindings nil])
+                             fixed-dparams (mapv first (partition 2 dbindings))
+                             [asserts body] ((juxt pop peek) (vec body))
+                             exp-pre (when (:pre old-sig)
+                                       (mapv second asserts))
+                             _ (assert (= (count (:pre old-sig))
+                                          (count exp-pre)))
+                             [exp-post body] (if (:post old-sig)
+                                               (let [[_let_ [_%_ body] & posts+%] body]
+                                                 [(butlast posts+%) body])
+                                               [nil body])
+                             _ (assert (= (count (:post old-sig))
+                                          (count exp-post)))
+                             pre-post-meta-map (merge (when exp-pre
+                                                        {:pre exp-pre})
+                                                      (when exp-post
+                                                        {:post exp-post}))
+                             fn-params (with-meta (into fixed-dparams 
+                                                        (when rst-dparam ['& rst-dparam]))
+                                                  (merge (meta params)
+                                                         (when (:conds-from-params-meta? old-sig)
+                                                           pre-post-meta-map)))]
+                         (prn "body" body)
+                         `(~fn-params
+                            ~@(when-not (:conds-from-params-meta? old-sig)
+                                (when (seq pre-post-meta-map)
+                                  [pre-post-meta-map]))
+                            ~@(splice-checked-body-forms body))))]
+    (list* (first original-form)
            (concat (when name [name])
-                   (if single-arity-syntax?
-                     (first sigs)
-                     [sigs])))))
+                   ((if single-arity-syntax? first identity)
+                    (map unexpand-sig sigs original-sigs))))))
 
-(defmethod -reconstruct-tag 'clojure.core/fn
-  [_]
-  clojure.lang.AFunction)
-
-(defmethod -freeze-macro 'clojure.core/fn
-  [vsym [_ & sigs :as form] env]
-;; TODO clojure.spec check 
+(defmethod -expand-macro 'clojure.core/fn
+  [[_ & sigs :as form] _]
   (let [{:keys [sigs name]} (parse-fn-sigs sigs)
-        process-sig (fn [{:keys [pre post params body]}]
-                      (assert (vector? params))
-                      (let [gsyms (mapv (fn [a]
-                                          (if (= '& a)
-                                            a
-                                            (gensym "a")))
-                                        params)]
-                        `([~@gsyms]
-                          (let [~@(mapcat (fn [param gsym]
-                                            (when-not (= '& param)
-                                              [param gsym]))
-                                          params
-                                          gsyms)]
-                            ~@(map (fn [p] `(assert ~p)) pre)
-                            (do
-                              ~@(if post
-                                  `((let [~'% (do ~@body)]
-                                      ~@(map (fn [c] `(assert ~c)) post)
-                                      ~'%))
-                                  body))))))
-         expand `(fn* ~@(when name [name])
-                      ~@(map process-sig sigs))
-         fnexpr (thaw-form expand env)
-         args [fnexpr]]
-    (->
-      {:op :frozen-macro
-       :env env
-       :args args
-       :vsym vsym
-       :form form}
-      reconstruct-tag+form)))
+        expand-sig (fn [{:keys [conds-from-params-meta? pre post params body sig-form]}]
+                     (assert (vector? params))
+                     (let [gsyms (mapv (fn [a]
+                                         (if (= '& a)
+                                           a
+                                           (gensym "a")))
+                                       params)
+                           fn*-params (with-meta gsyms (meta params))
+                           assert-form (fn [p] `^::freeze (assert ~p))]
+                       `(~fn*-params
+                         ^::freeze
+                         (let [~@(mapcat (fn [param gsym]
+                                           (when-not (= '& param)
+                                             [param gsym]))
+                                         params
+                                         gsyms)]
+                           ~@(map assert-form pre)
+                           ~(let [body `^::freeze (check-if-empty-body
+                                                    (do ~@body)
+                                                    {:msg-fn (fn [_#]
+                                                               (str "This 'fn' body returns nil, "
+                                                                    "which does not agree with the expected type."))
+                                                     :blame-form ~sig-form
+                                                     :original-body ~body})]
+                              (if post
+                                `^::freeze (let [~'% ~body]
+                                             ~@(map assert-form post)
+                                             ~'%)
+                                body))))))]
+    `(fn* ~@(when name [name])
+          ~@(map expand-sig sigs))))
 
-(defn for-seq-bindings-info+body [{[fexpand] :args
-                                   [_ seq-forms] :form}]
-  (loop [seq-forms (seq seq-forms)
-         seq-bindings-info []
-         fexpand (-> fexpand let-body :ret)]
-    (if-not seq-forms
-      [seq-bindings-info (-> fexpand :args second :args first)]
-      (let [[binding expr & seq-forms] seq-forms
-            [seq-bindings-info fexpand]
-            (case binding
-              :let [(conj seq-bindings-info
-                          {:seq-op :let
-                           :bindings-info (let-bindings-info fexpand)})
-                    (-> fexpand let-body :ret)]
-              (:when :while) [(conj seq-bindings-info
-                                    {:seq-op binding 
-                                     :test (:test fexpand)})
-                              (:then fexpand)]
-              [(conj seq-bindings-info
-                     {:seq-op binding
-                      :expr (-> fexpand :args (nth 2))})
-               (-> fexpand :args first fn-methods first fn-method-body :ret)])]
-        (recur seq-forms
-               seq-bindings-info
-               fexpand)))))
+(defmacro check-for-seq [{:keys [expr]}]
+  (throw (Exception. "Cannot expand check-for-seq")))
 
-(defn emit-seq-binding-info [{:keys [seq-op] :as seq-binding-info}]
-  (case seq-op
-    :let (let [{:keys [bindings-info]} seq-binding-info]
-           [seq-op (emit-bindings-info (:b-form seq-binding-info) seq-binding-info)])
-    (:while :when) [seq-op (emit-form/emit-form (:test seq-binding-info))]
-    [seq-op (emit-form/emit-form (:expr seq-binding-info))]))
+(defmethod -expand-macro `check-for-seq [{:keys [expr]}]
+  `(rand-nth (seq expr)))
 
-(defn emit-seq-bindings-info [bs]
-  (into [] (mapcat emit-seq-binding-info) bs))
+(def clojure-core-for-expansions
+  {:reduce-based {:expand-macro 
+                  (fn [[_ seq-forms body-form :as form] _]
+                    (let [acc (gensym "acc")]
+                      (reduce
+                        (fn [body [expr binding]]
+                          (case binding
+                            :let `(let ~expr ~body)
+                            :when `(if ~expr ~body ~acc)
+                            :while `(if ~expr ~body (reduced ~acc))
+                            (if (keyword? binding)
+                              (throw (Exception. (str "Invalid 'for' keyword: " binding)))
+                              `(reduce (fn [~acc ~binding] ~body) ~acc ~expr))))
+                        `(concat ~acc (list ~body-form))
+                        (partition 2 (rseq seq-forms)))))
+                  :unexpand-macro
+                  (fn [form {:keys [original-form]}]
+                    (let [[seq-forms body] original-form]
+                      (loop [seq-forms seq-forms
+                             new-seq-forms []
+                             form form]
+                        (if (empty? seq-forms)
+                          (let [[_concat _ [_list_ body]] form]
+                            (list (first original-form)
+                                  new-seq-forms
+                                  body))
+                          (let [[binding _ & seq-forms] seq-forms
+                                [expr form] (case binding
+                                              :let (let [[_let_ expr form] form]
+                                                     [expr form])
+                                              (:when :while) (let [[_if_ expr form] form]
+                                                               [expr form])
+                                              (let [[_reduce_ [_fn_ _ form] _ expr] form]
+                                                [expr form]))]
+                            (recur seq-forms
+                                   (conj new-seq-forms binding expr)
+                                   form))))))}
+;  {:typed {:expand-macro 
+;           (fn [[_ seq-forms body-form :as form] {:keys [:clojure.core.typed/type-opts]}]
+;             (reduce
+;               (fn [body [expr binding]]
+;                 (->
+;                   (case binding
+;                     :let `(let ~expr ~body)
+;                     (:while :when) `(when ~expr ~body)
+;                     `(let [~binding ^::freeze (check-for-seq
+;                                                 {:expr ~expr
+;                                                  :binding ~binding})]
+;                        ~body))
+;                   (with-meta {::pre/freeze true})))
+;               `[^::freeze (check-for-expected
+;                             {:expr ~body-form
+;                              :expected ~(-> type-opts :expected)})]
+;               (partition 2 (rseq seq-forms))))
+})
 
-(defmethod -reconstruct-form 'clojure.core/for
-  [{[mform seq-forms body-form :as form] :form
-    [forexpr] :args
-    :as formap}]
-  (let [[seq-bindings-info body] (for-seq-bindings-info+body formap)
-        form (list mform
-                   (emit-seq-bindings-info seq-bindings-info)
-                   (emit-form/emit-form body))]
-    form))
+(defmethod -unexpand-macro 'clojure.core/for
+  [& args]
+  (apply (-> clojure-core-for-expansions :reduce-based :unexpand-macro) args))
 
-(defmethod -reconstruct-tag 'clojure.core/for
-  [_]
-  nil)
+(defmethod -expand-macro 'clojure.core/for
+  [& args]
+  (apply (-> clojure-core-for-expansions :reduce-based :expand-macro) args))
 
-(defmethod -freeze-macro 'clojure.core/for
-  [vsym [_ seq-forms body-form :as form] env]
-  (let [acc (gensym "acc")
-        out-form (reduce
-                   (fn [body [expr binding]]
-                     (case binding
-                       :let `(let ~expr ~body)
-                       :when `(if ~expr ~body ~acc)
-                       :while `(if ~expr ~body (reduced ~acc))
-                       (if (keyword? binding)
-                         (throw (Exception. (str "Invalid 'for' keyword: " binding)))
-                         `(reduce (fn [~acc ~binding] ~body) ~acc ~expr))))
-                   `(concat ~acc (list ~body-form))
-                   (partition 2 (rseq seq-forms)))
-        thawed (thaw-form `(let [~acc '()]
-                             ~out-form)
-                          env)
-        args [thawed]]
-    (->
-      {:op :frozen-macro
-       :env env
-       :args args
-       :vsym vsym
-       :form form}
-      reconstruct-tag+form)))
+(defn unexpand-ast [vsym ast]
+  (unexpand-macro (emit-form/emit-form ast) {:vsym vsym}))
 
 (defn freeze-macro [op form env]
   (let [^Var v (u/resolve-sym op env)
         _ (assert (var? v))
         sym (symbol (-> v .ns ns-name str)
-                    (-> v .sym str))]
-    (assoc (-freeze-macro sym form (assoc env :thread-bindings (get-thread-bindings)))
-           :macro v)))
+                    (-> v .sym str))
+        env (assoc env :thread-bindings (get-thread-bindings))
+        expanded-form (expand-macro form {:vsym sym})
+        _ (prn "expanded-form" expanded-form)
+        {:keys [tag] :as expanded} (thaw-form expanded-form env)
+        unexpanded-form (unexpand-macro (emit-form/emit-form expanded)
+                                        {:vsym sym :original-form form})]
+    {:op :frozen-macro
+     :form unexpanded-form
+     :unexpanded-form unexpanded-form
+     :expanded-form expanded-form
+     :macro v
+     :tag tag
+     :env env}))
 
 (defn macroexpand-1
   "If form represents a macro form or an inlineable function, returns its expansion,
@@ -997,6 +915,8 @@
                             #'ana/create-var    taj/create-var
                             ;#'ana/parse         parse
                             #'pre/pre-parse  jpre/pre-parse
+                            #'pre/expand-macro   expand-macro
+                            #'pre/unexpand-macro unexpand-macro
                             #'ana/var?          var?
                             #'*ns*              (the-ns (:ns env))}
                            (:bindings opts))
@@ -1099,7 +1019,7 @@
                                                                            freeze-macro?)}
                                  (loop [form form raw-forms []]
                                    (let [freeze? (when (seq? form)
-                                                   (ana/freeze-macro? (first form) env))
+                                                   (ana/freeze-macro? (first form) form env))
                                          mform (if freeze?
                                                  form
                                                  (ana/macroexpand-1 form env))]

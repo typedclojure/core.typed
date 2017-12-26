@@ -397,18 +397,22 @@
 
 (def frozen-macros #{#_'clojure.core/ns
                      'clojure.core/when
-                     'clojure.core/let
-                     'clojure.core/when-let
                      'clojure.core/when-not
+                     'clojure.core/let
+                     'clojure.core.typed.analyzer2.jvm/check-expected
+                     'clojure.core.typed.analyzer2.jvm/check-let-destructure
+                     'clojure.core.typed.analyzer2.jvm/check-if-empty-body
                      'clojure.core/if-let
+                     'clojure.core.typed/ann-form
+                     'clojure.core.typed.macros/ann-form
+                     'clojure.core.typed/tc-ignore
+                     'clojure.core.typed.macros/tc-ignore
+                     'clojure.core/when-let
                      'clojure.core/with-open
                      'clojure.core/assert
                      'clojure.core/fn
-                     'clojure.core/for
-                     'clojure.core.typed/ann-form
-                     'clojure.core.typed.macros/ann-form
-                     #_'clojure.core.typed/tc-ignore
-                     #_'clojure.core.typed.macros/tc-ignore})
+                     #_'clojure.core/for
+                     })
 
 ;; (All [x ...] [-> '{(Var x) x ...})])
 (defn thread-bindings []

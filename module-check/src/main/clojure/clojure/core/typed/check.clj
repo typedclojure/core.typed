@@ -645,514 +645,144 @@
                              (r/ret r/-nil)
                              expected)))))
 
-(add-invoke-frozen-method 'clojure.core/ns
-  [_ {:keys [form env] :as expr} expected]
-  (assoc expr
-         u/expr-type (below/maybe-check-below
-                       (r/ret r/-nil
-                              (fo/-FS fl/-bot fl/-top))
-                       expected)))
+(defmulti typing-rule (fn [{:keys [vsym]}] vsym))
 
-(defn frozen-tc-ignore [{:keys [form env] :as expr} expected]
-  (assoc expr
-         u/expr-type (below/maybe-check-below
-                       (r/ret r/-any)
-                       expected)))
+(defmethod typing-rule `jana2/check-expected
+  [{[_ e opts :as form] :form, :keys [expected check]}]
+  (check e (when expected
+             (update expected :opts 
+                     ;; earlier messages override later ones
+                     #(merge
+                        (select-keys opts [:blame-form :msg-fn])
+                        %)))))
 
-(add-invoke-frozen-method 'clojure.core.typed/tc-ignore
-  [_ expr expected]
-  (frozen-tc-ignore expr expected))
+(defmethod typing-rule `jana2/check-if-empty-body
+  [{[_ [_do_ & body :as e] opts :as form] :form, :keys [expected check]}]
+  ;(prn "jana2/check-if-empty-body")
+  (check e (when expected
+             (if (empty? (:original-body opts))
+               (update expected :opts 
+                       ;; earlier messages override later ones
+                       #(merge
+                          (select-keys opts [:blame-form :msg-fn])
+                          %))
+               expected))))
 
-(add-invoke-frozen-method 'clojure.core.typed.macros/tc-ignore
-  [_ expr expected]
-  (frozen-tc-ignore expr expected))
+(defn ann-form-typing-rule 
+  [{[_ e ty :as form] :form, :keys [expected check subtype? expected-error]}]
+  (let [_ (when expected
+            (when-not (subtype? ty (:type expected))
+              (expected-error ty (:type expected)
+                              {:expected (update expected :opts
+                                                 ;; prefer earlier blame-form
+                                                 #(merge {:blame-form form}
+                                                         %))})))]
+    (check e (merge expected {:type ty}))))
 
-(defn frozen-ann-form
-  [{:keys [form env] :as expr} expected]
-  ;(prn "frozen" 'clojure.core.typed/ann-form)
-  (let [[_ expr-form tsyn & more] form
-        _ (assert (not more) "Too many arguments to ann-form")
-        parsed-t (binding [vs/*current-env* env
-                           prs/*parse-type-in-ns* (cu/expr-ns expr)]
-                   (prs/parse-type tsyn))
-        body (impl/impl-case
-               :clojure (ana-clj/thaw-form expr-form env)
-               :cljs (assert nil "TODO"))
-        cbody (check body (or (when expected
-                                (assoc expected :t parsed-t))
-                              (r/ret parsed-t
-                                     ;; TODO let users add expected filters
-                                     (fo/-FS fl/-top fl/-top)
-                                     obj/-empty
-                                     (r/-flow fl/-top))))
-        body-out-form (ast-u/emit-form-fn cbody)]
-    (assoc expr
-           :form `(~(first form) ~body-out-form ~tsyn)
-           u/expr-type (binding [vs/*current-expr* expr
-                                 vs/*current-env* env]
-                         (below/maybe-check-below
-                           (u/expr-type cbody)
-                           expected)))))
+(defmethod typing-rule `t/ann-form [& args] (apply ann-form-typing-rule args))
+(defmethod typing-rule 'clojure.core.typed.macros/ann-form [& args] (apply ann-form-typing-rule args))
 
-(add-invoke-frozen-method 'clojure.core.typed/ann-form
-  [_ expr expected]
-  (frozen-ann-form expr expected))
+(defn tc-ignore-typing-rule 
+  [{:keys [form expected maybe-check-expected]}]
+  {:form form
+   :expr-type (maybe-check-expected
+                {:type `t/Any}
+                expected)})
 
-(add-invoke-frozen-method 'clojure.core.typed.macros/ann-form
-  [_ expr expected]
-  (frozen-ann-form expr expected))
+(defmethod typing-rule `t/tc-ignore [& args] (apply tc-ignore-typing-rule args))
+(defmethod typing-rule 'clojure.core.typed.macros/tc-ignore [& args] (apply tc-ignore-typing-rule args))
 
-(add-invoke-frozen-method 'clojure.core/let
-  [vsym {:keys [form env args] :as expr} expected]
-  (let [[bindings-info body] args
-        is-reachable (atom true)
-        [env penv cbindings-info binding-names]
-        (reduce
-          (fn [[env penv cbindings-info binding-names] {:keys [b-form init d-bindings]}]
-            {:pre [@is-reachable
-                   (map? env)
-                   (lex/PropEnv? penv)
-                   (set? binding-names)
-                   (vector? d-bindings)
-                   (map? init)]
-             :post [((con/maybe-reduced-c? (con/hvector-c? map? lex/PropEnv? vector? set?)) %)]}
-            (let [;; FIXME this check is duplicated when we walk through destructuring.
-                  cinit init #_(var-env/with-lexical-env penv
-                                 (check init))
-                  ;; walk through destructuring of `b-form` to update env/penv
-                  [env penv cd-bindings]
-                  (reduce (fn [[env penv d-bindings] expr]
-                            {:pre [@is-reachable
-                                   (map? env)
-                                   (lex/PropEnv? penv)
-                                   (= :binding (:op expr))
-                                   (set? d-bindings)]
-                             :post [((con/maybe-reduced-c? (con/hvector-c? map? lex/PropEnv? set?)) %)]}
-                            (let [{unhygienic-name :form, nme :name, :keys [env]
-                                   :as cexpr}
-                                  (var-env/with-lexical-env penv
-                                    (check expr))
-                                  ;; BEGIN SIDE-EFFECT! must go before `maybe-reduced` calculation
-                                  penv (let/update-env penv nme (u/expr-type cexpr) is-reachable)
-                                  ;; END SIDE-EFFECT!
-                                  maybe-reduced (if @is-reachable identity reduced)]
-                              (maybe-reduced
-                                [env #_(assoc-in env [:locals unhygienic-name] (dissoc cexpr :env))
-                                 penv
-                                 (conj d-bindings cexpr)])))
-                          [env penv #{}]
-                          d-bindings)
-                  cd-bindings (into cd-bindings (subvec d-bindings (count cd-bindings)))
-                  _ (assert (= (count cd-bindings) (count d-bindings)))
-                  maybe-reduced (if @is-reachable identity reduced)]
-              (maybe-reduced
-                [env
-                 penv 
-                 (conj cbindings-info {:b-form b-form
-                                       :init cinit
-                                       :d-bindings cd-bindings})
-                 (into binding-names (map :name) d-bindings)])))
-          [env (lex/lexical-env) [] #{}]
-          bindings-info)
-        _ (assert (map? env))
-        _ (assert (lex/PropEnv? penv))
-        _ (assert ((con/vec-c? map?) cbindings-info))
-        ;; append any skipped bindings
-        cbindings-info (into cbindings-info (subvec bindings-info (count cbindings-info)))
-        _ (assert (= (count cbindings-info) (count bindings-info)))]
-      (cond
-        (not @is-reachable) (let [ret (or expected (r/ret (c/Un)))
-                                  cargs [cbindings-info body]]
-                              (-> expr
-                                  (assoc u/expr-type ret
-                                         :args cargs)
-                                  jana2/reconstruct-tag+form))
+(defmethod typing-rule :default
+  [{:keys [expanded-form expected check]}]
+  (check expanded-form expected))
 
-        :else
-        (let [cbody (var-env/with-lexical-env penv
-                      (binding [vs/*current-expr* body]
-                        (check body expected)))
-              unshadowed-ret (let/erase-objects binding-names (u/expr-type cbody))
-              cargs [cbindings-info cbody]]
-          (-> expr 
-              (assoc u/expr-type unshadowed-ret
-                     :args cargs)
-              jana2/reconstruct-tag+form)))))
-
-(add-invoke-frozen-method 'clojure.core/fn
-  [vsym {:keys [form args env] :as expr} expected]
-  (let [[fnexpr] args
-        cfnexpr (check fnexpr expected)
-        cargs [cfnexpr]]
-    (-> expr
-        (assoc u/expr-type (u/expr-type cfnexpr)
-               :args cargs)
-        jana2/reconstruct-tag+form)))
-
-(add-invoke-frozen-method 'clojure.core/when
-  [vsym {:keys [form args env] :as expr} expected]
-  (let [[wexpr] args
-        cwexpr (check wexpr expected)
-        cargs [cwexpr]]
-    (-> expr
-        (assoc u/expr-type (u/expr-type cwexpr)
-               :args cargs)
-        jana2/reconstruct-tag+form)))
-
-(add-invoke-frozen-method 'clojure.core/when-let
-  [vsym {:keys [form args env] :as expr} expected]
-  (let [[wlet] args
-        cwlet (check wlet expected)
-        cargs [cwlet]]
-    (-> expr
-        (assoc u/expr-type (u/expr-type cwlet)
-               :args cargs)
-        jana2/reconstruct-tag+form)))
-
-(add-invoke-frozen-method 'clojure.core/if-let
-  [vsym {:keys [form args env] :as expr} expected]
-  (let [[ilet] args
-        cilet (check ilet expected)
-        cargs [cilet]]
-    (-> expr
-        (assoc u/expr-type (u/expr-type cilet)
-               :args cargs)
-        jana2/reconstruct-tag+form)))
-
-(add-invoke-frozen-method 'clojure.core/with-open
-  [vsym {:keys [form args env] :as expr} expected]
-  (let [[wopen] args
-        cwopen (check wopen expected)
-        cargs [cwopen]]
-    (-> expr
-        (assoc u/expr-type (u/expr-type cwopen)
-               :args cargs)
-        jana2/reconstruct-tag+form)))
-
-(add-invoke-frozen-method 'clojure.core/assert
-  [vsym {:keys [form args env] :as expr} expected]
-  (let [[erase-assert? wopen] args
-        cwopen (check wopen expected)
-        cargs [erase-assert? cwopen]]
-    (-> expr
-        (assoc u/expr-type (u/expr-type cwopen)
-               :args cargs)
-        jana2/reconstruct-tag+form)))
-
-(add-invoke-frozen-method 'clojure.core/when-not
-  [vsym {:keys [form args env] :as expr} expected]
-  (let [[wnot-expand] args
-        cwnot-expand (check wnot-expand expected)
-        cargs [cwnot-expand]]
-    (-> expr
-        (assoc u/expr-type (u/expr-type cwnot-expand)
-               :args cargs)
-        jana2/reconstruct-tag+form)))
-(comment
-
-;; rewrite to 
-(for [a [1 2 3]
-      b ['a 'b 'c]
-      :let [d 1]
-      :when a
-      :while b]
-  (+ a d))
-
-(for [a [1 2 3]
-      b [3 4 5]
-      c [5 6 7]]
-  (+ a b))
-
-(for [a 1
-      b [3 4 5]
-      c [5 6 7]]
-  (+ a b))
-
-;(deftype-rule ::for-destructure-seq
-;  [{:keys [expected check parse unparse]}
-;   {{:keys [binding]} :opts
-;    {:keys [expr]} :exprs}]
-;  (let [ (check expr)
-;  (if (seqable? (check expr))
-;    (do good
-;        (unify t (Seqable x)))
-;    throw-error)
-;  (when expected
-;    (solve-subtype
-;      {:fresh [x]
-;       :out x}
-;      ~expected
-;      (t/U (t/Seqable x) nil)))
-;  (if (seqable? (check expr))
-;    (do good
-;        (unify t (Seqable x)))
-;    throw-error))
-
-(deftype-rule clojure.core/for
-  [{:keys [expected check solve-subtype delayed-error internal-error]}
-   [_ seq-forms body-form :as original-form]]
-  (let [{memt :x :as add-inner-expected?}
-        (when expected
-          (solve-subtype
-            '[x]
-            (fn [x]
-              [`(t/Seq ~x) (:type expected)])))
-        _ (when expected
-            (when-not add-inner-expected?
-              (delayed-error "for comprehension return type is incompatible with expected type"
-                             :expected (:type expected)
-                             :actual   `(t/Seq t/Any))))
-        out-form (reduce
-                   (fn [body [expr binding]]
-                     (case binding
-                       :let `^:freeze (let ~expr ~body)
-                       (:while :when) `^:freeze (when ~expr ~body)
-                       `^:freeze
-                       (let [~binding (t/type-rule
-                                        ::for-destructure-seq
-                                        {:opts {:binding ~binding}
-                                         :exprs {:expr ~expr}})]
-                         ~body)))
-                   `[~(if add-inner-expected? `^:freeze (t/ann-form ~body-form ~memt) body-form)]
-                   (partition 2 (rseq seq-forms)))
-        {:keys [expr-type form]} (check out-form)
-
-        {res-memt :x :as solved?} (solve-subtype '[x]
-                                                 (fn [x]
-                                                   [t `(t/U '[~x] nil)]))
-        _ (when-not solved?
-            (internal-error "Something went wrong in for comprehension typing rule"
-                            :expected `(t/U '[t/Any] nil)
-                            :actual   `t))
-
-        new-form (loop [seq-forms (seq seq-forms)
-                        new-seq-forms []
-                        form form]
-                   (if (empty? seq-forms)
-                     (list (first original-form)
-                           new-seq-forms
-                           (if add-inner-expected?
-                             (second form)
-                             form))
-                     (let [[binding _ & seq-forms] seq-forms
-                           [new-seq-forms form]
-                           (case binding
-                             :let (let [[_let_ expr body] form]
-                                    [(conj new-seq-forms :let expr) body])
-                             (:while :when) (let [[_when_ expr body] form]
-                                              [(conj new-seq-forms binding expr) body])
-                             (let [[_let_ [binding [_type-rule_ _ {{:keys [expr]} :expr}]] body] form]
-                               [(conj new-seq-forms binding expr) body]))]
-                       (recur seq-forms
-                              new-seq-forms
-                              form))))]
-    {:form new-form
-     :expr-type `{:type (t/Seq ~res-memt)
-                  :filters {:then '~tt
-                            :else '~tt}
-                  :object '~empty
-                  :flow '~tt}}))
-
-(let [a 1]
-  )
-;=>
-(let [a (custom-type-rule
-          ::let-destructure-rhs
-          {:syntax [a]
-           :exprs [1]})]
-  )
-);end comment
-
-(defn TCResult->map [ret]
-  {:pre [(r/TCResult? ret)]}
-  {:type (prs/unparse-type (:t ret))
-   :filters (prs/unparse-filter-set (:fl ret))
-   :object (prs/unparse-object (:o ret))
-   :flow (prs/unparse-filter (-> ret :flow :normal))})
-                                   
-(defn map->TCResult [expected]
-  {:pre [(map? expected)]
-   :post [(r/TCResult? %)]}
-  (r/ret (if-let [[_ t] (find expected :type)]
-           (prs/parse-type t)
-           (throw (Exception. "Must provide type")))
-         (if-let [[_ fl] (find expected :filters)]
-           (fo/-FS
-             (if-let [[_ f] (find fl :then)]
-               (prs/parse-filter f)
-               fl/-top)
-             (if-let [[_ f] (find fl :else)]
-               (prs/parse-filter f)
-               fl/-top))
-           (fo/-simple-filter))
-         (if-let [[_ o] (find expected :object)]
-           (prs/parse-object o)
-           obj/-empty)
-         (r/-flow
-           (if-let [[_ flow] (find expected :flow)]
-             (prs/parse-filter flow)
-             fl/-top))))
-
-(defn for-typing-rule [{[_ seq-forms body-form :as original-form] :form
-                        :keys [expected check solve-subtype delayed-error internal-error]}]
-  (let [{memt :x :as add-inner-expected?}
-        (when expected
-          (solve-subtype
-            '[x]
-            (fn [x]
-              [`(t/Seq ~x) (:type expected)])))
-        _ (when expected
-            (when-not add-inner-expected?
-              (delayed-error "for comprehension return type is incompatible with expected type"
-                             :expected (:type expected)
-                             :actual   `(t/Seq t/Any))))
-        out-form (reduce
-                   (fn [body [expr binding]]
-                     (-> 
-                       (case binding
-                         :let `(let ~expr ~body)
-                         (:while :when) `(when ~expr ~body)
-                         `(let [~binding (rand-nth (seq ~expr))]
-                            ~body))
-                       (with-meta {::pre/freeze true})))
-                   `[~(if add-inner-expected? `^::pre/freeze (t/ann-form ~body-form ~memt) body-form)]
-                   (partition 2 (rseq seq-forms)))
-        _ (prn "out-form" out-form)
-        {:keys [expr-type form]} (check out-form)
-        _ (prn "checked form" form)
-        _ (prn "expr-type" expr-type)
-        _ (assert (map? expr-type))
-        {res-memt :x :as solved?} (solve-subtype '[x]
-                                                 (fn [x]
-                                                   [(:type expr-type) `(t/U '[~x] nil)]))
-        _ (when-not solved?
-            (internal-error "Something went wrong in for comprehension typing rule"
-                            :expected `(t/U '[t/Any] nil)
-                            :actual   `t))
-        new-form (loop [seq-forms (seq seq-forms)
-                        new-seq-forms []
-                        form form]
-                   (if (empty? seq-forms)
-                     (list (first original-form)
-                           new-seq-forms
-                           (let [[form :as _singleton-vec_] form]
-                             (if add-inner-expected?
-                               (second form)
-                               form)))
-                     (let [[binding _ & seq-forms] seq-forms
-                           [new-seq-forms form]
-                           (case binding
-                             :let (let [[_let_ expr body] form]
-                                    [(conj new-seq-forms :let expr) body])
-                             (:while :when) (let [[_when_ expr body] form]
-                                              [(conj new-seq-forms binding expr) body])
-                             (let [[_let_ [binding [_rand-nth_ [_seq_ expr]]] body] form]
-                               [(conj new-seq-forms binding expr) body]))]
-                       (recur seq-forms
-                              new-seq-forms
-                              form))))]
-    (prn "new-form" new-form)
-    (prn "res-memt" res-memt)
-    {:form new-form
-     :expr-type `{:type (t/Seq ~res-memt)
-                  :filters {:then ~'tt
-                            :else ~'ff}
-                  :object ~'empty
-                  :flow ~'tt}}))
-
-(add-invoke-frozen-method 'clojure.core/for
-  [vsym {:keys [form args env] :as expr} expected]
-  (let [rule-args {:expected (some-> expected TCResult->map)
-                   :form form
+(defn invoke-typing-rule
+  [vsym {:keys [expanded-form unexpanded-form args env] :as expr} expected]
+  (let [maybe-map->TCResult #(some-> % cu/map->TCResult)
+        subtype? (fn [s t]
+                   (let [s (prs/parse-type s)
+                         t (prs/parse-type t)]
+                     (sub/subtype? s t)))
+        solve-subtype (fn [vs f]
+                        {:pre [(every? symbol? vs)]}
+                        (let [gvs (map gensym vs)
+                              syns (apply f gvs)
+                              [lhs rhs] (tvar-env/with-extended-tvars gvs
+                                          (mapv prs/parse-type syns))
+                              substitution
+                              (cgen/handle-failure
+                                (cgen/infer
+                                  (zipmap gvs (repeat r/no-bounds))
+                                  {}
+                                  [lhs]
+                                  [rhs]
+                                  r/-any))]
+                          (when substitution
+                            (into {}
+                                  (comp (filter (comp crep/t-subst? val))
+                                        (map (fn [[k v]]
+                                               [k (:type v)])))
+                                  (select-keys substitution gvs)))))
+        rule-args {:vsym vsym
+                   :expected (some-> expected cu/TCResult->map)
+                   :expanded-form expanded-form
+                   :unexpanded-form unexpanded-form
+                   :form unexpanded-form
+                   :maybe-check-expected (fn [actual expected]
+                                           {:pre [(map? actual)
+                                                  ((some-fn nil? map?) expected)]
+                                            :post [(map? %)]}
+                                           (->
+                                             (below/maybe-check-below
+                                               (cu/map->TCResult actual)
+                                               (maybe-map->TCResult expected))
+                                             cu/TCResult->map))
                    :check (fn check-fn
-                            ([form] (check-fn form {}))
-                            ([form {:keys [expected] :as opt}]
-                             {:pre [(map? opt)
-                                    ((some-fn nil? map?) expected)]}
-                             (let [ret (some-> expected map->TCResult)
+                            ([form] (check-fn form nil))
+                            ([form expected]
+                             {:pre [((some-fn nil? map?) expected)]}
+                             (let [ret (some-> expected cu/map->TCResult)
                                    ;; TODO do we want to accept an :env option in this function?
                                    expr (ana-clj/thaw-form form env)
                                    cexpr (check expr ret)]
                                {:form (ast-u/emit-form-fn cexpr)
-                                :expr-type (TCResult->map (u/expr-type cexpr))})))
-                   :solve-subtype (fn [vs f]
-                                    {:pre [(every? symbol? vs)]}
-                                    (let [gvs (map gensym vs)
-                                          syns (apply f gvs)
-                                          [lhs rhs] (tvar-env/with-extended-tvars gvs
-                                                      (mapv prs/parse-type syns))
-                                          substitution
-                                          (cgen/handle-failure
-                                            (cgen/infer
-                                              (zipmap gvs (repeat r/no-bounds))
-                                              {}
-                                              [lhs]
-                                              [rhs]
-                                              r/-any))]
-                                      (when substitution
-                                        (into {}
-                                              (comp (filter (comp crep/t-subst? val))
-                                                    (map (fn [[k v]]
-                                                           [k (:type v)])))
-                                              (select-keys substitution gvs)))))
-                   :delayed-error (fn [s & args]
-                                    ;; TODO args
-                                    (err/tc-delayed-error s))
-                   :internal-error (fn [s & args]
+                                :expr-type (cu/TCResult->map (u/expr-type cexpr))})))
+                   :solve-subtype solve-subtype
+                   :subtype? subtype?
+                   :expected-error (fn [s t opts]
+                                     (let [opts (update opts :expected maybe-map->TCResult)]
+                                       (apply cu/expected-error (prs/parse-type s) (prs/parse-type t)
+                                              (apply concat opts))))
+                   :delayed-error (fn [s opts]
+                                    (let [opts (update opts :expected maybe-map->TCResult)]
+                                      (apply err/tc-delayed-error s (apply concat opts))))
+                   :internal-error (fn [s opts]
                                      ;; TODO args
-                                     (err/int-error s))}
+                                     (let [opts (update opts :expected maybe-map->TCResult)]
+                                       (apply err/int-error s (apply concat opts))))}
 
         {out-expr-type :expr-type
          out-form :form}
-        (for-typing-rule rule-args)]
-    (-> (jana2/-freeze-macro vsym out-form env)
-        (assoc u/expr-type (map->TCResult out-expr-type)))))
+        (typing-rule rule-args)
+        unexpanded-form (jana2/unexpand-macro out-form {:vsym vsym
+                                                        :original-form unexpanded-form})
+        ]
+    {:op :frozen-macro
+     :env env
+     :form unexpanded-form
+     :unexpanded-form unexpanded-form
+     :expanded-form out-form
+     :macro (:macro expr)
+     u/expr-type (cu/map->TCResult out-expr-type)}))
 
-;(add-invoke-frozen-method 'clojure.core/for
-;  [vsym {:keys [form args env] :as expr} expected]
-;  (let [[seq-forms body] form
-;
-;
-;
-;        [penv cseq-bindings-info cbody]
-;        (loop [penv (lex/lexical-env)
-;               seq-bindings-info (seq seq-bindings-info)
-;               cseq-bindings-info []]
-;            (if-not seq-bindings-info
-;              [env penv cseq-bindings-info
-;               (var-env/with-lexical-env penv
-;                 (check body))]
-;              (let [[binding expr & seq-forms] seq-forms
-;                    [seq-bindings-info fexpand]
-;                    (case binding
-;                      :let `(let [~binding (custom-type-checking
-;                                             ::for-seq-check-and-member
-;                                             [~binding ~expr])]
-;                              )
-;                      (:when :while)
-;											(or (cgen/unify-or-nil
-;														{:fresh [x]
-;														 :out x}
-;														coll-t
-;														(c/Un
-;															r/-nil
-;															(c/RClass-of Seqable [x])))
-;													;; if we get here, presumably there was some previous error,
-;													;; since we already checked the arguments under (U nil (Seqable Any))
-;													r/-error))
-;										]
-;                (recur 
-;        cwnot-expand (check wnot-expand expected)
-;        cargs [cwnot-expand]]
-;    (-> expr
-;        (assoc u/expr-type (u/expr-type cwnot-expand)
-;               :args cargs)
-;        jana2/reconstruct-tag+form)))
+(defmethod invoke-frozen :default
+  [vsym {:keys [expanded-form] :as expr} expected]
+  (check expanded-form expected))
 
 (add-check-method :frozen-macro
   [{:keys [macro] :as expr} & [expected]]
   (binding [vs/*current-expr* expr]
-    (invoke-frozen (coerce/var->symbol macro) expr expected)))
+    (invoke-typing-rule (coerce/var->symbol macro) expr expected)))
 
 (defn swap!-dummy-arg-expr [env [target-expr & [f-expr & args]]]
   (assert f-expr)
