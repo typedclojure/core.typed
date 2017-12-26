@@ -143,6 +143,7 @@
              [-> Number]))
 
 (deftest fn-test
+  (is-tc-e (clojure.core/fn [a]))
   (is-tc-e (clojure.core/fn [a] a))
   (is-tc-e (clojure.core/fn [a]
              {:pre [(-> a identity)]}
@@ -150,8 +151,8 @@
   (is-tc-e (clojure.core/fn [a]
              {:post [(symbol? %)]}
              a))
-  (is-tc-e (clojure.core/fn [a])
-           [Number -> Number])
+  (is-tc-err (clojure.core/fn [a])
+             [Number -> Number])
   )
 
 (deftest for-test

@@ -72,6 +72,7 @@
 
 (defn splice-checked-body-forms
   [[_check-if-empty-body_ new-do-body {:keys [original-body]} :as checked-body]]
+  {:pre [(= 3 (count checked-body))]}
   (splice-body-forms original-body new-do-body))
 
 (defmacro check-let-destructure [{:keys [expression]}] expression)
@@ -406,10 +407,13 @@
 
 (defmethod -unexpand-macro 'clojure.core/fn
   [[_fn*_ & sigs] {:keys [original-form]}]
-  (let [name (first sigs)
-        sigs (if (symbol? sigs) (next sigs) sigs)
+  (let [name (let [s (first sigs)]
+               (when (symbol? s)
+                 s))
+        sigs (if (symbol? name) (next sigs) sigs)
         {original-sigs :sigs, :keys [single-arity-syntax?]} (parse-fn-sigs (next original-form))
         unexpand-sig (fn [[params [_let_ dbindings & body]] old-sig]
+                       {:pre [(map? old-sig)]}
                        (let [rest-arg? (boolean
                                          (when (<= 2 (count params))
                                            (= '& (nth params (- count 2)))))
@@ -437,16 +441,15 @@
                                                   (merge (meta params)
                                                          (when (:conds-from-params-meta? old-sig)
                                                            pre-post-meta-map)))]
-                         (prn "body" body)
                          `(~fn-params
                             ~@(when-not (:conds-from-params-meta? old-sig)
                                 (when (seq pre-post-meta-map)
                                   [pre-post-meta-map]))
-                            ~@(splice-checked-body-forms body))))]
+                            ~@(splice-checked-body-forms body))))
+        unexpanded-sigs (map unexpand-sig sigs original-sigs)]
     (list* (first original-form)
-           (concat (when name [name])
-                   ((if single-arity-syntax? first identity)
-                    (map unexpand-sig sigs original-sigs))))))
+           (concat (when (symbol? name) [name])
+                   ((if single-arity-syntax? first identity) unexpanded-sigs)))))
 
 (defmethod -expand-macro 'clojure.core/fn
   [[_ & sigs :as form] _]
@@ -563,7 +566,6 @@
                     (-> v .sym str))
         env (assoc env :thread-bindings (get-thread-bindings))
         expanded-form (expand-macro form {:vsym sym})
-        _ (prn "expanded-form" expanded-form)
         {:keys [tag] :as expanded} (thaw-form expanded-form env)
         unexpanded-form (unexpand-macro (emit-form/emit-form expanded)
                                         {:vsym sym :original-form form})]
