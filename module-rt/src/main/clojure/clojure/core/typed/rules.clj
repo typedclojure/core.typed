@@ -37,7 +37,7 @@
            ;; the expanded form of the current form
            :expanded-form t/Any
            ;; the unexpanded form (to be type checked)
-           :form t/Any, :unexpanded-form t/Any
+           :form (t/Seq t/Any), :unexpanded-form (t/Seq t/Any)
            ;; (fn [actual maybe-expected] ..)
            ;; if provided, checks actual is compatible with the expected type
            :maybe-check-expected [ExprType (t/U nil ExprType) -> ExprType]
