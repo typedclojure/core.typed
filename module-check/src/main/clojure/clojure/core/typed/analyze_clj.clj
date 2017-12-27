@@ -402,6 +402,7 @@
                      'clojure.core.typed.analyzer2.jvm/check-expected
                      'clojure.core.typed.analyzer2.jvm/check-let-destructure
                      'clojure.core.typed.analyzer2.jvm/check-if-empty-body
+                     'clojure.core.typed.analyzer2.jvm/check-for-expected
                      'clojure.core/if-let
                      'clojure.core.typed/ann-form
                      'clojure.core.typed.macros/ann-form
@@ -411,7 +412,7 @@
                      'clojure.core/with-open
                      'clojure.core/assert
                      'clojure.core/fn
-                     #_'clojure.core/for
+                     'clojure.core/for
                      })
 
 ;; (All [x ...] [-> '{(Var x) x ...})])

@@ -157,5 +157,17 @@
 
 (deftest for-test
   (is-tc-e (clojure.core/for [a [1 2]] a))
+  (is-tc-e (clojure.core/for [a [1 2]] a) (Seqable Number))
+  ;; FIXME improve error
+  (is-tc-err (clojure.core/for [a [1 2]] a) Number)
+  ;; FIXME improve error
+  (is-tc-e (clojure.core/for [a [1 2]] a) nil)
   (is-tc-e (clojure.core/for [a [1 2] b [2 3]] [a b]))
-  (is-tc-e (clojure.core/for [a [1 2] b [2 3]] [a b]) (Seq '[Num Num])))
+  (is-tc-e (clojure.core/for [a [1 2] b [2 3]] [a b]) (Seq '[Num Num]))
+  ;FIXME use t/fn instead of fn*
+  ;; propagates expected type to body
+  (is-tc-e (clojure.core/for [a [1 2] b [2 3]] (fn* [c] (+ c a b)))
+           (Seq [Num -> Num]))
+  ;; example of bad type propagating to body
+  (is-tc-err (clojure.core/for [a [1 2] b [2 3]] (fn* [c] (+ c a b))) (Seq [nil -> Num]))
+)
