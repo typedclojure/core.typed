@@ -57,9 +57,9 @@
 (defmulti -unexpand-macro (fn [form {:keys [vsym]}] vsym))
 
 (def expand-macro -expand-macro)
-(defn unexpand-macro [form opts]
+(defn unexpand-macro [form {:keys [original-form] :as opts}]
   (let [out (-unexpand-macro form opts)]
-    (vary-meta out #(merge (meta form) %))))
+    (vary-meta out #(merge (meta original-form) %))))
 
 (defn do-form? [b]
   (and (seq? b) (= 'do (first b))))
@@ -489,8 +489,40 @@
 (defmacro check-for-seq [{:keys [expr]}]
   (throw (Exception. "Cannot expand check-for-seq")))
 
-(defmethod -expand-macro `check-for-seq [{:keys [expr]}]
-  `(rand-nth (seq expr)))
+(defmethod -expand-macro `check-for-seq [[_ {:keys [expr]} :as form] _]
+  `(rand-nth (seq ~expr)))
+
+(defmethod -unexpand-macro `check-for-seq [[_rand-nth_ [_seq_ expr]] {:keys [original-form]}]
+  (let [[mop opt] original-form]
+    (list mop (assoc opt :expr expr))))
+
+(defmacro expected-as [s body]
+  body)
+
+(defmethod -expand-macro `expected-as [[_ s body] _]
+  `(let* [~s 'nil] ~body))
+
+(defmethod -unexpand-macro `expected-as [[_let*_ [s _] body] {:keys [original-form]}]
+  (list (first original-form) s body))
+
+(defmacro gather-for-return-type [ret]
+  (throw (Exception. "gather-for-return-type Not for expansion")))
+
+(defmethod -expand-macro `gather-for-return-type [[_ ret] _]
+  ret)
+
+(defmethod -unexpand-macro `gather-for-return-type [ret {:keys [original-form]}]
+  (list (first original-form) ret))
+
+(defmacro check-for-expected [{:keys [expr expected-local]}]
+  (throw (Exception. "check-for-expected Not for expansion")))
+
+(defmethod -expand-macro `check-for-expected [[_ {:keys [expr expected-local]}] _]
+  expr)
+
+(defmethod -unexpand-macro `check-for-expected [expr {:keys [original-form]}]
+  (let [[mop opt] original-form]
+    (list mop (assoc opt :expr expr))))
 
 (def clojure-core-for-expansions
   {:reduce-based {:expand-macro 
@@ -498,13 +530,15 @@
                     (let [acc (gensym "acc")]
                       (reduce
                         (fn [body [expr binding]]
-                          (case binding
-                            :let `(let ~expr ~body)
-                            :when `(if ~expr ~body ~acc)
-                            :while `(if ~expr ~body (reduced ~acc))
-                            (if (keyword? binding)
-                              (throw (Exception. (str "Invalid 'for' keyword: " binding)))
-                              `(reduce (fn [~acc ~binding] ~body) ~acc ~expr))))
+                          (with-meta
+                            (case binding
+                              :let `(let ~expr ~body)
+                              :when `(if ~expr ~body ~acc)
+                              :while `(if ~expr ~body (reduced ~acc))
+                              (if (keyword? binding)
+                                (throw (Exception. (str "Invalid 'for' keyword: " binding)))
+                                `(reduce (fn [~acc ~binding] ~body) ~acc ~expr)))
+                            {::freeze true}))
                         `(concat ~acc (list ~body-form))
                         (partition 2 (rseq seq-forms)))))
                   :unexpand-macro
@@ -529,32 +563,62 @@
                             (recur seq-forms
                                    (conj new-seq-forms binding expr)
                                    form))))))}
-;  {:typed {:expand-macro 
-;           (fn [[_ seq-forms body-form :as form] {:keys [:clojure.core.typed/type-opts]}]
-;             (reduce
-;               (fn [body [expr binding]]
-;                 (->
-;                   (case binding
-;                     :let `(let ~expr ~body)
-;                     (:while :when) `(when ~expr ~body)
-;                     `(let [~binding ^::freeze (check-for-seq
-;                                                 {:expr ~expr
-;                                                  :binding ~binding})]
-;                        ~body))
-;                   (with-meta {::pre/freeze true})))
-;               `[^::freeze (check-for-expected
-;                             {:expr ~body-form
-;                              :expected ~(-> type-opts :expected)})]
-;               (partition 2 (rseq seq-forms))))
-})
+   :typed {:expand-macro 
+           (fn [[_ seq-forms body-form :as form] _]
+             (let [expg (gensym 'expected)
+                   ret (reduce
+                         (fn [body [expr binding]]
+                           (with-meta
+                             (case binding
+                               :let `(let ~expr ~body)
+                               (:while :when) `(when ~expr ~body)
+                               (if (keyword? binding)
+                                 (throw (Exception. (str "Invalid 'for' keyword: " binding)))
+                                 `(let [~binding ^::freeze (check-for-seq
+                                                             {:expr ~expr
+                                                              :binding ~binding})]
+                                    ~body)))
+                             {::freeze true}))
+                         `[^::freeze (check-for-expected
+                                       {:expr ~body-form
+                                        ;; FIXME should we blame an outer form (if it exists)
+                                        ;; if the expected type is incompatible with Seq?
+                                        :form ~form
+                                        :expected-local ~expg})]
+                         (partition 2 (rseq seq-forms)))]
+               `^::freeze
+                (expected-as ~expg
+                  ^::freeze (gather-for-return-type ~ret))))
+           :unexpand-macro
+           (fn [form {:keys [original-form]}]
+             (let [[mop original-seq-forms _] original-form
+                   [_expected-as_ _ [_gather-for-return-type_ form]] form]
+               (loop [original-seq-forms original-seq-forms
+                      seq-forms []
+                      form form]
+                 (if (empty? original-seq-forms)
+                   (let [[[_check-for-expected {form :expr}]] form]
+                     (list mop seq-forms form))
+                   (let [[binding _ & original-seq-forms] original-seq-forms
+                         [seq-forms form]
+                         (case binding
+                           :let (let [[_let_ expr body] form]
+                                  [(conj seq-forms binding expr) body])
+                           (:while :when) (let [[_when_ expr body] form]
+                                            [(conj seq-forms binding expr) body])
+                           (let [[_let_ [_ [_check-for-seq_ {:keys [expr]}]] body] form]
+                             [(conj seq-forms binding expr) body]))]
+                     (recur original-seq-forms
+                            seq-forms
+                            form))))))}})
 
 (defmethod -unexpand-macro 'clojure.core/for
   [& args]
-  (apply (-> clojure-core-for-expansions :reduce-based :unexpand-macro) args))
+  (apply (-> clojure-core-for-expansions :typed :unexpand-macro) args))
 
 (defmethod -expand-macro 'clojure.core/for
   [& args]
-  (apply (-> clojure-core-for-expansions :reduce-based :expand-macro) args))
+  (apply (-> clojure-core-for-expansions :typed :expand-macro) args))
 
 (defn unexpand-ast [vsym ast]
   (unexpand-macro (emit-form/emit-form ast) {:vsym vsym}))

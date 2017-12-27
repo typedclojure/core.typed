@@ -4,6 +4,7 @@
   (:require [clojure.core.typed :as t]
             [clojure.core.typed.debug :refer [dbg]]
             [clojure.core.typed.profiling :as p]
+            [clojure.core.typed.rules :as rules]
             [clojure.core.typed.check-below :as below]
             [clojure.core.typed.abo :as abo]
             [clojure.core.typed.analyze-clj :as ana-clj]
@@ -645,67 +646,20 @@
                              (r/ret r/-nil)
                              expected)))))
 
-(defmulti typing-rule (fn [{:keys [vsym]}] vsym))
-
-(defmethod typing-rule `jana2/check-expected
-  [{[_ e opts :as form] :form, :keys [expected check]}]
-  (check e (when expected
-             (update expected :opts 
-                     ;; earlier messages override later ones
-                     #(merge
-                        (select-keys opts [:blame-form :msg-fn])
-                        %)))))
-
-(defmethod typing-rule `jana2/check-if-empty-body
-  [{[_ [_do_ & body :as e] opts :as form] :form, :keys [expected check]}]
-  ;(prn "jana2/check-if-empty-body")
-  (check e (when expected
-             (if (empty? (:original-body opts))
-               (update expected :opts 
-                       ;; earlier messages override later ones
-                       #(merge
-                          (select-keys opts [:blame-form :msg-fn])
-                          %))
-               expected))))
-
-(defn ann-form-typing-rule 
-  [{[_ e ty :as form] :form, :keys [expected check subtype? expected-error]}]
-  (let [_ (when expected
-            (when-not (subtype? ty (:type expected))
-              (expected-error ty (:type expected)
-                              {:expected (update expected :opts
-                                                 ;; prefer earlier blame-form
-                                                 #(merge {:blame-form form}
-                                                         %))})))]
-    (check e (merge expected {:type ty}))))
-
-(defmethod typing-rule `t/ann-form [& args] (apply ann-form-typing-rule args))
-(defmethod typing-rule 'clojure.core.typed.macros/ann-form [& args] (apply ann-form-typing-rule args))
-
-(defn tc-ignore-typing-rule 
-  [{:keys [form expected maybe-check-expected]}]
-  {:form form
-   :expr-type (maybe-check-expected
-                {:type `t/Any}
-                expected)})
-
-(defmethod typing-rule `t/tc-ignore [& args] (apply tc-ignore-typing-rule args))
-(defmethod typing-rule 'clojure.core.typed.macros/tc-ignore [& args] (apply tc-ignore-typing-rule args))
-
-(defmethod typing-rule :default
-  [{:keys [expanded-form expected check]}]
-  (check expanded-form expected))
-
 (defn invoke-typing-rule
   [vsym {:keys [expanded-form unexpanded-form args env] :as expr} expected]
-  (let [maybe-map->TCResult #(some-> % cu/map->TCResult)
+  (let [unparse-type-verbose #(binding [vs/*verbose-types* false]
+                                (prs/unparse-type %))
+        maybe-map->TCResult #(some-> % cu/map->TCResult)
         subtype? (fn [s t]
                    (let [s (prs/parse-type s)
                          t (prs/parse-type t)]
                      (sub/subtype? s t)))
         solve-subtype (fn [vs f]
-                        {:pre [(every? symbol? vs)]}
+                        {:pre [(apply distinct? vs)
+                               (every? symbol? vs)]}
                         (let [gvs (map gensym vs)
+                              gvs->vs (zipmap gvs vs)
                               syns (apply f gvs)
                               [lhs rhs] (tvar-env/with-extended-tvars gvs
                                           (mapv prs/parse-type syns))
@@ -721,9 +675,11 @@
                             (into {}
                                   (comp (filter (comp crep/t-subst? val))
                                         (map (fn [[k v]]
-                                               [k (:type v)])))
+                                               [(gvs->vs k)
+                                                (unparse-type-verbose (:type v))])))
                                   (select-keys substitution gvs)))))
         rule-args {:vsym vsym
+                   :locals (:locals env)
                    :expected (some-> expected cu/TCResult->map)
                    :expanded-form expanded-form
                    :unexpanded-form unexpanded-form
@@ -749,6 +705,11 @@
                                 :expr-type (cu/TCResult->map (u/expr-type cexpr))})))
                    :solve-subtype solve-subtype
                    :subtype? subtype?
+                   :emit-form ast-u/emit-form-fn
+                   :abbreviate-type (fn [t]
+                                      (let [m (prs/parse-type t)]
+                                        (binding [vs/*verbose-types* false]
+                                          (prs/unparse-type m))))
                    :expected-error (fn [s t opts]
                                      (let [opts (update opts :expected maybe-map->TCResult)]
                                        (apply cu/expected-error (prs/parse-type s) (prs/parse-type t)
@@ -763,7 +724,7 @@
 
         {out-expr-type :expr-type
          out-form :form}
-        (typing-rule rule-args)
+        (rules/typing-rule rule-args)
         unexpanded-form (jana2/unexpand-macro out-form {:vsym vsym
                                                         :original-form unexpanded-form})]
     {:op :frozen-macro
