@@ -152,6 +152,12 @@
 (defmethod typing-rule `t/tc-ignore [& args] (apply tc-ignore-typing-rule args))
 (defmethod typing-rule 'clojure.core.typed.macros/tc-ignore [& args] (apply tc-ignore-typing-rule args))
 
+(defmethod typing-rule 'clojure.core.typed.expand/ignore-expected-if
+  [{[_ ignore? body :as form] :form, :keys [expected check]}]
+  {:pre [(boolean? ignore?)]}
+  (check body (when-not ignore? expected)))
+
+
 (defmethod typing-rule :default
   [{:keys [expanded-form expected check]}]
   (check expanded-form expected))

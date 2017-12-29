@@ -5666,6 +5666,13 @@
                     (ann-form m Number))))
 )
 
+(deftest typed-fn-return-empty-body
+  (is (= ((clojure.core.typed/fn [] :-)) :-))
+  (is (= ((clojure.core.typed/fn [] :- nil)) nil))
+  (is (= ((clojure.core.typed/fn [] :- clojure.core.typed/Any)) nil))
+  (is (= ((clojure.core.typed/fn [] :- clojure.core.typed/Any, nil)) nil))
+  (is (= ((clojure.core.typed/fn [] :- nil, nil)) nil)))
+
 ;    (is-tc-e 
 ;      (let [f (fn [{:keys [a] :as m} :- '{:a (U nil Num)}] :- '{:a Num} 
 ;                {:pre [(number? a)]} 

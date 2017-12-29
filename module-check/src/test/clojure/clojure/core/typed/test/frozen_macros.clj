@@ -23,6 +23,9 @@
   (is-tc-e (tc-ignore #(/ nil nil)))
   (is-tc-err (tc-ignore #(/ nil nil)) nil))
 
+(deftest typed-fn-test
+  (is-tc-e (fn [a :- (U nil Number)])))
+
 (deftest when-test
   (is-tc-e (fn [a :- (U nil Number)]
              (when a (inc a))))
