@@ -41,6 +41,8 @@
                   forms)
         parsed-methods   (for [method methods]
                            (merge-with merge
+                             {:ann-params (first method)
+                              :original-method method}
                              (loop [ann-params (first method)
                                     pvec (empty (first method)) ; an empty param vector with same metadata
                                     ann-info []]
@@ -94,7 +96,8 @@
                                             (conj pvec p)
                                             (conj ann-info {:type 'clojure.core.typed/Any
                                                             :default true}))))))
-                             (if (#{:-} (second method))
+                             (if (and (#{:-} (second method))
+                                      (<= 3 (count method)))
                                (let [[param colon t & body] method]
                                  {:body body
                                   :ann {:rng {:type t}}})
@@ -118,7 +121,8 @@
                     (apply list pvec body))))
      :ann final-ann
      :poly poly
-     :methods methods
+     :parsed-methods parsed-methods
+     :name name
      :single-arity-syntax? single-arity-syntax?}))
 
 (defn parse-defn* [args]

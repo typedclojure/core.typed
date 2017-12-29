@@ -24,7 +24,8 @@
 
 (defn splice-checked-body-forms
   [[_check-if-empty-body_ new-do-body {:keys [original-body]} :as checked-body]]
-  {:pre [(= 3 (count checked-body))]}
+  {:pre [(= `check-if-empty-body _check-if-empty-body_)
+         (= 3 (count checked-body))]}
   (splice-body-forms original-body new-do-body))
 
 (defmacro check-let-destructure [{:keys [expression]}] expression)
@@ -205,17 +206,17 @@
 
 (defmethod -expand-macro 'clojure.core/if-let
   [[_ bindings then else :as original-form] _]
-	(let [form (bindings 0) tst (bindings 1)]
-		`^::t/freeze
+  (let [form (bindings 0) tst (bindings 1)]
+    `^::t/freeze
      (let [temp# ~tst]
-			 (if temp#
-				 ^::t/freeze
+       (if temp#
+         ^::t/freeze
          (let [_# ^::t/freeze (check-let-destructure-no-op
-                              {:binding ~form
-                               :expression ~tst})
+                                {:binding ~form
+                                 :expression ~tst})
                ;TODO avoid repeated destructuring checks ^::no-check-destructure
                ~form temp#]
-					 ~then)
+           ~then)
          ~(if (= 3 (count original-form))
             `^::t/freeze
             (check-expected
@@ -227,7 +228,7 @@
 
 (defmethod -unexpand-macro 'clojure.core/if-let
   [form {:keys [original-form]}]
-	(let [[_let_ [_tmp_ tst]
+  (let [[_let_ [_tmp_ tst]
          [_if _tmp
           [_let_ [_ _no-op_ binding _tmp_]
            then]
@@ -263,7 +264,7 @@
 
 (defmethod -expand-macro 'clojure.core/with-open
   [[_ bindings & body :as form] _]
-	(let [expand-with-open (fn expand-with-open [bindings body]
+  (let [expand-with-open (fn expand-with-open [bindings body]
                            (cond
                              (= (count bindings) 0) `^::t/freeze (check-if-empty-body
                                                                  (do ~@body)
@@ -296,24 +297,24 @@
 
 (defmethod -expand-macro 'clojure.core/assert
   [[_ x message :as form] _]
-	(let [msg? (= 3 (count form))
+  (let [msg? (= 3 (count form))
         erase-assert? (not *assert*)
         assert-expand (fn
                         ([x]
                          (when-not erase-assert?
-													 `^::t/freeze
+                           `^::t/freeze
                             (when-not ~x
                               (throw (new AssertionError (str "Assert failed: " (pr-str '~x)))))))
                         ([x message]
                          (when-not erase-assert?
-													 `^::t/freeze
+                           `^::t/freeze
                             (when-not ~x
                               (throw (new AssertionError (str "Assert failed: " ~message "\n" (pr-str '~x))))))))]
-		(apply assert-expand (rest form))))
+    (apply assert-expand (rest form))))
 
 (defmethod -unexpand-macro 'clojure.core/assert
   [form {:keys [original-form]}]
-	(if (some? form)
+  (if (some? form)
     (let [msg? (= 3 (count original-form))
           [mop] original-form]
       (if msg?
@@ -324,20 +325,20 @@
     original-form))
 
 (defn parse-fn-sigs [sigs]
-	(let [name (if (symbol? (first sigs)) (first sigs) nil)
-				sigs (if name (next sigs) sigs)
+  (let [name (if (symbol? (first sigs)) (first sigs) nil)
+        sigs (if name (next sigs) sigs)
         single-arity-syntax? (vector? (first sigs))
-				sigs (if (vector? (first sigs))
-							 (list sigs)
-							 (if (seq? (first sigs))
-								 sigs
-								 ;; Assume single arity syntax
-								 (throw (IllegalArgumentException.
-													(if (seq sigs)
-														(str "Parameter declaration "
-																 (first sigs)
-																 " should be a vector")
-														(str "Parameter declaration missing"))))))
+        sigs (if (vector? (first sigs))
+               (list sigs)
+               (if (seq? (first sigs))
+                 sigs
+                 ;; Assume single arity syntax
+                 (throw (IllegalArgumentException.
+                          (if (seq sigs)
+                            (str "Parameter declaration "
+                                 (first sigs)
+                                 " should be a vector")
+                            (str "Parameter declaration missing"))))))
         process-sigs (fn [[params & body :as sig]]
                        (assert (vector? params) params)
                        (let [conds (when (and (next body) (map? (first body)))
@@ -573,21 +574,86 @@
   [& args]
   (apply (-> clojure-core-for-expansions :typed :expand-macro) args))
 
-(defmethod -expand-macro 'clojure.core.typed/fn
-  [[_ & forms :as form] _]
-  (let [{:keys [poly fn ann]} (internal/parse-fn* forms)]
-    (with-meta fn {::t/freeze true})))
+(defmacro ignore-expected-if [tst body] body)
 
-(defmethod -unexpand-macro 'clojure.core.typed/fn
-  [[_fn_ & sigs] {:keys [original-form]}]
-  (let [[mop & forms] original-form
-        {:keys [poly fn ann single-arity-syntax?]} (internal/parse-fn* forms)]
-    (list* mop
-           (concat (apply concat poly)
-           ))))
+(defmethod -expand-macro `ignore-expected-if
+  [[_ tst body :as form] _]
+  {:pre [(= 3 (count form))]}
+  body)
+
+(defmethod -unexpand-macro `ignore-expected-if
+  [body {:keys [original-form]}]
+  (let [[mop tst _original-body_] original-form]
+    (list mop tst body)))
+
+(defn expand-typed-fn-macro
+  [[_ & forms :as form] _]
+  (let [{:keys [parsed-methods name poly ann]} (internal/parse-fn* forms)
+        reassembled-fn-type `(t/IFn ~@(map (fn [{:keys [rest drest dom rng] :as method-ann}]
+                                             {:pre [(map? method-ann)]
+                                              :post [(vector? %)]}
+                                             (into (mapv :type dom)
+                                                   (concat
+                                                     (cond
+                                                       rest [(:type rest) '*]
+                                                       drest [(-> drest :pretype :type) '... (:bound drest)])
+                                                     [:-> (:type rng)]))
+                                           (map :ann parsed-methods))))
+        reassembled-fn-type (if-let [forall (:forall poly)]
+                              `(t/All ~forall reassembled-fn-type)
+                              reassembled-fn-type)]
+    `^::t/freeze
+    (t/ann-form
+      ^::t/freeze
+      (fn ~@(concat
+              (when name
+                [name])
+              (for [{:keys [original-method body pvec ann]} parsed-methods]
+                (list* pvec
+                       `^::t/freeze
+                       (ignore-expected-if ~(boolean (-> ann :rng :default))
+                         ^::t/freeze
+                         (check-if-empty-body
+                           (do ~@body)
+                           {:msg-fn (fn [_#]
+                                      "This 't/fn' method returns nil, which does not agree with the expected type.")
+                            :blame-form ~original-method
+                            :original-body ~body}))))))
+      ~reassembled-fn-type)))
+
+(defn unexpand-typed-fn-macro
+  [form {:keys [original-form]}]
+  (let [[_ann-form_ form _ty_] form
+        _ (assert (= `t/ann-form _ann-form_))
+        [_fn_ & expanded-sigs] form
+        [mop & original-sigs] original-form
+        {original-methods :parsed-methods :keys [name poly ann single-arity-syntax?]} (internal/parse-fn* original-sigs)
+        {expanded-methods :sigs} (parse-fn-sigs expanded-sigs)
+        _ (assert (= (count expanded-methods) (count original-methods)))
+        unparsed-methods (map (fn [expanded-method original-method]
+                                (let [rng-ann (-> original-method :ann :rng)
+                                      [_ignore-if-expected_ _test_ body] (:body expanded-method)]
+                                  (assert (map? rng-ann))
+                                  (list* (:ann-params original-method)
+                                         (concat
+                                           (when-not (:default rng-ann)
+                                             [:- (:type rng-ann)])
+                                           (splice-checked-body-forms body)))))
+                              expanded-methods
+                              original-methods)
+        res (list* mop
+                   (concat (when name [name])
+                           (if single-arity-syntax?
+                             (first unparsed-methods)
+                             unparsed-methods)))]
+    res))
+
+(defmethod -expand-macro `t/fn [& args] (apply expand-typed-fn-macro args))
+(defmethod -expand-macro 'clojure.core.typed.macros/fn [& args] (apply expand-typed-fn-macro args))
+(defmethod -unexpand-macro `t/fn [& args] (apply unexpand-typed-fn-macro args))
+(defmethod -unexpand-macro 'clojure.core.typed.macros/fn [& args] (apply unexpand-typed-fn-macro args))
 
 (defmethod -expand-macro 'clojure.core/ns [form _]
-  (prn "expand ns" form)
   `^::t/freeze
   (check-expected
     nil

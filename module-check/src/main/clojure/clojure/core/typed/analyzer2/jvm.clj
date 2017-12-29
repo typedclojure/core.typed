@@ -61,6 +61,7 @@
   original-form)
 
 (defn freeze-macro [op form env]
+  (prn "op" op)
   (let [^Var v (u/resolve-sym op env)
         _ (assert (var? v))
         sym (symbol (-> v .ns ns-name str)
