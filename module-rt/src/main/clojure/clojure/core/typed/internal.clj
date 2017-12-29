@@ -34,11 +34,12 @@
   [forms]
   (let [[{poly :forall :as opts} forms] (parse-keyword-map forms)
         [name forms] (take-when symbol? forms)
-        methods (if ((some-fn vector? keyword?) (first forms))
+        _ (assert (not (keyword? (first forms))))
+        single-arity-syntax? (vector? (first forms))
+        methods (if single-arity-syntax?
                   (list forms)
                   forms)
-        parsed-methods (doall 
-                         (for [method methods]
+        parsed-methods   (for [method methods]
                            (merge-with merge
                              (loop [ann-params (first method)
                                     pvec (empty (first method)) ; an empty param vector with same metadata
@@ -100,7 +101,7 @@
                                (let [[param & body] method]
                                  {:body body
                                   :ann {:rng {:type 'clojure.core.typed/Any
-                                              :default true}}})))))
+                                              :default true}}}))))
         final-ann (mapv :ann parsed-methods)]
     #_(assert ((con/vec-c?
                (con/hmap-c?
@@ -116,7 +117,9 @@
                   (for [{:keys [body pvec]} parsed-methods]
                     (apply list pvec body))))
      :ann final-ann
-     :poly poly}))
+     :poly poly
+     :methods methods
+     :single-arity-syntax? single-arity-syntax?}))
 
 (defn parse-defn* [args]
   (let [[flatopt args] (parse-keyword-flat-map args)
