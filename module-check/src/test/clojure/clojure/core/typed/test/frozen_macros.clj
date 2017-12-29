@@ -15,7 +15,8 @@
 
 (deftest ann-form-test
   (is-tc-e (ann-form 1 Integer))
-  (is-tc-e (ann-form 1 Integer) nil)
+  ;; blames ann-form form
+  (is-tc-err (ann-form 1 Integer) nil)
   (is-tc-err (ann-form 1 nil)))
 
 (deftest tc-ignore-test
@@ -101,11 +102,6 @@
 (deftest if-let-test
   (is-tc-e (if-let [_ 1]
              (inc 1)))
-  (is-tc-e (if-let [_ (ann-form 1 (U nil Number))]
-             (inc 1))
-           Number)
-  (is-tc-e (if-let [a 1]
-             (inc a)))
   (is-tc-e (if-let [a (ann-form 1 (U nil Number))]
              (inc a)))
   ; improved error
@@ -161,7 +157,7 @@
   ;; FIXME improve error
   (is-tc-err (clojure.core/for [a [1 2]] a) Number)
   ;; FIXME improve error
-  (is-tc-e (clojure.core/for [a [1 2]] a) nil)
+  (is-tc-err (clojure.core/for [a [1 2]] a) nil)
   (is-tc-e (clojure.core/for [a [1 2] b [2 3]] [a b]))
   (is-tc-e (clojure.core/for [a [1 2] b [2 3]] [a b]) (Seq '[Num Num]))
   ;FIXME use t/fn instead of fn*

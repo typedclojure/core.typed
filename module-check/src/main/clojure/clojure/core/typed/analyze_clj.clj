@@ -13,6 +13,7 @@
             [clojure.tools.analyzer.passes.jvm.warn-on-reflection :as warn-reflect]
             [clojure.core.typed.analyzer2.jvm :as jana2]
             [clojure.core.typed.analyzer2 :as ana2]
+            [clojure.core.typed.analyzer2.pre-analyze :as pre]
             [clojure.tools.reader :as tr]
             [clojure.tools.reader.reader-types :as readers]
             [clojure.tools.analyzer.passes.jvm.validate :as validate]
@@ -31,6 +32,8 @@
             [clojure.set :as set]
             [clojure.string :as str]
             [clojure.core :as core]
+            [clojure.core.typed.rules :as rules]
+            [clojure.core.typed.expand :as expand]
             [clojure.core.typed.ns-deps :as dep]
             [clojure.core.typed.ns-deps-utils :as dep-u])
   (:import (clojure.tools.analyzer.jvm ExceptionThrown)))
@@ -395,14 +398,14 @@
 (defn run-passes [ast]
   (typed-schedule ast))
 
-(def frozen-macros #{#_'clojure.core/ns
+(def frozen-macros #{'clojure.core/ns
                      'clojure.core/when
                      'clojure.core/when-not
                      'clojure.core/let
-                     'clojure.core.typed.analyzer2.jvm/check-expected
-                     'clojure.core.typed.analyzer2.jvm/check-let-destructure
-                     'clojure.core.typed.analyzer2.jvm/check-if-empty-body
-                     'clojure.core.typed.analyzer2.jvm/check-for-expected
+                     'clojure.core.typed.expand/check-expected
+                     'clojure.core.typed.expand/check-let-destructure
+                     'clojure.core.typed.expand/check-if-empty-body
+                     'clojure.core.typed.expand/check-for-expected
                      'clojure.core/if-let
                      'clojure.core.typed/ann-form
                      'clojure.core.typed.macros/ann-form
@@ -412,6 +415,7 @@
                      'clojure.core/with-open
                      'clojure.core/assert
                      'clojure.core/fn
+                     'clojure.core.typed/fn
                      'clojure.core/for
                      })
 
@@ -420,6 +424,8 @@
   (t/tc-ignore
     {#'ana2/macroexpand-1 macroexpand-1
      #'jana2/frozen-macros frozen-macros
+     #'pre/expand-macro expand/expand-macro
+     #'pre/unexpand-macro expand/unexpand-macro
      ;#'jana2/run-passes run-passes
      }))
 

@@ -1,5 +1,6 @@
 (ns clojure.core.typed.rules
-  (:require [clojure.core.typed :as t]))
+  (:require [clojure.core.typed :as t]
+						[clojure.core.typed.internal :as internal]))
 
 (t/defalias TCType t/Any)
 (t/defalias MsgFnOpts (t/HMap))
@@ -64,7 +65,7 @@
 (t/ann typing-rule [RuleOpts -> '{:form t/Any :expr-type ExprType}])
 (defmulti typing-rule (fn [{:keys [vsym]}] vsym))
 
-(defmethod typing-rule 'clojure.core.typed.analyzer2.jvm/gather-for-return-type
+(defmethod typing-rule 'clojure.core.typed.expand/gather-for-return-type
   [{[_ ret] :form, :keys [expected check solve-subtype]}]
   (let [{:keys [expr-type] :as m} (check ret)
         {:keys [x] :as solved?} (solve-subtype '[x]
@@ -75,13 +76,13 @@
              :filters {:else 'ff}}]
     (assoc m :expr-type ret)))
 
-(defmethod typing-rule 'clojure.core.typed.analyzer2.jvm/expected-as
+(defmethod typing-rule 'clojure.core.typed.expand/expected-as
   [{[_ s body :as form] :form, :keys [expected check]}]
   (check `(let* [~s '~expected]
             ~body)
          expected))
 
-(defmethod typing-rule 'clojure.core.typed.analyzer2.jvm/check-for-expected
+(defmethod typing-rule 'clojure.core.typed.expand/check-for-expected
   [{[_ {:keys [expr expected-local] :as form-opts} :as form] :form,
     :keys [expected check locals solve-subtype subtype? delayed-error abbreviate-type
            emit-form] :as opt}]
@@ -107,7 +108,7 @@
                     (when (not errored?)
                       {:type x}))))))
 
-(defmethod typing-rule 'clojure.core.typed.analyzer2.jvm/check-expected
+(defmethod typing-rule 'clojure.core.typed.expand/check-expected
   [{[_ e opts :as form] :form, :keys [expected check]}]
   (check e (when expected
              (update expected :opts 
@@ -116,7 +117,7 @@
                         (select-keys opts [:blame-form :msg-fn])
                         %)))))
 
-(defmethod typing-rule 'clojure.core.typed.analyzer2.jvm/check-if-empty-body
+(defmethod typing-rule 'clojure.core.typed.expand/check-if-empty-body
   [{[_ [_do_ & body :as e] opts :as form] :form, :keys [expected check]}]
   (check e (when expected
              (if (empty? (:original-body opts))
@@ -142,8 +143,8 @@
 (defmethod typing-rule 'clojure.core.typed.macros/ann-form [& args] (apply ann-form-typing-rule args))
 
 (defn tc-ignore-typing-rule 
-  [{:keys [form expected maybe-check-expected]}]
-  {:form form
+  [{:keys [expanded-form expected maybe-check-expected]}]
+  {:form expanded-form
    :expr-type (maybe-check-expected
                 {:type `t/Any}
                 expected)})
