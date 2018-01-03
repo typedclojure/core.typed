@@ -89,11 +89,11 @@
                                         uvs/*current-expr*)
                                 {:form form})
                               {:env (env-for-error
-                                      (merge (when (contains? (:opts expected) :blame-form)
-                                               (meta (-> expected :opts :blame-form)))
-                                             (or (when uvs/*current-expr*
+                                      (merge (or (when uvs/*current-expr*
                                                    (:env uvs/*current-expr*))
-                                                 *current-env*)))}))]
+                                                 *current-env*)
+                                             (when (contains? (:opts expected) :blame-form)
+                                               (meta (-> expected :opts :blame-form)))))}))]
     (cond
       ;can't delay here
       (not uvs/*delayed-errors*)

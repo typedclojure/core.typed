@@ -237,15 +237,12 @@
       (throw (ex-info "Can't call nil"
                       (merge {:form form}
                              (u/-source-info form env)))))
-    (cond
-      (ana/freeze-macro? op form env) (ana/freeze-macro op form env)
-      :else
-      (let [mform (ana/macroexpand-1 form env)]
-        (if (= form mform) ;; function/special-form invocation
-          (pre-parse mform env)
-          (-> (pre-analyze-form mform env)
+    (let [mform (ana/macroexpand-1 form env)]
+      (if (= form mform) ;; function/special-form invocation
+        (pre-parse mform env)
+        (-> (pre-analyze-form mform env)
             (update-in [:raw-forms] (fnil conj ())
-                       (vary-meta form assoc ::resolved-op (u/resolve-sym op env)))))))))
+                       (vary-meta form assoc ::resolved-op (u/resolve-sym op env))))))))
 
 (defn pre-parse-do
   [[_ & exprs :as form] env]

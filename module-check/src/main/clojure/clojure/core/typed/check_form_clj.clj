@@ -15,7 +15,9 @@
    :check-expr chk-clj/check-expr
    :runtime-check-expr rt-chk/runtime-check-expr
    :runtime-infer-expr rt-infer/runtime-infer-expr
-   :eval-out-ast #(ana-clj/eval-ast % {})
+   :eval-out-ast (fn eval-out-ast
+                   ([ast] (eval-out-ast ast {}))
+                   ([ast opts] (ana-clj/eval-ast ast opts)))
    :emit-form emit-form/emit-form})
 
 (defn check-form-info

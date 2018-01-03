@@ -24,7 +24,11 @@
   (is-tc-err (tc-ignore #(/ nil nil)) nil))
 
 (deftest typed-fn-test
-  (is-tc-e (fn [a :- (U nil Number)])))
+  (is-tc-e (fn [a :- (U nil Number)]))
+  ;; inherits column from outer expression
+  (is-tc-err (fn [] :- Number))
+  ;; exact column number
+  (is-tc-err (fn ([] :- Number))))
 
 (deftest when-test
   (is-tc-e (fn [a :- (U nil Number)]
@@ -33,8 +37,9 @@
              (when a (inc a))))
   (is-tc-e (fn [a :- Number] :- Number
              (when a (inc a))))
-  (is-tc-e (fn [a :- (U nil Number)] :- Number,
-             (when a (inc a))))
+  ;; better error
+  (is-tc-err (fn [a :- (U nil Number)] :- Number,
+               (when a (inc a))))
   ;; 'else' expected error
   (is-tc-err (fn [a :- (U nil Number)] :- Number,
                (when a 1)))
@@ -59,7 +64,8 @@
                (when-not (not a)))))
 
 (deftest let-test
-  (is-tc-e (let [a 1]) Number)
+  ;; better error
+  (is-tc-err (let [a 1]) Number)
   (is-tc-e (let [a 1]
              (inc a)))
   (is-tc-e #(let [a (throw (Exception.))]
@@ -79,8 +85,8 @@
   ;destructuring
   (is-tc-e (let [{:keys [a]} {:a 1}]
              (inc a)))
-  (is-tc-e (let [{:keys [a]} []]
-             (inc a)))
+  (is-tc-err (let [{:keys [a]} []]
+               (inc a)))
 
   ;; locals shadow vars
   (is-tc-e (let [identity identity]
@@ -150,23 +156,27 @@
   (is-tc-e (clojure.core/fn [a]
              {:post [(symbol? %)]}
              a))
+  ;; approximates line number from outer form
   (is-tc-err (clojure.core/fn [a])
+             [Number -> Number])
+  ;; exact line number
+  (is-tc-err (clojure.core/fn ([a]))
              [Number -> Number])
   )
 
 (deftest for-test
-  (is-tc-e (clojure.core/for [a [1 2]] a))
-  (is-tc-e (clojure.core/for [a [1 2]] a) (Seqable Number))
+  (is-tc-e #(clojure.core/for [a [1 2]] a))
+  (is-tc-e #(clojure.core/for [a [1 2]] a) [-> (Seqable Number)])
   ;; FIXME improve error
-  (is-tc-err (clojure.core/for [a [1 2]] a) Number)
+  (is-tc-err #(clojure.core/for [a [1 2]] a) [-> Number])
   ;; FIXME improve error
-  (is-tc-err (clojure.core/for [a [1 2]] a) nil)
-  (is-tc-e (clojure.core/for [a [1 2] b [2 3]] [a b]))
-  (is-tc-e (clojure.core/for [a [1 2] b [2 3]] [a b]) (Seq '[Num Num]))
+  (is-tc-err #(clojure.core/for [a [1 2]] a) [-> nil])
+  (is-tc-e #(clojure.core/for [a [1 2] b [2 3]] [a b]))
+  (is-tc-e #(clojure.core/for [a [1 2] b [2 3]] [a b]) [-> (Seq '[Num Num])])
   ;FIXME use t/fn instead of fn*
   ;; propagates expected type to body
-  (is-tc-e (clojure.core/for [a [1 2] b [2 3]] (fn* [c] (+ c a b)))
-           (Seq [Num -> Num]))
+  (is-tc-e #(clojure.core/for [a [1 2] b [2 3]] (fn* [c] (+ c a b)))
+           [-> (Seq [Num -> Num])])
   ;; example of bad type propagating to body
-  (is-tc-err (clojure.core/for [a [1 2] b [2 3]] (fn* [c] (+ c a b))) (Seq [nil -> Num]))
+  (is-tc-err #(clojure.core/for [a [1 2] b [2 3]] (fn* [c] (+ c a b))) [-> (Seq [nil -> Num])])
 )

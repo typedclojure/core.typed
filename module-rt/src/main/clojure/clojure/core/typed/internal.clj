@@ -31,7 +31,9 @@
 (defn parse-fn*
   "(fn name? [[param :- type]* & [param :- type *]?] :- type? exprs*)
   (fn name? ([[param :- type]* & [param :- type *]?] :- type? exprs*)+)"
-  [forms]
+  [[_fn_ & forms :as form]]
+  {:pre [(symbol? _fn_)
+         #_(= "fn" (name _fn_))]}
   (let [[{poly :forall :as opts} forms] (parse-keyword-map forms)
         [name forms] (take-when symbol? forms)
         _ (assert (not (keyword? (first forms))))
@@ -41,8 +43,12 @@
                   forms)
         parsed-methods   (for [method methods]
                            (merge-with merge
-                             {:ann-params (first method)
-                              :original-method method}
+                             (let [ann-params (first method)]
+                               (assert (vector? ann-params))
+                               {:ann-params ann-params
+                                :original-method (vary-meta method #(merge (meta form)
+                                                                           (meta ann-params)
+                                                                           %))})
                              (loop [ann-params (first method)
                                     pvec (empty (first method)) ; an empty param vector with same metadata
                                     ann-info []]

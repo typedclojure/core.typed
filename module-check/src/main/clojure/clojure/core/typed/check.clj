@@ -4,7 +4,7 @@
   (:require [clojure.core.typed :as t]
             [clojure.core.typed.debug :refer [dbg]]
             [clojure.core.typed.profiling :as p]
-            [clojure.core.typed.rules :as rules]
+            ;[clojure.core.typed.rules :as rules]
             [clojure.core.typed.check-below :as below]
             [clojure.core.typed.abo :as abo]
             [clojure.core.typed.analyze-clj :as ana-clj]
@@ -646,6 +646,7 @@
                              (r/ret r/-nil)
                              expected)))))
 
+#_
 (defn invoke-typing-rule
   [vsym {:keys [expanded-form unexpanded-form args env] :as expr} expected]
   (let [unparse-type-verbose #(binding [vs/*verbose-types* false]
@@ -735,10 +736,12 @@
      :macro (:macro expr)
      u/expr-type (cu/map->TCResult out-expr-type)}))
 
+#_
 (defmethod invoke-frozen :default
   [vsym {:keys [expanded-form] :as expr} expected]
   (check expanded-form expected))
 
+#_
 (add-check-method :frozen-macro
   [{:keys [macro] :as expr} & [expected]]
   (binding [vs/*current-expr* expr]
@@ -1567,6 +1570,36 @@
 (defmethod internal-special-form ::t/loop
   [{[_ _ {{tsyns :ann} :val} :as statements] :statements frm :ret, :keys [env], :as expr} expected]
   (special-loop/check-special-loop check expr expected))
+
+(defmethod internal-special-form :clojure.core.typed.expand/check-if-empty-body
+  [{[_ _ config-map-ast :as statements] :statements, e :ret, :keys [env], :as expr} expected]
+  (let [opts (second (ast-u/emit-form-fn config-map-ast))
+        _ (assert (map? opts))
+        ce (check e (when expected
+                      (if (empty? (:original-body opts))
+                        (update expected :opts 
+                                ;; earlier messages override later ones
+                                #(merge
+                                   (select-keys opts [:blame-form :msg-fn])
+                                   %))
+                        expected)))]
+    (assoc expr
+           :ret ce
+           u/expr-type (u/expr-type ce))))
+
+(defmethod internal-special-form :clojure.core.typed.expand/check-expected
+  [{[_ _ config-map-ast :as statements] :statements, e :ret, :keys [env], :as expr} expected]
+  (let [opts (second (ast-u/emit-form-fn config-map-ast))
+        _ (assert (map? opts))
+        ce (check e (when expected
+                      (update expected :opts 
+                              ;; earlier messages override later ones
+                              #(merge
+                                 (select-keys opts [:blame-form :msg-fn])
+                                 %))))]
+    (assoc expr
+           :ret ce
+           u/expr-type (u/expr-type ce))))
 
 (defmethod internal-special-form :default
   [expr expected]
