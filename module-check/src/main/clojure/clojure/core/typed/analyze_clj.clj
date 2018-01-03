@@ -130,7 +130,13 @@
 
 (T/ann ^:no-check typed-macro-lookup [T/Any :-> T/Any])
 (defn typed-macro-lookup [var]
-  (get *typed-macros* var var))
+  {:post [(ifn? %)]}
+  (or (get *typed-macros* var)
+      (when (expand/custom-expansion? (coerce/var->symbol var))
+        (fn [form locals & _args_]
+          (expand/expand-macro form {:vsym (coerce/var->symbol var)
+                                     :locals locals})))
+      var))
 
 ;; copied from tools.analyze.jvm to insert `*typed-macros*`
 (T/ann ^:no-check macroexpand-1 
@@ -233,7 +239,6 @@
                                                                   ;; use custom macroexpand-1
                                                                   macroexpand-1)]
                                  (loop [form form raw-forms []]
-                                   (assert nil "TODO handle frozen macros")
                                    (let [mform (ta/macroexpand-1 form env)]
                                      (if (= mform form)
                                        [mform (seq raw-forms)]
@@ -398,34 +403,10 @@
 (defn run-passes [ast]
   (typed-schedule ast))
 
-(def frozen-macros #{'clojure.core/ns
-                     'clojure.core/when
-                     'clojure.core/when-not
-                     'clojure.core/let
-                     'clojure.core.typed.expand/check-expected
-                     'clojure.core.typed.expand/check-let-destructure
-                     'clojure.core.typed.expand/check-if-empty-body
-                     'clojure.core.typed.expand/check-for-expected
-                     'clojure.core/if-let
-                     'clojure.core.typed/ann-form
-                     'clojure.core.typed.macros/ann-form
-                     'clojure.core.typed/tc-ignore
-                     'clojure.core.typed.macros/tc-ignore
-                     'clojure.core/when-let
-                     'clojure.core/with-open
-                     'clojure.core/assert
-                     'clojure.core/fn
-                     'clojure.core.typed/fn
-                     'clojure.core/for
-                     })
-
 ;; (All [x ...] [-> '{(Var x) x ...})])
 (defn thread-bindings []
   (t/tc-ignore
     {#'ana2/macroexpand-1 macroexpand-1
-     #'jana2/frozen-macros frozen-macros
-     #'pre/expand-macro expand/expand-macro
-     #'pre/unexpand-macro expand/unexpand-macro
      ;#'jana2/run-passes run-passes
      }))
 
@@ -439,7 +420,6 @@
    (u/trace "Analyze1 form" *file* form)
    (let [old-bindings (or (some-> bindings-atom deref) {})]
      (with-bindings old-bindings
-       ;(prn "analyze1 namespace" *ns*)
        (let [ana (jana2/analyze+eval 
                    form (or env (taj/empty-env))
                    (->
@@ -548,8 +528,6 @@
            (cache/miss cache nsym asts))
          asts)))))
 
-(def thaw-form #'jana2/thaw-form)
-
 ; eval might already be monkey-patched, eval' avoids infinite looping
 (defn eval' [frm]
   (. clojure.lang.Compiler (eval frm)))
@@ -561,7 +539,7 @@
   ;                  (catch Exception e
   ;                    (ExceptionThrown. e)))]
   ;  (merge ast {:result result}))
-  (let [frm (emit-form/emit-form ast)
+  (let [frm (:original-form opts) #_(emit-form/emit-form ast)
         ;_ (prn "form" frm)
         #_#_
         _ (binding [;*print-meta* true

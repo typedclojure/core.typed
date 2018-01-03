@@ -56,6 +56,7 @@
 
   :repositories {"sonatype-oss-public" "https://oss.sonatype.org/content/groups/public/"}
 
+	:resource-paths [~(libyjp-jar-path)]
   :java-source-paths ["module-check/src/main/java"]
   :source-paths [#_"module-cljs/src/main/clojure"
                  #_"module-cljs/src/main/cljs"

@@ -38,46 +38,11 @@
   (into ana/specials
         '#{monitor-enter monitor-exit clojure.core/import* reify* deftype* case*}))
 
-(def ^:dynamic frozen-macros #{})
-
-(defn freeze-macro? [op form env]
-  (boolean
-    (or (-> form meta ::freeze)
-        (-> form meta :clojure.core.typed/freeze)
-        (when (symbol? op)
-          (when-not (specials op)
-            (let [^Var v (u/resolve-sym op env)]
-              (when (var? v)
-                (let [vsym (symbol (str (ns-name (.ns v)))
-                                   (str (.sym v)))]
-                  (contains? frozen-macros vsym)))))))))
-
-(declare thaw-form rerun-passes)
-
 (defn expand-macro [form _]
   (ana/macroexpand-1 form))
 
 (defn unexpand-macro [_ {:keys [original-form]}]
   original-form)
-
-(defn freeze-macro [op form env]
-  (prn "op" op)
-  (let [^Var v (u/resolve-sym op env)
-        _ (assert (var? v))
-        sym (symbol (-> v .ns ns-name str)
-                    (-> v .sym str))
-        env (assoc env :thread-bindings (get-thread-bindings))
-        expanded-form (pre/expand-macro form {:vsym sym})
-        {:keys [tag] :as expanded} (thaw-form expanded-form env)
-        unexpanded-form (pre/unexpand-macro (emit-form/emit-form expanded)
-                                        {:vsym sym :original-form form})]
-    {:op :frozen-macro
-     :form unexpanded-form
-     :unexpanded-form unexpanded-form
-     :expanded-form expanded-form
-     :macro v
-     :tag tag
-     :env env}))
 
 (defn macroexpand-1
   "If form represents a macro form or an inlineable function, returns its expansion,
@@ -414,13 +379,8 @@
   ([form env opts]
      (with-bindings (merge {Compiler/LOADER     (RT/makeClassLoader)
                             #'ana/macroexpand-1 macroexpand-1
-                            #'ana/freeze-macro? freeze-macro?
-                            #'ana/freeze-macro  freeze-macro
                             #'ana/create-var    taj/create-var
-                            ;#'ana/parse         parse
                             #'pre/pre-parse  jpre/pre-parse
-                            #'pre/expand-macro   expand-macro
-                            #'pre/unexpand-macro unexpand-macro
                             #'ana/var?          var?
                             #'*ns*              (the-ns (:ns env))}
                            (:bindings opts))
@@ -428,26 +388,6 @@
          (doto (env/with-env (u/mmerge (env/deref-env) {:passes-opts (get opts :passes-opts default-passes-opts)})
                  (run-passes (pre/pre-analyze-child form env)))
            (do (taj/update-ns-map!)))))))
-
-(defn thaw-frozen-macro [{:keys [op form env] :as expr}]
-  {:pre [(= :frozen-macro op)]}
-  (let [thread-bindings (or (:thread-bindings env) {})]
-    (with-bindings thread-bindings
-      (let [env (dissoc env :thread-bindings)]
-        (analyze (macroexpand-1 form env) env
-                 {:bindings thread-bindings})))))
-
-(defn thaw-form [form env]
-  {:pre []}
-  (analyze form (dissoc env :thread-bindings)
-           {:bindings (:thread-bindings env)}))
-
-(defn rerun-passes [{:keys [env] :as ast}]
-  (let [thread-bindings (:thread-bindings env)]
-    (assert (map? thread-bindings))
-    (with-bindings thread-bindings
-      (doto (run-passes ast)
-        (do (taj/update-ns-map!))))))
 
 (deftype ExceptionThrown [e ast])
 
@@ -464,13 +404,7 @@
         (prn (str "WARNING: emit-form: did not analyze: " form))
         form)))
 
-(defmethod emit-form/-emit-form :frozen-macro
-  [{:keys [form] :as ast} opts]
-  (do (assert (not (#{:hygienic :qualified-symbols} opts))
-              "Cannot support emit-form options on :frozen-macro form")
-      form))
-
-(defn eval-ast [a {:keys [handle-evaluation-exception] 
+(defn eval-ast [a {:keys [handle-evaluation-exception]
                    :or {handle-evaluation-exception throw!}
                    :as opts}]
   (let [frm (emit-form/emit-form a)
@@ -516,17 +450,9 @@
              [mform raw-forms] (with-bindings {Compiler/LOADER     (RT/makeClassLoader)
                                                #'*ns*              (the-ns (:ns env))
                                                #'ana/macroexpand-1 (get-in opts [:bindings #'ana/macroexpand-1] 
-                                                                           macroexpand-1)
-                                               #'frozen-macros     (get-in opts [:bindings #'frozen-macros] 
-                                                                           frozen-macros)
-                                               #'ana/freeze-macro? (get-in opts [:bindings #'ana/freeze-macro?] 
-                                                                           freeze-macro?)}
+                                                                           macroexpand-1)}
                                  (loop [form form raw-forms []]
-                                   (let [freeze? (when (seq? form)
-                                                   (ana/freeze-macro? (first form) form env))
-                                         mform (if freeze?
-                                                 form
-                                                 (ana/macroexpand-1 form env))]
+                                   (let [mform (ana/macroexpand-1 form env)]
                                      (if (= mform form)
                                        [mform (seq raw-forms)]
                                        (recur mform (conj raw-forms
@@ -559,5 +485,5 @@
                statements-expr
                ret-expr))
            (let [a (analyze mform (analyze-env-fn env) (analyze-opts-fn opts))
-                 e (eval-fn a opts)]
+                 e (eval-fn a (assoc opts :original-form mform))]
              (merge e {:raw-forms raw-forms})))))))

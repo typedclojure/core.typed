@@ -78,6 +78,7 @@
 
 (defmethod typing-rule 'clojure.core.typed.expand/expected-as
   [{[_ s body :as form] :form, :keys [expected check]}]
+  (assert nil "need different approach")
   (check `(let* [~s '~expected]
             ~body)
          expected))
@@ -86,6 +87,7 @@
   [{[_ {:keys [expr expected-local] :as form-opts} :as form] :form,
     :keys [expected check locals solve-subtype subtype? delayed-error abbreviate-type
            emit-form] :as opt}]
+  (assert nil "need different approach")
   (assert (not (:expected opt)))
   (let [l (get locals expected-local)
         _ (assert l expected-local)
@@ -130,6 +132,7 @@
 
 (defn ann-form-typing-rule 
   [{[_ e ty :as form] :form, :keys [expected check subtype? expected-error]}]
+  ;; FIXME use check-below
   (let [_ (when expected
             (when-not (subtype? ty (:type expected))
               (expected-error ty (:type expected)
