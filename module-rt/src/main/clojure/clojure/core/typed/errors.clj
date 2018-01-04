@@ -3,6 +3,7 @@
    :core.typed {:collect-only true}}
   (:require [clojure.core.typed.util-vars :refer [*current-env*] :as uvs]
             [clojure.core.typed.current-impl :as impl]
+            [clojure.pprint :as pp]
             [clojure.core.typed.ast-utils :as ast-u]))
 
 (def int-error-kw ::internal-error)
@@ -82,7 +83,11 @@
                (contains? opt :form) form
                :else (ast-u/emit-form-fn uvs/*current-expr*))
         msg (str (when-let [msg-fn (some-> (-> expected :opts :msg-fn) eval)]
-                   (str (msg-fn {}) "\n"))
+                   (str (msg-fn {})
+                        "\n\n"
+                        "====================\n"
+                        "  More information  \n"
+                        "====================\n\n"))
                  msg)
         e (ex-info msg (merge {:type-error tc-error-parent}
                               (when (or (contains? opt :form)
@@ -221,17 +226,19 @@
                            (when column
                              (str ":" column))))
                     ") "))
+        (println)
         (print (.getMessage e))
         (println)
         (flush)
         (let [[_ form :as has-form?] (find data :form)]
           (when has-form?
-            (print "in: ")
+            (print "\n\nin:\n")
             (binding [*print-length* (when-not uvs/*verbose-forms*
-                                       6)
+                                       10)
                       *print-level* (when-not uvs/*verbose-forms*
-                                      4)]
-              (prn form))
+                                      10)]
+              (pp/pprint form)
+              (println))
             (println)
             (println)
             (flush)))

@@ -160,10 +160,16 @@
                   local? (-> env :locals (get op))
                   macro? (and (not local?) (:macro m)) ;; locals shadow macros
                   inline-arities-f (:inline-arities m)
-                  inline? (and (not local?)
-                               (or (not inline-arities-f)
-                                   (inline-arities-f (count args)))
-                               (:inline m))
+                  inline? (or
+                            (when (var? v)
+                              (let [vsym (coerce/var->symbol v)]
+                                (when (expand/custom-inline? vsym)
+                                  (fn [& _args_]
+                                    (expand/expand-inline form {:vsym vsym})))))
+                            (and (not local?)
+                                 (or (not inline-arities-f)
+                                     (inline-arities-f (count args)))
+                                 (:inline m)))
                   t (:tag m)]
               (cond
 

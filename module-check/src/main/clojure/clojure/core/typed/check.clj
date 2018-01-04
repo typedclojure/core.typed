@@ -1239,9 +1239,9 @@
 
         ctarget (check target)
         targetun (-> ctarget u/expr-type r/ret-t)
-        ckeyvals (doall (map check keyvals))
+        ckeyvals (mapv check keyvals)
         keypair-types (partition 2 (map u/expr-type ckeyvals))
-        cargs (vec (cons ctarget ckeyvals))]
+        cargs (into [ctarget] ckeyvals)]
     (if-let [new-hmaps (apply assoc-u/assoc-type-pairs targetun keypair-types)]
       (-> expr
         (update-in [:fn] check)
@@ -1249,22 +1249,20 @@
           :args cargs
           u/expr-type (below/maybe-check-below
                         (r/ret new-hmaps
-                               (fo/-true-filter) ;assoc never returns nil
-                               obj/-empty)
+                               (fo/-true-filter)) ;assoc never returns nil
                         expected)))
       
       ;; to do: improve this error message
-      (err/tc-delayed-error (str "Cannot assoc args `"
-                               (clojure.string/join " "
-                                 (map (comp prs/unparse-type u/expr-type) ckeyvals))
-                               "` on "
-                               (prs/unparse-type targetun))
-                          :return (-> expr
-                                      (update-in [:fn] check)
-                                      (assoc
-                                        :args cargs
-                                        u/expr-type (cu/error-ret expected)))))
-    ))
+      (err/tc-delayed-error (str "A call to assoc failed to type check with target expression of type:\n\t" (prs/unparse-type targetun)
+                                 "\nand key/value pairs of types: \n\t"
+                                 (clojure.string/join " " (map (comp pr-str prs/unparse-type :t u/expr-type) ckeyvals)))
+                            ;; first argument is to blame, gather any blame information from there
+                            :expected (u/expr-type ctarget)
+                            :return (-> expr
+                                        (update-in [:fn] check)
+                                        (assoc
+                                          :args cargs
+                                          u/expr-type (cu/error-ret expected)))))))
 
 (add-invoke-special-method 'clojure.core/dissoc
   [{fexpr :fn :keys [args] :as expr} & [expected]]
@@ -1600,6 +1598,20 @@
     (assoc expr
            :ret ce
            u/expr-type (u/expr-type ce))))
+
+(defmethod internal-special-form :clojure.core.typed.expand/with-post-blame-context
+  [{[_ _ config-map-ast :as statements] :statements, e :ret, :keys [env], :as expr} expected]
+  (let [opts (second (ast-u/emit-form-fn config-map-ast))
+        _ (assert (map? opts))
+        ce (check e expected)]
+    (assoc expr
+           :ret ce
+           u/expr-type (let [expected (u/expr-type ce)]
+                         (update expected :opts 
+                                 ;; earlier messages override later ones
+                                 #(merge
+                                    (select-keys opts [:blame-form :msg-fn])
+                                    %))))))
 
 (defmethod internal-special-form :default
   [expr expected]

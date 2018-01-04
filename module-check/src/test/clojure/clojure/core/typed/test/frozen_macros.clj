@@ -180,3 +180,48 @@
   ;; example of bad type propagating to body
   (is-tc-err #(clojure.core/for [a [1 2] b [2 3]] (fn* [c] (+ c a b))) [-> (Seq [nil -> Num])])
 )
+
+(deftest assoc-in-inline-test
+  (is-tc-e (assoc-in {} [:a] 1) '{:a Num})
+  ;; improved msg
+  (is-tc-err (assoc-in {} [:a :b] 1) '{:a Num})
+  ;; improved msg
+  (is-tc-err (assoc-in 'a [:a] 1))
+  ;; improved msg
+  (is-tc-err (assoc-in {:a (ann-form 'a Sym)} [:a :b] 1))
+  (is-tc-err (assoc-in {:a {:b (ann-form 'a Sym)}} [:a :b :c] 1))
+  (is-tc-err (assoc-in {:a []} [:a :b] 1))
+  (is-tc-e (assoc-in {:a []} [:a 0] 1) '{:a '[Num]}))
+
+(deftest get-in-test
+  (is-tc-e (get-in {:a {:b 1}} [:a :b])
+           Num)
+  ; improved error
+  (is-tc-e (get-in {:a {:b 1}} [:a :b])
+           Sym)
+  ;; FIXME need better messages for 'default'
+  (is-tc-err (get-in {:a {:b 1}} [:a :b] 1))
+  (is-tc-err (get-in {:a {:b 1}} [:a :b] 1)
+             Sym))
+
+(deftest update-in-inline-test
+  (is-tc-e (update-in {:a {:b 1}} [:a :b] identity)
+           '{:a '{:b Num}})
+  (is-tc-e (update-in {:a {:b 1 :c 2}} [:a] dissoc :b)
+           '{:a '{:c Num}})
+  (is-tc-e (let [m {:a {:b {:c 3}}}]
+             (update-in m [:a] update-in [:b] update-in [:c] str))
+           '{:a '{:b '{:c Str}}})
+  ;; error is the second 'update-in' call
+  (is-tc-err (let [m {:a {:b 1}}]
+               (update-in m [:a] update-in [:b] update-in [:c] inc)))
+  ;; error is (inc "a") call
+  (is-tc-err (let [m {:a {:b {:c "a"}}}]
+               (update-in m [:a] update-in [:b] update-in [:c] inc)))
+  (is-tc-e (update-in {:a {:b 1}} [:a :b] inc)
+           '{:a '{:b Num}})
+  (is-tc-e (update-in {:a {:b 1}} [:a :b] str)
+           '{:a '{:b Str}})
+  (is-tc-e (update-in {:a []} [:a :b] identity))
+  (is-tc-e (let [m {:a []}]
+             (update-in m [:a :b] identity))))
