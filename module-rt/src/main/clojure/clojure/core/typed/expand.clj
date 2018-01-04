@@ -4,17 +4,27 @@
   error messages."
   (:require [clojure.core.typed :as t]
             [clojure.core.typed.special-form :as spc]
+            [clojure.pprint :as pp]
             [clojure.core.typed.internal :as internal]))
 
 (defmulti -expand-macro (fn [form {:keys [vsym]}] vsym))
+(defmulti -expand-inline (fn [form {:keys [vsym]}] vsym))
 
 (defn custom-expansion? [vsym]
   {:pre [(symbol? vsym)
          (namespace vsym)]}
   (contains? (methods -expand-macro) vsym))
 
+(defn custom-inline? [vsym]
+  {:pre [(symbol? vsym)
+         (namespace vsym)]}
+  (contains? (methods -expand-inline) vsym))
+
 (defn expand-macro [form opts]
   (-expand-macro form opts))
+
+(defn expand-inline [form opts]
+  (-expand-inline form opts))
 
 (defmacro check-let-destructure [{:keys [expression]}] expression)
 (defmacro check-let-destructure-no-op [_] nil)
@@ -321,3 +331,121 @@
      {:msg-fn (fn [_#]
                 "This 'ns' expression returns nil, which does not agree with the expected type.")
       :blame-form ~form}))
+
+(comment
+(assoc-in 'a [:a] 1)
+(assoc 'a :a 1)
+)
+
+(defmacro with-post-blame-context [e opts]
+  {:pre [(map? opts)]}
+  `(do ~spc/special-form
+       ::with-post-blame-context
+       '~opts
+       ~e))
+
+(defn inline-assoc-in
+  ([[_ m ks v :as form]] (inline-assoc-in form m ks v))
+  ([form m ks v]
+   {:pre [(vector? ks)
+          (seq ks)]}
+   (inline-assoc-in form m ks v []))
+  ([form m [k & ks] v seen]
+   `(assoc (with-post-blame-context
+             ~m
+             {:msg-fn (fn [_#]
+                        ~(if (seq seen)
+                           (str "I traversed the first argument of this 'assoc-in' expression down the path"
+                                ;; indent
+                                "\n\n  "
+                                (binding [*print-level* 4
+                                          *print-length* 8]
+                                  (with-out-str
+                                    (pp/pprint (nth form 2))))
+                                "\n"
+                                "and expected to find each level to be 'assoc'able. However, I found the result down sub-path"
+                                "\n\n  "
+                                (binding [*print-level* 4
+                                          *print-length* 8]
+                                  (with-out-str
+                                    (pp/pprint seen)))
+                                "\n"
+                                "cannot be associated with the next key in the path, which is"
+                                "\n\n  "
+                                (binding [*print-level* 1
+                                          *print-length* 8]
+                                  (with-out-str (pp/pprint k))))
+                           (str "The first argument of 'assoc-in must be 'assoc'able")))
+              :blame-form ~form})
+           ~k
+           ~(if ks
+              (inline-assoc-in form
+                               `(get ~m ~k)
+                               ks v (conj seen k))
+              v))))
+
+(comment 
+  (inline-assoc-in `(assoc-in {:a {:b nil}} [:a :b] 2))
+  (inline-assoc-in {:a {:b {:c nil}}} [:a :b :c] 2)
+)
+
+(defn inline-get-in
+  ([[_ m ks default :as form]] 
+   (if (nil? default)
+     (inline-get-in form m ks)
+     `(t/ann-form "core.typed only supports 'get-in' with 'nil' default value" t/Nothing)))
+  ([form m [k & ks]]
+   (if ks
+     (inline-get-in form `(get ~m ~k) ks)
+     `(get ~m ~k))))
+
+(defmethod -expand-inline 'clojure.core/assoc-in [form _]
+  {:pre [(= 4 (count form))]}
+  (let [[_ _ path] form
+        _ (assert (and (vector? path) (seq path)) "core.typed only supports non-empty vector paths with assoc-in")]
+    `(check-expected
+       ~(inline-assoc-in form)
+       {:msg-fn (fn [_#]
+                  "The return type of this 'assoc-in' expression does not agree with the expected type.")
+        :blame-form ~form})))
+
+(defmethod -expand-inline 'clojure.core/get-in [form _]
+  {:pre [(#{3 4} (count form))]}
+  (let [[_ _ path] form
+        _ (assert (and (vector? path) (seq path)) "core.typed only supports non-empty vector paths with get-in")]
+    `(check-expected
+       ~(inline-get-in form)
+       {:msg-fn (fn [_#]
+                  "The return type of this 'get-in' expression does not agree with the expected type.")
+        :blame-form ~form})))
+
+(defn inline-update-in
+  ([[_ m ks f & args :as form]] (inline-update-in form m ks f args))
+  ([form m ks f args]
+   `(assoc-in ~m ~ks (~f (get-in ~m ~ks) ~@args))))
+
+(defmethod -expand-inline 'clojure.core/update-in [form _]
+  {:pre [(<= 4 (count form))]}
+  (let [[_ _ path] form
+        _ (assert (and (vector? path) (seq path)) "core.typed only supports non-empty vector paths with 'update-in'")]
+    `(check-expected
+       ~(inline-update-in form)
+       {:msg-fn (fn [_#]
+                  "The return type of this 'update-in' expression does not agree with the expected type.")
+        :blame-form ~form})))
+
+
+(comment
+  (update-in m [:a :b] f x y z)
+  (assoc-in m [:a :b]
+            (fake-application
+              (f (get-in [:a :b]) x y z)
+              {:bad-function-blame f
+               :bad-argument {0 {:blame-form (update-in m [:a :b] f x y z)
+                                 :msg-fn (fn [_]
+                                           (str "The implicit first argument of this 'update-in' expression does not"
+                                                " match the first argument of the function."))}}}))
+
+  (assoc-in
+  )
+)
