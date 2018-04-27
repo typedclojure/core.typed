@@ -116,6 +116,7 @@
               (loop* ~(vec (interleave gs gs))
                      (let ~(vec (interleave bs gs))
                        ~@body)))))))
+   #_#_
    #'clojure.core/for
    (fn [&form &env seq-exprs body-expr]
      (@#'T/for &form &env seq-exprs body-expr))
@@ -180,6 +181,7 @@
                    (vary-meta res merge (meta form))
                    res))
 
+               #_#_
                inline?
                (let [res (apply inline? args)]
                  (taj/update-ns-map!)
