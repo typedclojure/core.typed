@@ -162,11 +162,13 @@
                   macro? (and (not local?) (:macro m)) ;; locals shadow macros
                   inline-arities-f (:inline-arities m)
                   inline? (or
-                            (when (var? v)
+                            (when (and (not local?) (var? v))
                               (let [vsym (coerce/var->symbol v)]
                                 (when (expand/custom-inline? vsym)
                                   (fn [& _args_]
                                     (expand/expand-inline form {:vsym vsym})))))
+                            ;; Disable :inline
+                            #_
                             (and (not local?)
                                  (or (not inline-arities-f)
                                      (inline-arities-f (count args)))
@@ -181,7 +183,6 @@
                    (vary-meta res merge (meta form))
                    res))
 
-               #_#_
                inline?
                (let [res (apply inline? args)]
                  (taj/update-ns-map!)

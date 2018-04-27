@@ -88,11 +88,12 @@
 
 (defmethod typing-rule 'clojure.core.typed.expand/check-for-expected
   [{[_ {:keys [expr expected-local] :as form-opts} :as form] :form,
-    :keys [expr expected check locals solve-subtype subtype? delayed-error abbreviate-type
+    :keys [expr opts expected check locals solve-subtype subtype? delayed-error abbreviate-type
            emit-form] :as opt}]
   (assert nil "FIXME update args above and defmacro")
   (assert (not (:expected opt)))
-  (let [l (get locals expected-local)
+  (let [{:keys [expected-local]} opts
+        l (get locals expected-local)
         _ (assert l expected-local)
         [qut expected] (-> l :init emit-form)
         _ (assert (= 'quote qut))
@@ -133,9 +134,25 @@
                              %))
                   expected))))
 
+(defmethod typing-rule 'clojure.core.typed.expand/type-error
+  [{:keys [expr opts delayed-error]}]
+  (let [{:keys [msg-fn form]} opts]
+    (delayed-error ((eval msg-fn) {}) {:form form})
+    (assoc expr ::expr-type {:type `t/Nothing})))
+
+(defmethod typing-rule 'clojure.core.typed.expand/with-post-blame-context
+  [{:keys [expr opts env expected check]} ]
+  (let [ce (check expr expected)]
+    (update-in ce [::expr-type :opts]
+               ;; earlier messages override later ones
+               #(merge
+                  (select-keys opts [:blame-form :msg-fn])
+                  %))))
+
 (defn ann-form-typing-rule 
   [{:keys [expr opts expected check subtype? expected-error]}]
   ;; FIXME use check-below
+  (assert nil "TYPING_RULE ann-form-typing-rule")
   (let [ty (:type opts)
         ;; FIXME I don't think this `form` is initialized and/or used properly here, revisit!!
         form (:form expr)
