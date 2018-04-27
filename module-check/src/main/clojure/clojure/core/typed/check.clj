@@ -1544,53 +1544,6 @@
   [{[_ _ {{tsyns :ann} :val} :as statements] :statements frm :ret, :keys [env], :as expr} expected]
   (special-loop/check-special-loop check expr expected))
 
-#_
-(defmethod internal-special-form :clojure.core.typed.expand/check-if-empty-body
-  [{[_ _ config-map-ast :as statements] :statements, e :ret, :keys [env], :as expr} expected]
-  (let [opts (second (ast-u/emit-form-fn config-map-ast))
-        _ (assert (map? opts))
-        ce (check e (when expected
-                      (if (empty? (:original-body opts))
-                        (update expected :opts 
-                                ;; earlier messages override later ones
-                                #(merge
-                                   (select-keys opts [:blame-form :msg-fn])
-                                   %))
-                        expected)))]
-    (assoc expr
-           :ret ce
-           u/expr-type (u/expr-type ce))))
-
-#_
-(defmethod internal-special-form :clojure.core.typed.expand/check-expected
-  [{[_ _ config-map-ast :as statements] :statements, e :ret, :keys [env], :as expr} expected]
-  (let [opts (second (ast-u/emit-form-fn config-map-ast))
-        _ (assert (map? opts))
-        ce (check e (when expected
-                      (update expected :opts 
-                              ;; earlier messages override later ones
-                              #(merge
-                                 (select-keys opts [:blame-form :msg-fn])
-                                 %))))]
-    (assoc expr
-           :ret ce
-           u/expr-type (u/expr-type ce))))
-
-(defmethod internal-special-form :clojure.core.typed.expand/with-post-blame-context
-  [{[_ _ config-map-ast :as statements] :statements, e :ret, :keys [env], :as expr} expected]
-  (assert nil "FIXME move to rules")
-  (let [opts (second (ast-u/emit-form-fn config-map-ast))
-        _ (assert (map? opts))
-        ce (check e expected)]
-    (assoc expr
-           :ret ce
-           u/expr-type (let [expected (u/expr-type ce)]
-                         (update expected :opts 
-                                 ;; earlier messages override later ones
-                                 #(merge
-                                    (select-keys opts [:blame-form :msg-fn])
-                                    %))))))
-
 (defmethod internal-special-form :default
   [expr expected]
   (binding [vs/*current-expr* expr]

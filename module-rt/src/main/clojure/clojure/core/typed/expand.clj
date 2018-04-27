@@ -28,13 +28,8 @@
 (defmacro check-let-destructure [{:keys [expression]}] expression)
 (defmacro check-let-destructure-no-op [_] nil)
 
-(defmethod -expand-macro `check-let-destructure [[_ {:keys [expression]} :as form] _] expression)
-
-(defmethod -expand-macro `check-let-destructure-no-op [_ _] nil)
-
 (defmethod -expand-macro 'clojure.core/let
   [[_ bindings-form & body-forms :as form] _]
-  (prn "TYPING_RULE clojure.core/let")
   (let [gs (gensym "b")]
     (reduce
       (fn [form [expression binding]]
@@ -390,11 +385,20 @@
   (inline-assoc-in {:a {:b {:c nil}}} [:a :b :c] 2)
 )
 
+(defmacro type-error [opts]
+  {:pre [(map? opts)]}
+  `(do ~spc/special-form
+       ::type-error
+       '~opts
+       nil))
+
 (defn inline-get-in
   ([[_ m ks default :as form]] 
    (if (nil? default)
      (inline-get-in form m ks)
-     `(t/ann-form "core.typed only supports 'get-in' with 'nil' default value" t/Nothing)))
+     `(type-error {:msg-fn (fn [_#]
+                             "core.typed only supports 'get-in' with 'nil' default value")
+                   :form ~form})))
   ([form m [k & ks]]
    (if ks
      (inline-get-in form `(get ~m ~k) ks)
@@ -402,6 +406,7 @@
 
 (defmethod -expand-inline 'clojure.core/assoc-in [form _]
   {:pre [(= 4 (count form))]}
+  (prn "-expand-inline clojure.core/assoc-in")
   (let [[_ _ path] form
         _ (assert (and (vector? path) (seq path)) "core.typed only supports non-empty vector paths with assoc-in")]
     `(check-expected

@@ -199,8 +199,8 @@
   (is-tc-e (get-in {:a {:b 1}} [:a :b])
            Num)
   ; improved error
-  (is-tc-e (get-in {:a {:b 1}} [:a :b])
-           Sym)
+  (is-tc-err (get-in {:a {:b 1}} [:a :b])
+             Sym)
   ;; FIXME need better messages for 'default'
   (is-tc-err (get-in {:a {:b 1}} [:a :b] 1))
   (is-tc-err (get-in {:a {:b 1}} [:a :b] 1)
