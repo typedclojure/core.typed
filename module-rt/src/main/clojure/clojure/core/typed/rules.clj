@@ -1,6 +1,6 @@
 (ns clojure.core.typed.rules
   (:require [clojure.core.typed :as t]
-						[clojure.core.typed.internal :as internal]))
+            [clojure.core.typed.internal :as internal]))
 
 (t/defalias TCType t/Any)
 (t/defalias MsgFnOpts (t/HMap))
