@@ -4,7 +4,7 @@
   (:require [clojure.core.typed :as t]
             [clojure.core.typed.debug :refer [dbg]]
             [clojure.core.typed.profiling :as p]
-            ;[clojure.core.typed.rules :as rules]
+            [clojure.core.typed.rules :as rules]
             [clojure.core.typed.check-below :as below]
             [clojure.core.typed.abo :as abo]
             [clojure.core.typed.analyze-clj :as ana-clj]
@@ -279,12 +279,6 @@
                            (r/ret (c/RClass-of Var [t t])
                                   (fo/-true-filter))
                            expected)))))
-
-(defmulti invoke-frozen (fn [vsym {:keys [op] :as expr} expected] 
-                           {:pre [(#{:frozen-macro} op)]
-                            :post [(symbol? %)]}
-                           vsym))
-(u/add-defmethod-generator invoke-frozen)
 
 (defmulti invoke-special (fn [{fexpr :fn :keys [op] :as expr} & args] 
                            {:pre [(#{:invoke} op)]
@@ -646,9 +640,14 @@
                              (r/ret r/-nil)
                              expected)))))
 
-#_
+(defn typing-rule-opts [expr]
+  (second (:form (nth (:statements expr) 2))))
+
+(defn typing-rule-expr [expr]
+  (:ret expr))
+
 (defn invoke-typing-rule
-  [vsym {:keys [expanded-form unexpanded-form args env] :as expr} expected]
+  [vsym {:keys [env] :as expr} expected]
   (let [unparse-type-verbose #(binding [vs/*verbose-types* false]
                                 (prs/unparse-type %))
         maybe-map->TCResult #(some-> % cu/map->TCResult)
@@ -680,11 +679,10 @@
                                                 (unparse-type-verbose (:type v))])))
                                   (select-keys substitution gvs)))))
         rule-args {:vsym vsym
+                   :opts (typing-rule-opts expr)
+                   :expr (typing-rule-expr expr)
                    :locals (:locals env)
                    :expected (some-> expected cu/TCResult->map)
-                   :expanded-form expanded-form
-                   :unexpanded-form unexpanded-form
-                   :form unexpanded-form
                    :maybe-check-expected (fn [actual expected]
                                            {:pre [(map? actual)
                                                   ((some-fn nil? map?) expected)]
@@ -695,15 +693,12 @@
                                                (maybe-map->TCResult expected))
                                              cu/TCResult->map))
                    :check (fn check-fn
-                            ([form] (check-fn form nil))
-                            ([form expected]
+                            ([expr] (check-fn expr nil))
+                            ([expr expected]
                              {:pre [((some-fn nil? map?) expected)]}
                              (let [ret (some-> expected cu/map->TCResult)
-                                   ;; TODO do we want to accept an :env option in this function?
-                                   expr (ana-clj/thaw-form form env)
                                    cexpr (check expr ret)]
-                               {:form (ast-u/emit-form-fn cexpr)
-                                :expr-type (cu/TCResult->map (u/expr-type cexpr))})))
+                               (assoc cexpr ::rules/expr-type (cu/TCResult->map (u/expr-type cexpr))))))
                    :solve-subtype solve-subtype
                    :subtype? subtype?
                    :emit-form ast-u/emit-form-fn
@@ -723,29 +718,9 @@
                                      (let [opts (update opts :expected maybe-map->TCResult)]
                                        (apply err/int-error s (apply concat opts))))}
 
-        {out-expr-type :expr-type
-         out-form :form}
-        (rules/typing-rule rule-args)
-        unexpanded-form (jana2/unexpand-macro out-form {:vsym vsym
-                                                        :original-form unexpanded-form})]
-    {:op :frozen-macro
-     :env env
-     :form unexpanded-form
-     :unexpanded-form unexpanded-form
-     :expanded-form out-form
-     :macro (:macro expr)
-     u/expr-type (cu/map->TCResult out-expr-type)}))
-
-#_
-(defmethod invoke-frozen :default
-  [vsym {:keys [expanded-form] :as expr} expected]
-  (check expanded-form expected))
-
-#_
-(add-check-method :frozen-macro
-  [{:keys [macro] :as expr} & [expected]]
-  (binding [vs/*current-expr* expr]
-    (invoke-typing-rule (coerce/var->symbol macro) expr expected)))
+        ; throw away checked expr
+        {out-expr-type ::rules/expr-type} (rules/typing-rule rule-args)]
+    (assoc expr u/expr-type (cu/map->TCResult out-expr-type))))
 
 (defn swap!-dummy-arg-expr [env [target-expr & [f-expr & args]]]
   (assert f-expr)
@@ -1569,6 +1544,7 @@
   [{[_ _ {{tsyns :ann} :val} :as statements] :statements frm :ret, :keys [env], :as expr} expected]
   (special-loop/check-special-loop check expr expected))
 
+#_
 (defmethod internal-special-form :clojure.core.typed.expand/check-if-empty-body
   [{[_ _ config-map-ast :as statements] :statements, e :ret, :keys [env], :as expr} expected]
   (let [opts (second (ast-u/emit-form-fn config-map-ast))
@@ -1585,6 +1561,7 @@
            :ret ce
            u/expr-type (u/expr-type ce))))
 
+#_
 (defmethod internal-special-form :clojure.core.typed.expand/check-expected
   [{[_ _ config-map-ast :as statements] :statements, e :ret, :keys [env], :as expr} expected]
   (let [opts (second (ast-u/emit-form-fn config-map-ast))
@@ -1601,6 +1578,7 @@
 
 (defmethod internal-special-form :clojure.core.typed.expand/with-post-blame-context
   [{[_ _ config-map-ast :as statements] :statements, e :ret, :keys [env], :as expr} expected]
+  (assert nil "FIXME move to rules")
   (let [opts (second (ast-u/emit-form-fn config-map-ast))
         _ (assert (map? opts))
         ce (check e expected)]
@@ -1615,7 +1593,8 @@
 
 (defmethod internal-special-form :default
   [expr expected]
-  (err/int-error (str "No such internal form: " (ast-u/emit-form-fn expr))))
+  (binding [vs/*current-expr* expr]
+    (invoke-typing-rule (coerce/kw->symbol (u/internal-dispatch-val expr)) expr expected)))
 
 (add-check-method :do
   [expr & [expected]]

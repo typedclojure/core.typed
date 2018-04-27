@@ -5,6 +5,8 @@
 (t/defalias TCType t/Any)
 (t/defalias MsgFnOpts (t/HMap))
 
+(t/defalias AST (t/Map t/Any t/Any))
+
 (t/defalias ExprType
   (t/HMap :mandatory
           {;; the type
@@ -28,17 +30,17 @@
 
 (t/defalias RuleOpts
   (t/HMap :mandatory
-          {;; the fully qualified symbol of the current
+          {; FIXME docs
+           :expr AST
+           ; FIXME docs
+           :opts t/Any
+           ;; the fully qualified symbol of the current
            ;; macro being type checked
            :vsym t/Sym
            ;; Map of current tools.analyzer local scope
            :locals (t/Map t/Sym t/Any)
            ;; expected type of the current form
            :expected (t/U nil ExprType)
-           ;; the expanded form of the current form
-           :expanded-form t/Any
-           ;; the unexpanded form (to be type checked)
-           :form (t/Seq t/Any), :unexpanded-form (t/Seq t/Any)
            ;; (fn [actual maybe-expected] ..)
            ;; if provided, checks actual is compatible with the expected type
            :maybe-check-expected [ExprType (t/U nil ExprType) -> ExprType]
@@ -62,32 +64,33 @@
            :internal-error [t/Str ErrorOpts :-> t/Any]
            }))
 
-(t/ann typing-rule [RuleOpts -> '{:form t/Any :expr-type ExprType}])
+(t/ann typing-rule [RuleOpts -> '{:op t/Kw, ::expr-type ExprType}])
 (defmulti typing-rule (fn [{:keys [vsym]}] vsym))
 
 (defmethod typing-rule 'clojure.core.typed.expand/gather-for-return-type
   [{[_ ret] :form, :keys [expected check solve-subtype]}]
-  (let [{:keys [expr-type] :as m} (check ret)
+  (assert nil "FIXME args etc.")
+  (let [{:keys [::expr-type] :as m} (check ret)
         {:keys [x] :as solved?} (solve-subtype '[x]
                                                (fn [x]
                                                  [(:type expr-type) `(t/U nil '[~x])]))
         _ (assert solved?)
         ret {:type `(t/Seq ~x)
              :filters {:else 'ff}}]
-    (assoc m :expr-type ret)))
+    (assoc m ::expr-type ret)))
 
 (defmethod typing-rule 'clojure.core.typed.expand/expected-as
   [{[_ s body :as form] :form, :keys [expected check]}]
-  (assert nil "need different approach")
+  (assert nil "FIXME args etc.")
   (check `(let* [~s '~expected]
             ~body)
          expected))
 
 (defmethod typing-rule 'clojure.core.typed.expand/check-for-expected
   [{[_ {:keys [expr expected-local] :as form-opts} :as form] :form,
-    :keys [expected check locals solve-subtype subtype? delayed-error abbreviate-type
+    :keys [expr expected check locals solve-subtype subtype? delayed-error abbreviate-type
            emit-form] :as opt}]
-  (assert nil "need different approach")
+  (assert nil "FIXME update args above and defmacro")
   (assert (not (:expected opt)))
   (let [l (get locals expected-local)
         _ (assert l expected-local)
@@ -111,46 +114,49 @@
                       {:type x}))))))
 
 (defmethod typing-rule 'clojure.core.typed.expand/check-expected
-  [{[_ e opts :as form] :form, :keys [expected check]}]
-  (check e (when expected
-             (update expected :opts 
-                     ;; earlier messages override later ones
-                     #(merge
-                        (select-keys opts [:blame-form :msg-fn])
-                        %)))))
+  [{:keys [expr opts expected check]}]
+  (check expr (when expected
+                (update expected :opts 
+                        ;; earlier messages override later ones
+                        #(merge
+                           (select-keys opts [:blame-form :msg-fn])
+                           %)))))
 
 (defmethod typing-rule 'clojure.core.typed.expand/check-if-empty-body
-  [{[_ [_do_ & body :as e] opts :as form] :form, :keys [expected check]}]
-  (check e (when expected
-             (if (empty? (:original-body opts))
-               (update expected :opts 
-                       ;; earlier messages override later ones
-                       #(merge
-                          (select-keys opts [:blame-form :msg-fn])
-                          %))
-               expected))))
+  [{:keys [expr opts expected check]}]
+  (check expr (when expected
+                (if (empty? (:original-body opts))
+                  (update expected :opts 
+                          ;; earlier messages override later ones
+                          #(merge
+                             (select-keys opts [:blame-form :msg-fn])
+                             %))
+                  expected))))
 
 (defn ann-form-typing-rule 
-  [{[_ e ty :as form] :form, :keys [expected check subtype? expected-error]}]
+  [{:keys [expr opts expected check subtype? expected-error]}]
   ;; FIXME use check-below
-  (let [_ (when expected
+  (let [ty (:type opts)
+        ;; FIXME I don't think this `form` is initialized and/or used properly here, revisit!!
+        form (:form expr)
+        _ (when expected
             (when-not (subtype? ty (:type expected))
               (expected-error ty (:type expected)
                               {:expected (update expected :opts
                                                  ;; prefer earlier blame-form
                                                  #(merge {:blame-form form}
                                                          %))})))]
-    (check e (merge expected {:type ty}))))
+    (check expr (merge expected {:type ty}))))
 
 (defmethod typing-rule `t/ann-form [& args] (apply ann-form-typing-rule args))
 (defmethod typing-rule 'clojure.core.typed.macros/ann-form [& args] (apply ann-form-typing-rule args))
 
 (defn tc-ignore-typing-rule 
-  [{:keys [expanded-form expected maybe-check-expected]}]
-  {:form expanded-form
-   :expr-type (maybe-check-expected
-                {:type `t/Any}
-                expected)})
+  [{:keys [expr expected maybe-check-expected]}]
+  (assoc expr
+         ::expr-type (maybe-check-expected
+                       {:type `t/Any}
+                       expected)))
 
 (defmethod typing-rule `t/tc-ignore [& args] (apply tc-ignore-typing-rule args))
 (defmethod typing-rule 'clojure.core.typed.macros/tc-ignore [& args] (apply tc-ignore-typing-rule args))
@@ -158,9 +164,9 @@
 (defmethod typing-rule 'clojure.core.typed.expand/ignore-expected-if
   [{[_ ignore? body :as form] :form, :keys [expected check]}]
   {:pre [(boolean? ignore?)]}
+  (assert nil "FIXME args etc.")
   (check body (when-not ignore? expected)))
 
-
 (defmethod typing-rule :default
-  [{:keys [expanded-form expected check]}]
-  (check expanded-form expected))
+  [{:keys [form internal-error]}]
+  (internal-error (str "No such internal form: " form)))

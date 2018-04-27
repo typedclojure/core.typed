@@ -1,7 +1,6 @@
 (ns clojure.core.typed.expand
-  "Rewriting rules for custom expansions and undoing those
-  custom expansions (\"unexpansions\"), mainly to improve type checking
-  error messages."
+  "Rewriting rules for custom expansions, to improve type checking
+  error messages and reduce local annotations."
   (:require [clojure.core.typed :as t]
             [clojure.core.typed.special-form :as spc]
             [clojure.pprint :as pp]
@@ -35,6 +34,7 @@
 
 (defmethod -expand-macro 'clojure.core/let
   [[_ bindings-form & body-forms :as form] _]
+  (prn "TYPING_RULE clojure.core/let")
   (let [gs (gensym "b")]
     (reduce
       (fn [form [expression binding]]
@@ -47,8 +47,8 @@
          (do ~@body-forms)
          {:msg-fn (fn [_#]
                      "This 'let' expression returns nil with an empty body, which does not agree with the expected type")
-          :blame-form '~form
-          :original-body '~body-forms})
+          :blame-form ~form
+          :original-body ~body-forms})
       (partition 2 (rseq bindings-form)))))
 
 (defmacro check-if-empty-body [e opts]
@@ -234,33 +234,34 @@
     `(fn* ~@(when name [name])
           ~@(map expand-sig sigs))))
 
-(defmacro check-for-seq [{:keys [expr]}]
-  (throw (Exception. "Cannot expand check-for-seq")))
-
-(defmethod -expand-macro `check-for-seq [[_ {:keys [expr]} :as form] _]
+(defmacro check-for-seq [expr]
+  (throw (Exception. "TODO check-for-seq"))
   `(rand-nth (seq ~expr)))
 
 (defmacro expected-as [s body]
-  body)
-
-(defmethod -expand-macro `expected-as [[_ s body] _]
-  `(let* [~s 'nil] ~body))
+  `(do ~spc/special-form
+       ::expected-as
+       '{:sym ~s}
+       ~body))
 
 (defmacro gather-for-return-type [ret]
   (throw (Exception. "gather-for-return-type Not for expansion")))
 
-(defmethod -expand-macro `gather-for-return-type [[_ ret] _]
-  ret)
+(defmacro gather-for-return-type [_ ret]
+  `(do ~spc/special-form
+       ::gather-for-return-type
+       '{}
+       ~ret))
 
 (defmacro check-for-expected [{:keys [expr expected-local]}]
   (throw (Exception. "check-for-expected Not for expansion")))
 
 (defmethod -expand-macro `check-for-expected [[_ {:keys [expr expected-local]}] _]
+  (assert nil "TODO check-for-expected")
   expr)
 
 (defmethod -expand-macro 'clojure.core/for
   [[_ seq-forms body-form :as form] _]
-  (time
   (let [expg (gensym 'expected)
         ret (reduce
               (fn [body [expr binding]]
@@ -281,7 +282,7 @@
                    :expected-local ~expg})]
               (partition 2 (rseq seq-forms)))]
     `(expected-as ~expg
-                  (gather-for-return-type ~ret)))))
+                  (gather-for-return-type ~ret))))
 
 (defmacro ignore-expected-if [tst body] body)
 

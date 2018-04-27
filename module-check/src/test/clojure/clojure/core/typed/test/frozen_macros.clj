@@ -54,6 +54,7 @@
              (when-not (not a) (inc a))))
   (is-tc-e (fn [a :- Number] :- Number
              (when-not (not a) (inc a))))
+  ;; better error
   (is-tc-err (fn [a :- (U nil Number)] :- Number,
                (when-not (not a) (inc a))))
   ;; 'then' expected error
@@ -167,6 +168,7 @@
 (deftest for-test
   (is-tc-e #(clojure.core/for [a [1 2]] a))
   (is-tc-e #(clojure.core/for [a [1 2]] a) [-> (Seqable Number)])
+  (is-tc-err #(clojure.core/for [a [1 2]] a) [-> (Seqable Boolean)])
   ;; FIXME improve error
   (is-tc-err #(clojure.core/for [a [1 2]] a) [-> Number])
   ;; FIXME improve error

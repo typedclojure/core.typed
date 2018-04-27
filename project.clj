@@ -34,14 +34,14 @@
                  [rhizome "0.2.5"]
                  ]
 
-  :repl-options {:port 64540
+  :repl-options {:port 64544
                  :timeout 6645464645555}
 
   ; fireplace repl middleware
   :profiles {:dev {:dependencies [[com.cemerick/piggieback "0.2.1"]
                                   [org.clojure/tools.nrepl "0.2.10"]]
                    ; CLJS fireplace REPL
-                   :repl-options {:port 64540
+                   :repl-options {:port 64544
                                   :timeout 6645464644444455
                                   ;:nrepl-middleware [cemerick.piggieback/wrap-cljs-repl]
                                   }
