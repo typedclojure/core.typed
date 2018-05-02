@@ -392,7 +392,8 @@
 ;========================
 
 (def typed-passes
-  (-> jana2/default-passes
+  (-> taj/default-passes
+      #_jana2/default-passes
       ; this pass is manually inserted as we check
       ; in functions like clojure.core.typed.check.utils/FieldExpr->Field
       ;(conj #'reflect-validated)
