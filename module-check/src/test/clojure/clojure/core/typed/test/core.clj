@@ -5,7 +5,7 @@
     [clojure.core.typed.test.test-utils :refer :all]
             [clojure.test :refer :all]
             [clojure.core.typed.analyze-clj :as ana]
-            [clojure.tools.analyzer.passes.jvm.emit-form :as emit-form]
+            ;[clojure.tools.analyzer.passes.jvm.emit-form :as emit-form]
             [clojure.repl :refer [pst]]
             [clojure.pprint :refer [pprint]]
             [clojure.data :refer [diff]]

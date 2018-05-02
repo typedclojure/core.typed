@@ -144,7 +144,7 @@
        (T/IFn [T/Any -> T/Any] 
               [T/Any (T/Map T/Any T/Any) -> T/Any]))
 (defn macroexpand-1
-  "If form represents a macro form or an inlineable function,returns its expansion,
+  "If form represents a macro form or an inlinable function, returns its expansion,
    else returns form."
   ([form] (macroexpand-1 form (taj/empty-env)))
   ([form env]
@@ -167,8 +167,6 @@
                                 (when (expand/custom-inline? vsym)
                                   (fn [& _args_]
                                     (expand/expand-inline form {:vsym vsym})))))
-                            ;; Disable :inline
-                            #_
                             (and (not local?)
                                  (or (not inline-arities-f)
                                      (inline-arities-f (count args)))

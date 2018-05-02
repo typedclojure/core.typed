@@ -2,7 +2,7 @@
   (:require [clojure.core.typed.check-form-common :as chk-form]
             [clojure.core.typed.analyze-clj :as ana-clj]
             [clojure.core.typed.check :as chk-clj]
-            [clojure.tools.analyzer.passes.jvm.emit-form :as emit-form]
+            [clojure.core.typed.ast-utils :as ast-u]
             [clojure.core.typed.runtime-check :as rt-chk]
             [clojure.core.typed.runtime-infer :as rt-infer]
             [clojure.core.typed.current-impl :as impl]))
@@ -18,7 +18,7 @@
    :eval-out-ast (fn eval-out-ast
                    ([ast] (eval-out-ast ast {}))
                    ([ast opts] (ana-clj/eval-ast ast opts)))
-   :emit-form emit-form/emit-form})
+   :emit-form ast-u/emit-form-fn})
 
 (defn check-form-info
   [form & opt]
