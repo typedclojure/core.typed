@@ -163,7 +163,9 @@
   ;; exact line number
   (is-tc-err (clojure.core/fn ([a]))
              [Number -> Number])
-  )
+  (is-tc-e #(inc
+              ((fn []
+                 (throw (Exception. "a")))))))
 
 (deftest for-test
   (is-tc-e #(clojure.core/for [a [1 2]] a))

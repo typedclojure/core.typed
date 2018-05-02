@@ -116,7 +116,7 @@
               (loop* ~(vec (interleave gs gs))
                      (let ~(vec (interleave bs gs))
                        ~@body)))))))
-   #_#_
+   ;#_#_
    #'clojure.core/for
    (fn [&form &env seq-exprs body-expr]
      (@#'T/for &form &env seq-exprs body-expr))
@@ -129,15 +129,26 @@
         ~(apply @#'core/defmacro &form &env args)))
    })
 
+(def types-as-macros? false)
+
 (T/ann ^:no-check typed-macro-lookup [T/Any :-> T/Any])
 (defn typed-macro-lookup [var]
   {:post [(ifn? %)]}
   (or (get *typed-macros* var)
-      (when (expand/custom-expansion? (coerce/var->symbol var))
-        (fn [form locals & _args_]
-          (expand/expand-macro form {:vsym (coerce/var->symbol var)
-                                     :locals locals})))
+      (when types-as-macros?
+        (when (expand/custom-expansion? (coerce/var->symbol var))
+          (fn [form locals & _args_]
+            (expand/expand-macro form {:vsym (coerce/var->symbol var)
+                                       :locals locals}))))
       var))
+
+(T/ann ^:no-check typed-inline-lookup [T/Any :-> T/Any])
+(defn typed-inline-lookup [form v]
+  (when types-as-macros?
+    (let [vsym (coerce/var->symbol v)]
+      (when (expand/custom-inline? vsym)
+        (fn [& _args_]
+          (expand/expand-inline form {:vsym vsym}))))))
 
 ;; copied from tools.analyze.jvm to insert `*typed-macros*`
 (T/ann ^:no-check macroexpand-1 
@@ -163,10 +174,7 @@
                   inline-arities-f (:inline-arities m)
                   inline? (or
                             (when (and (not local?) (var? v))
-                              (let [vsym (coerce/var->symbol v)]
-                                (when (expand/custom-inline? vsym)
-                                  (fn [& _args_]
-                                    (expand/expand-inline form {:vsym vsym})))))
+                              (typed-inline-lookup form v))
                             (and (not local?)
                                  (or (not inline-arities-f)
                                      (inline-arities-f (count args)))

@@ -230,7 +230,7 @@
           ~@(map expand-sig sigs))))
 
 (defmacro check-for-seq [expr]
-  (throw (Exception. "TODO check-for-seq"))
+  #_(throw (Exception. "TODO check-for-seq"))
   `(rand-nth (seq ~expr)))
 
 (defmacro expected-as [s body]
@@ -240,20 +240,13 @@
        ~body))
 
 (defmacro gather-for-return-type [ret]
-  (throw (Exception. "gather-for-return-type Not for expansion")))
-
-(defmacro gather-for-return-type [_ ret]
   `(do ~spc/special-form
        ::gather-for-return-type
        '{}
        ~ret))
 
 (defmacro check-for-expected [{:keys [expr expected-local]}]
-  (throw (Exception. "check-for-expected Not for expansion")))
-
-(defmethod -expand-macro `check-for-expected [[_ {:keys [expr expected-local]}] _]
-  (assert nil "TODO check-for-expected")
-  expr)
+  (throw (Exception. "TODO check-for-expected")))
 
 (defmethod -expand-macro 'clojure.core/for
   [[_ seq-forms body-form :as form] _]
@@ -318,7 +311,7 @@
                             :original-body ~body}))))))
       ~reassembled-fn-type)))
 
-(defmethod -expand-macro `t/fn [& args] (apply expand-typed-fn-macro args))
+(defmethod -expand-macro 'clojure.core.typed/fn [& args] (apply expand-typed-fn-macro args))
 (defmethod -expand-macro 'clojure.core.typed.macros/fn [& args] (apply expand-typed-fn-macro args))
 
 (defmethod -expand-macro 'clojure.core/ns [form _]

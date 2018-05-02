@@ -59,6 +59,13 @@
 (t/ann -any Type)
 (def -any (Top-maker))
 
+(t/ann -infer-any Type)
+(def -infer-any (with-meta -any {::t/infer true}))
+
+(defn infer-any? [t]
+  (and (= -infer-any t)
+       (boolean (-> t meta ::t/infer))))
+
 (u/ann-record Unchecked [vsym :- (U nil t/Sym)])
 (u/def-type Unchecked [vsym]
   "The unchecked type, like bottom and only introduced 
@@ -806,11 +813,11 @@
   :methods
   [p/TCType])
 
-(u/ann-record FnIntersection [types :- (t/NonEmptySeqable Function)])
+(u/ann-record FnIntersection [types :- (t/NonEmptyVec Function)])
 (u/def-type FnIntersection [types]
   "An ordered intersection of Functions."
   [(seq types)
-   (sequential? types)
+   (vector? types)
    (every? Function? types)]
   :methods
   [p/TCType])
@@ -857,7 +864,7 @@
 (t/ann ^:no-check make-FnIntersection [Function * -> FnIntersection])
 (defn make-FnIntersection [& fns]
   {:pre [(every? Function? fns)]}
-  (FnIntersection-maker fns))
+  (FnIntersection-maker (vec fns)))
 
 (u/ann-record NotType [type :- Type])
 (u/def-type NotType [type]
@@ -922,8 +929,7 @@
 (u/ann-record TCResult [t :- Type
                         fl :- p/IFilterSet
                         o :- p/IRObject
-                        flow :- FlowSet
-                        opts :- (t/Map t/Any t/Any)])
+                        flow :- FlowSet])
 
 (t/ann Result->TCResult [Result -> TCResult])
 (defn Result->TCResult [{:keys [t fl o flow] :as r}]
@@ -982,13 +988,12 @@
   :methods
   [p/IFilter])
 
-(u/def-type TCResult [t fl o flow opts]
+(u/def-type TCResult [t fl o flow]
   "This record represents the result of typechecking an expression"
   [(Type? t)
    (p/IFilterSet? fl)
    (p/IRObject? o)
-   (FlowSet? flow)
-   (map? opts)]
+   (FlowSet? flow)]
   ;:methods
   ;[p/TCAnyType]
   )
@@ -1016,7 +1021,7 @@
           (p/IRObject? o)
           (FlowSet? flow)]
     :post [(TCResult? %)]}
-   (TCResult-maker t f o flow {})))
+   (TCResult-maker t f o flow)))
 
 (t/ann ret-t [TCResult -> Type])
 (defn ret-t [r]
