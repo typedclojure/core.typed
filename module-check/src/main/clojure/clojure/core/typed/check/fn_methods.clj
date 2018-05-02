@@ -92,7 +92,7 @@
          (methods? mthods)
          (opt-map? opt)]
    :post [(method-return? %)]}
-  (prn "check-fni" expected)
+  ;(prn "check-fni" expected)
   (let [; unwrap polymorphic expected types
         [fin inst-frees bnds poly?] (cu/unwrap-poly expected)
         ; this should never fail due to function-type? check
