@@ -8,8 +8,6 @@
             [clojure.core.typed.check.fn-methods :as fn-methods]
             [clojure.core.typed.check.utils :as cu]))
 
-(alter-meta! *ns* assoc :skip-wiki true)
-
 ; Can take a CLJ or CLJS function expression.
 ;
 ;[FnExpr (Option Type) -> Expr]
