@@ -214,14 +214,10 @@
           ;_ (prn "poly" poly)
           ;_ (prn "fn-anns-quoted" fn-anns-quoted)
           fn-anns (impl/impl-case
-                    :clojure (if (seq? (first fn-anns-quoted))
-                               (second fn-anns-quoted)
-                               fn-anns-quoted)
+                    :clojure (second fn-anns-quoted)
                     :cljs fn-anns-quoted)
           poly (impl/impl-case
-                 :clojure (if (seq? (first fn-anns-quoted))
-                            (second poly-quoted)
-                            poly-quoted)
+                 :clojure (second poly-quoted)
                  :cljs poly-quoted)
           _ (assert (vector? fn-anns) (pr-str fn-anns))
           self-name (cu/fn-self-name fexpr)
