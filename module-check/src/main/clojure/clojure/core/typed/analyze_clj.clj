@@ -435,12 +435,13 @@
    (u/trace "Analyze1 form" *file* form)
    (let [old-bindings (or (some-> bindings-atom deref) {})]
      (with-bindings old-bindings
-       (let [ana (jana2/analyze+eval 
+       (let [ana (analyze+eval ;jana2/analyze+eval 
                    form (or env (taj/empty-env))
                    (->
                      (merge-with merge opts 
                                  {:bindings (thread-bindings)
                                   :special-form? special-form?})
+                     #_
                      (assoc
                        ;; if this is a typed special form like an ann-form, don't treat like
                        ;; a top-level do.

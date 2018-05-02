@@ -65,3 +65,13 @@
              sym)
            (-> ret :body :ret :body :ret :name)))
     (is (not= 'a (-> ret :body :ret :body :ret :name)))))
+
+#_
+(deftest tag-infer-test
+  (is (= :instance-call
+         (-> (ast (try :anything (catch Exception e (.getCause e))))
+             :catches
+             first
+             :body
+             :ret
+             :op))))
