@@ -110,6 +110,14 @@
        :doc      "Multimethod that dispatches on op, should default to -pre-parse"}
   pre-parse)
 
+(def ^{:dynamic  true
+       :arglists '([form opts])}
+  expand-macro)
+
+(def ^{:dynamic  true
+       :arglists '([expanded-form opts])}
+  unexpand-macro)
+
 ;; this node wraps non-quoted collections literals with metadata attached
 ;; to them, the metadata will be evaluated at run-time, not treated like a constant
 (defn pre-wrapping-meta
@@ -209,6 +217,7 @@
 
 (defn pre-analyze-seq
   [form env]
+  ;(prn "pre-analyze-seq" form)
   (let [op (first form)]
     (when (nil? op)
       (throw (ex-info "Can't call nil"
@@ -218,8 +227,8 @@
       (if (= form mform) ;; function/special-form invocation
         (pre-parse mform env)
         (-> (pre-analyze-form mform env)
-          (update-in [:raw-forms] (fnil conj ())
-                     (vary-meta form assoc ::resolved-op (u/resolve-sym op env))))))))
+            (update-in [:raw-forms] (fnil conj ())
+                       (vary-meta form assoc ::resolved-op (u/resolve-sym op env))))))))
 
 (defn pre-parse-do
   [[_ & exprs :as form] env]

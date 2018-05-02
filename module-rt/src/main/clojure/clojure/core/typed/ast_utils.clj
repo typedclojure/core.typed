@@ -17,6 +17,12 @@
             (require '[clojure.core.typed.util-cljs])
             ((impl/v 'clojure.core.typed.util-cljs/emit-form) expr))))
 
+(defn emit-raw-invoke [expr]
+  (impl/impl-case
+    :clojure (case (:op expr)
+               :invoke (last (:raw-forms expr)))
+    :cljs (assert nil "TODO emit-raw-invoke for cljs")))
+
 (defn constant-expr [expr]
   {:pre [(#{:quote} (:op expr))
          (#{:const} (:op (:expr expr)))]}
@@ -159,9 +165,6 @@
                  :params (vec (concat required-params
                                       (when rest-param
                                         [rest-param]))))))
-
-(defn let-body-kw []
-  :body)
 
 (defn def-var-name [expr]
   {:post [(symbol? %)]}

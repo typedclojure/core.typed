@@ -8,8 +8,6 @@
             [clojure.core.typed.check.fn-methods :as fn-methods]
             [clojure.core.typed.check.utils :as cu]))
 
-(alter-meta! *ns* assoc :skip-wiki true)
-
 ; Can take a CLJ or CLJS function expression.
 ;
 ;[FnExpr (Option Type) -> Expr]
@@ -21,7 +19,7 @@
    :post [(-> % u/expr-type r/TCResult?)
           (vector? (::t/cmethods %))]}
   ;(prn "check-fn" methods)
-  (let [{:keys [methods cmethods]}
+  (let [{:keys [ifn methods cmethods]}
         (fn-methods/check-fn-methods 
           methods
           (r/ret-t expected)
@@ -29,5 +27,5 @@
     (assoc fexpr
            :methods methods
            ::t/cmethods cmethods
-           u/expr-type  (r/ret (r/ret-t expected)
+           u/expr-type  (r/ret ifn
                                (fo/-FS fl/-top fl/-bot)))))

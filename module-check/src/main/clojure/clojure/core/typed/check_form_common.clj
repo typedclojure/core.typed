@@ -11,8 +11,7 @@
             [clojure.core.typed.current-impl :as impl]
             [clojure.core.typed.lex-env :as lex-env]
             [clojure.core.typed.errors :as err]
-            [clojure.core.typed.parse-unparse :as prs])
-  (:import (clojure.lang ExceptionInfo)))
+            [clojure.core.typed.parse-unparse :as prs]))
 
 ;; (check-form-info config-map form & kw-args)
 ;; 
@@ -95,7 +94,9 @@
               vs/*analyze-ns-cache* (cache/soft-cache-factory {})
               vs/*in-check-form* true
               vs/*lexical-env* (lex-env/init-lexical-env)
-              vs/*can-rewrite* true]
+              ;; not supported anymore after c.c.t.expand basically expands
+              ;; to garbage we throw away.
+              vs/*can-rewrite* nil]
       (let [expected (or
                        expected-ret
                        (when type-provided?
@@ -134,7 +135,7 @@
                                            (check-expr ast expected)))
                                  eval-cexp (or (when-not no-eval
                                                  eval-out-ast)
-                                               identity)
+                                               (fn [ast _] ast))
                                  _ (when file-mapping
                                      (p/p :check-form/file-mapping
                                        (swap! file-mapping-atom
@@ -145,7 +146,7 @@
                              (or (some-> (seq (delayed-errors-fn)) 
                                          err/print-errors!)
                                  (p/p :check-form/eval-ast
-                                   (eval-cexp c-ast))))))
+                                   (eval-cexp c-ast opt))))))
             terminal-error (atom nil)
             c-ast (try
                     (p/p :check-form/ast-for-form
