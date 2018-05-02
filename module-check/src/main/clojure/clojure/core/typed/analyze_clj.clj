@@ -421,7 +421,12 @@
 ;; (All [x ...] [-> '{(Var x) x ...})])
 (defn thread-bindings []
   (t/tc-ignore
-    {#'ana2/macroexpand-1 macroexpand-1
+    ; t.a.j
+    {#'ta/macroexpand-1 macroexpand-1
+     #'taj/run-passes run-passes
+     }
+    ; analyzer2
+    #_{#'ana2/macroexpand-1 macroexpand-1
      ;#'jana2/run-passes run-passes
      }))
 
