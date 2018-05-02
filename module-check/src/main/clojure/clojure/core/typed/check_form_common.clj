@@ -11,8 +11,7 @@
             [clojure.core.typed.current-impl :as impl]
             [clojure.core.typed.lex-env :as lex-env]
             [clojure.core.typed.errors :as err]
-            [clojure.core.typed.parse-unparse :as prs])
-  (:import (clojure.lang ExceptionInfo)))
+            [clojure.core.typed.parse-unparse :as prs]))
 
 ;; (check-form-info config-map form & kw-args)
 ;; 
@@ -157,11 +156,11 @@
                                      :expected expected
                                      :stop-analysis stop-analysis
                                      :env env}))
-                    (catch ExceptionInfo e
+                    (catch Throwable e
                       (let [e (if (some-> e ex-data err/tc-error?)
                                 (try
                                   (err/print-errors! (vec (concat (delayed-errors-fn) [e])))
-                                  (catch ExceptionInfo e
+                                  (catch Throwable e
                                     e))
                                 e)]
                         (reset! terminal-error e)
