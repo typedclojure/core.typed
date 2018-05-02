@@ -1114,14 +1114,14 @@
   (is-clj (subtype? 
             (ety 
               #(= Number (class %)))
-            (FnIntersection-maker
-              [(make-Function
+            (make-FnIntersection
+               (make-Function
                  [-any]
                  (RClass-of 'boolean)
                  :filter (-FS (-and (-filter (-val Number) 0 [(ClassPE-maker)])
                                     ;the important filter, updates first argument to be Number if predicate is true
                                     (-filter (RClass-of Number) 0))
-                              (-not-filter (-val Number) 0 [(ClassPE-maker)])))]))))
+                              (-not-filter (-val Number) 0 [(ClassPE-maker)])))))))
 
 ;TODO ^--
 ;(-> (tc-t #(let [a (class %)]
@@ -3316,20 +3316,20 @@
              first
              :drest
              :name)
-         0)))
+         0))
 
-(cf (tc/fn [f :- (clojure.core.typed/All [b ...]
-                   [-> [b ... b -> clojure.core.typed/Any]])] 
-      (f)))
-(cf (tc/fn [f :- (clojure.core.typed/All [b ...]
-                   ['[b ... b] ... b -> [b ... b -> clojure.core.typed/Any]])] 
-      (f [1 2] [1 2])))
-(cf (tc/fn [f :- (clojure.core.typed/All [b ...]
-                   [-> (HVec [b ... b])])] 
-      (f)))
-(cf (tc/fn [f :- (clojure.core.typed/All [b ...]
-                   [-> (HSequential [b ... b])])] 
-      (f)))
+  (is (cf (tc/fn [f :- (clojure.core.typed/All [b ...]
+                         [-> [b ... b -> clojure.core.typed/Any]])]
+            (f))))
+  (is (cf (tc/fn [f :- (clojure.core.typed/All [b ...]
+                         ['[b ... b] ... b -> [b ... b -> clojure.core.typed/Any]])] 
+            (f [1 2] [1 2]))))
+  (is (cf (tc/fn [f :- (clojure.core.typed/All [b ...]
+                         [-> (HVec [b ... b])])] 
+            (f))))
+  (is (cf (tc/fn [f :- (clojure.core.typed/All [b ...]
+                         [-> (HSequential [b ... b])])] 
+            (f)))))
 
 #_(check-form* '(do (ns unit-test.blah
                     (:require [clojure.core.typed :as t]))
@@ -3570,6 +3570,9 @@
 
 (deftest anon-fn
   (is-tc-e (inc ((fn [a :- Num] a) 1)))
+  (is-tc-e (ann-form
+             (fn ([a :- Num b :- Num] (.toUpperCase ^String b)))
+             [String String -> String]))
   (is-tc-e (fn foo 
              ([a :- Num] :- Num (foo 1 a))
              ([a :- Num b :- Num] :- Num b)))
