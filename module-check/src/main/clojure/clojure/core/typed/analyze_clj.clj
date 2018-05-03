@@ -13,6 +13,7 @@
             [clojure.tools.analyzer.passes.jvm.warn-on-reflection :as warn-reflect]
             [clojure.core.typed.analyzer2.jvm :as jana2]
             [clojure.core.typed.analyzer2 :as ana2]
+            [clojure.core.typed.analyzer2.pre-analyze :as pre]
             [clojure.tools.reader :as tr]
             [clojure.tools.reader.reader-types :as readers]
             [clojure.tools.analyzer.passes.jvm.validate :as validate]
@@ -31,6 +32,8 @@
             [clojure.set :as set]
             [clojure.string :as str]
             [clojure.core :as core]
+            [clojure.core.typed.rules :as rules]
+            [clojure.core.typed.expand :as expand]
             [clojure.core.typed.ns-deps :as dep]
             [clojure.core.typed.ns-deps-utils :as dep-u])
   (:import (clojure.tools.analyzer.jvm ExceptionThrown)))
@@ -113,6 +116,7 @@
               (loop* ~(vec (interleave gs gs))
                      (let ~(vec (interleave bs gs))
                        ~@body)))))))
+   #_#_
    #'clojure.core/for
    (fn [&form &env seq-exprs body-expr]
      (@#'T/for &form &env seq-exprs body-expr))
@@ -127,14 +131,20 @@
 
 (T/ann ^:no-check typed-macro-lookup [T/Any :-> T/Any])
 (defn typed-macro-lookup [var]
-  (get *typed-macros* var var))
+  {:post [(ifn? %)]}
+  (or (get *typed-macros* var)
+      (when (expand/custom-expansion? (coerce/var->symbol var))
+        (fn [form locals & _args_]
+          (expand/expand-macro form {:vsym (coerce/var->symbol var)
+                                     :locals locals})))
+      var))
 
 ;; copied from tools.analyze.jvm to insert `*typed-macros*`
 (T/ann ^:no-check macroexpand-1 
        (T/IFn [T/Any -> T/Any] 
               [T/Any (T/Map T/Any T/Any) -> T/Any]))
 (defn macroexpand-1
-  "If form represents a macro form or an inlineable function,returns its expansion,
+  "If form represents a macro form or an inlinable function, returns its expansion,
    else returns form."
   ([form] (macroexpand-1 form (taj/empty-env)))
   ([form env]
@@ -151,10 +161,16 @@
                   local? (-> env :locals (get op))
                   macro? (and (not local?) (:macro m)) ;; locals shadow macros
                   inline-arities-f (:inline-arities m)
-                  inline? (and (not local?)
-                               (or (not inline-arities-f)
-                                   (inline-arities-f (count args)))
-                               (:inline m))
+                  inline? (or
+                            (when (and (not local?) (var? v))
+                              (let [vsym (coerce/var->symbol v)]
+                                (when (expand/custom-inline? vsym)
+                                  (fn [& _args_]
+                                    (expand/expand-inline form {:vsym vsym})))))
+                            (and (not local?)
+                                 (or (not inline-arities-f)
+                                     (inline-arities-f (count args)))
+                                 (:inline m)))
                   t (:tag m)]
               (cond
 
@@ -411,7 +427,6 @@
    (u/trace "Analyze1 form" *file* form)
    (let [old-bindings (or (some-> bindings-atom deref) {})]
      (with-bindings old-bindings
-       ;(prn "analyze1 namespace" *ns*)
        (let [ana (jana2/analyze+eval 
                    form (or env (taj/empty-env))
                    (->
@@ -531,11 +546,13 @@
   ;                  (catch Exception e
   ;                    (ExceptionThrown. e)))]
   ;  (merge ast {:result result}))
-  (let [frm (emit-form/emit-form ast)
+  (let [frm (:original-form opts) #_(emit-form/emit-form ast)
         ;_ (prn "form" frm)
         #_#_
-        _ (binding [*print-meta* true
+        _ (binding [;*print-meta* true
                     ;*print-dup* true
+                    ;*print-length* 6
+                    ;*print-level* 6
                     ]
             (prn "form")
             (pp/pprint frm))
