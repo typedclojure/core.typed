@@ -22,7 +22,7 @@
   </parent>
 
   <modules>
-    <module>module-cljs</module>
+    <!--<module>module-cljs</module>-->
     <module>module-check</module>
     <module>module-rt</module>
     <module>module-infer</module>
