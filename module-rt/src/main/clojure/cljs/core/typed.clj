@@ -47,7 +47,8 @@
   [{:keys [form env]} & body]
   `(let [form# ~form
          env# ~env]
-     (binding [vs/*current-env* {:ns {:name (or '~((impl/v 'clojure.core.typed.util-cljs/cljs-ns)))}
+     (binding [vs/*current-env* {:ns (or (:ns env#)
+                                         {:name '~((impl/v 'clojure.core.typed.util-cljs/cljs-ns))})
                                  :line (or (-> form# meta :line)
                                            (:line env#)
                                  :column (or (-> form# meta :column)
