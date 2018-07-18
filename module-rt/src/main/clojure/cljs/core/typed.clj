@@ -40,7 +40,7 @@
          (app-outer-context#
            (fn []
              (with-parse-ns*#
-               ((impl/v 'clojure.core.typed.util-cljs/cljs-ns))
+               ((impl/v '~'clojure.core.typed.util-cljs/cljs-ns))
                #(parse-cljs# t#))))))))
 
 (defmacro ^:skip-wiki with-current-location
@@ -48,7 +48,7 @@
   `(let [form# ~form
          env# ~env]
      (binding [vs/*current-env* {:ns (or (:ns env#)
-                                         {:name '~((impl/v 'clojure.core.typed.util-cljs/cljs-ns))})
+                                         {:name ((impl/v '~'clojure.core.typed.util-cljs/cljs-ns))})
                                  :line (or (-> form# meta :line)
                                            (:line env#)
                                  :column (or (-> form# meta :column)
@@ -314,6 +314,7 @@
   REPL see check-ns."
   ([]
    (load-if-needed)
+   (require 'clojure.core.typed.util-cljs)
    (check-ns-info ((impl/v 'clojure.core.typed.util-cljs/cljs-ns))))
   ([ns-or-syms & {:as opt}]
    (load-if-needed)
@@ -326,6 +327,7 @@
   REPL see check-ns."
   ([] 
    (load-if-needed)
+   (require 'clojure.core.typed.util-cljs)
    (check-ns* ((impl/v 'clojure.core.typed.util-cljs/cljs-ns))))
   ([ns-or-syms & {:as opt}]
    (load-if-needed)
