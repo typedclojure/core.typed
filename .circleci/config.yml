@@ -20,7 +20,7 @@ jobs:
             branches:
               only: cljs
           name: Clone CLJS fork
-          command: git clone https://github.com/frenchy64/clojurescript.git ~/cljs
+          command: git clone https://github.com/clojure/clojurescript.git ~/cljs
       - run:
           filters:
             branches:
