@@ -362,14 +362,15 @@
                (conj out group))))))
 
 (defn parse-dotted-binder [bnds]
+  {:pre [(vector? bnds)]}
   (let [frees-with-bnds (reduce (fn [fs fsyn]
                                   {:pre [(vector? fs)]
                                    :post [(every? (con/hvector-c? symbol? r/Bounds?) %)]}
                                   (conj fs
                                         (free-ops/with-bounded-frees (into {} (map (fn [[n bnd]] [(r/make-F n) bnd]) fs))
                                           (parse-free fsyn))))
-                                [] (-> bnds butlast butlast))
-        dvar (parse-free (-> bnds butlast last))]
+                                [] (-> bnds pop pop))
+        dvar (parse-free (-> bnds pop peek))]
     [frees-with-bnds dvar]))
 
 (defn parse-normal-binder [bnds]
@@ -386,26 +387,64 @@
 (defn parse-unknown-binder [bnds]
   {:pre [((some-fn nil? vector?) bnds)]}
   (when bnds
-    ((if (#{'...} (last bnds))
+    ((if (#{'...} (peek bnds))
        parse-dotted-binder
        parse-normal-binder)
      bnds)))
 
+(defn parse-All-binder [bnds]
+  {:pre [(vector? bnds)]}
+  (let [[positional kwargs] (split-with (complement keyword?) bnds)
+        _ (when-not (even? (count kwargs))
+            (err/int-error (str "Expected an even number of keyword options to All, given: " (vec kwargs))))
+        {:keys [named] :as kwargs} kwargs
+        _ (let [unsupported (set/difference (set (keys kwargs)) #{:named})]
+            (when (seq unsupported)
+              (err/int-error (str "Unsupported keyword argument(s) to All: " unsupported))))
+        _ (when (contains? kwargs :named)
+            (when-not (and (vector? named)
+                           (every? symbol? named))
+              (err/int-error (str ":named keyword argument to All must be a vector of symbols, given: " (pr-str named)))))
+        dotted? (#{'...} (peek bnds))
+        bnds* (if named
+                (let [bnds-no-dots (if dotted?
+                                     (pop bnds)
+                                     bnds)
+                      bnds* (vec (concat bnds named
+                                         (when dotted?
+                                           '[...])))]
+                  bnds*)
+                bnds)
+        ;; TODO 
+        ;; 1. ensure bnds* is (apply distinct? ...)
+        ;; 2. calculate :named and return from this function
+        ;; 3. update usages of parse-unknown-binder to use parse-All-binder
+        [frees-with-bnds dvar] ((if dotted?
+                                  parse-dotted-binder
+                                  parse-normal-binder)
+                                bnds*)
+        ]
+    {:frees-with-bnds frees-with-bnds
+     :dvar dvar}
+    ))
+
 ;dispatch on last element of syntax in binder
 (defn parse-all-type [bnds type]
   (let [_ (assert (vector? bnds))
-        [frees-with-bnds dvar] (parse-unknown-binder bnds)
+        {:keys [frees-with-bnds dvar named]} (parse-All-binder bnds)
         bfs (into {} (map (fn [[n bnd]] [(r/make-F n) bnd]) frees-with-bnds))]
     (if dvar
       (free-ops/with-bounded-frees bfs
         (c/PolyDots* (map first (concat frees-with-bnds [dvar]))
                      (map second (concat frees-with-bnds [dvar]))
                      (dvar/with-dotted [(r/make-F (first dvar))]
-                       (parse-type type))))
+                       (parse-type type))
+                     :named named))
       (free-ops/with-bounded-frees bfs
         (c/Poly* (map first frees-with-bnds)
                  (map second frees-with-bnds)
-                 (parse-type type))))))
+                 (parse-type type)
+                 :named named)))))
 
 (defmethod parse-type-list 'Extends
   [[_ extends & {:keys [without] :as opts} :as syn]]

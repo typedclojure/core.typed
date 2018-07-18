@@ -1008,27 +1008,6 @@
            :args cargs
            u/expr-type (u/expr-type cfexpr))))
 
-;polymorphic fn literal
-(add-invoke-special-method 'clojure.core.typed/pfn>-ann
-  [{:keys [args] :as expr} & [expected]]
-  (assert false "pfn> NYI")
-         ;FIXME these are :quote exprs
-  #_(let [[fexpr {poly-decl :val} {method-types-syn :val}] args
-        frees-with-bounds (map prs/parse-free poly-decl)
-        method-types (free-ops/with-bounded-frees frees-with-bounds
-                       (binding [prs/*parse-type-in-ns* (cu/expr-ns expr)]
-                         (doall 
-                           (for [{:keys [dom-syntax has-rng? rng-syntax]} method-types-syn]
-                             {:dom (doall (map prs/parse-type dom-syntax))
-                              :rng (if has-rng?
-                                     (prs/parse-type rng-syntax)
-                                     r/-any)}))))
-        cexpr (-> (check-anon-fn fexpr method-types :poly frees-with-bounds)
-                  (update-in [u/expr-type :t] (fn [fin] (c/Poly* (map first frees-with-bounds) 
-                                                             (map second frees-with-bounds)
-                                                             fin))))]
-    cexpr))
-
 ;loop
 (add-invoke-special-method 'clojure.core.typed/loop>-ann
   [{:keys [args] :as expr} & [expected]]

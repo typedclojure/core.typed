@@ -130,7 +130,8 @@
                             no-bounds-scoped]
                            (add-scopes 4
                                        (make-FnIntersection
-                                         (make-Function [(B-maker 3)] (B-maker 1)))))))))
+                                         (make-Function [(B-maker 3)] (B-maker 1))))
+                           {})))))
 
 (deftest trans-dots-test
   (is-clj (= (inst/manual-inst (parse-type '(clojure.core.typed/All [x b ...]
@@ -5709,46 +5710,11 @@
                :kw))
            [nil :-> ':kw]))
 
-;    (is-tc-e 
-;      (let [f (fn [{:keys [a] :as m} :- '{:a (U nil Num)}] :- '{:a Num} 
-;                {:pre [(number? a)]} 
-;                m)
-;            m :- '{:a (U nil Num)}
-;  ))
-;
-;(tc-e (do (ann f (All [a] [a -> a]))
-;          (defn f [x]
-;            (if (number? x)
-;              (do 
-;                (print-env "a")
-;                x)
-;              x))))
-;
-;(tc-e (fn [a] (not (number? a))) )
-;(tc-e (filter (fn [a] (not (number? a))) )
-;  (let* [map__65083 {} 
-;         map__65083 (if (clojure.core/seq? map__65083) (clojure.lang.PersistentHashMap/create (clojure.core/seq map__65083)) map__65083) 
-;         b (clojure.core/get map__65083 :b 3)] 
-;    (ann-form b Number))
+(deftest inst-poly-named-test
+  (is-tc-e (do (t/ann ^:no-check foo 
+                      (t/All [:named [a b]]
+                             [a -> b]))
+               (def foo identity)
+               (t/inst foo :named {a t/Num b t/Num}))
+           [t/Num :-> t/Num]))
 
-; This works in Di's work I think
-;(tc-e (fn [a]
-;        {:pre [(symbol? (nth a 0))]}
-;        a)
-;      ['[Any] -> '[Sym]])
-
-; CTYP-108
-;
-;{:env {a__#0 (U nil false), props__#0 (HMap :mandatory {}), map__63343__#1 (HMap :mandatory {}), map__63343__#0 (HMap :mandatory {})}, 
-; :props ((when (is (U nil false) props__#0) 
-;           (is (U nil false) map__63343__#1)) 
-;         (when (! (U nil false) props__#0) 
-;           (! (U nil false) map__63343__#1)) 
-;         (| (is (U nil false) map__63343__#1 [(Key :a)]) 
-;            (is (HMap :absent-keys #{:a}) map__63343__#1)) 
-;         (when (is (U nil false) map__63343__#1) 
-;           (is (U nil false) map__63343__#0)) 
-;         (when (! (U nil false) map__63343__#1) 
-;           (! (U nil false) map__63343__#0)) 
-;         (is (U nil false) a__#0))}
-;
