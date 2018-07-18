@@ -35,13 +35,13 @@
          app-outer-context# (bound-fn [f#] (f#))]
      (delay
        (require '~'clojure.core.typed.parse-unparse)
-       (let [parse-clj# (impl/v '~'clojure.core.typed.parse-unparse/parse-clj)
+       (let [parse-cljs# (impl/v '~'clojure.core.typed.parse-unparse/parse-cljs)
              with-parse-ns*# (impl/v '~'clojure.core.typed.parse-unparse/with-parse-ns*)]
          (app-outer-context#
            (fn []
              (with-parse-ns*#
-               (ns-name *ns*)
-               #(parse-clj# t#))))))))
+               ((impl/v 'clojure.core.typed.util-cljs/cljs-ns))
+               #(parse-cljs# t#))))))))
 
 (defmacro ^:skip-wiki with-current-location
   [{:keys [form env]} & body]
