@@ -349,6 +349,7 @@
   [{:keys [ctor args] :as expr} & [expected]]
   (let [;; TODO check ctor
         cargs (mapv check-expr args)]
+    (u/tc-warning (str "`new` special form is Unchecked"))
     (assoc :args cargs
            u/expr-type (below/maybe-check-below
                          ;; TODO actual checks
@@ -381,7 +382,7 @@
 ;TODO
 (add-check-method :defrecord
   [expr & [expected]]
-  (prn "WARNING: :defrecord not supported in cljs.typed")
+  (u/tc-warning (str "`defrecord` special form is Unchecked"))
   (assoc expr
          u/expr-type (below/maybe-check-below
                        (r/ret (r/-unchecked))
@@ -389,7 +390,7 @@
 
 (add-check-method :deftype
   [expr & [expected]]
-  (prn "WARNING: :defrecord not supported in cljs.typed")
+  (u/tc-warning (str "`deftype` special form is Unchecked"))
   (assoc expr
          u/expr-type (below/maybe-check-below
                        (r/ret (r/-unchecked))
@@ -405,6 +406,7 @@
   [{:keys [method target args] :as expr} & [expected]]
   (let [ctarget (check-expr target)
         cargs (mapv check-expr args)]
+    (u/tc-warning (str "`.` special form is Unchecked"))
     (assoc expr 
            :target ctarget
            :args cargs
@@ -417,6 +419,7 @@
 (add-check-method :host-field
   [{:keys [target] :as expr} & [expected]]
   (let [ctarget (check-expr target)]
+    (u/tc-warning (str "`.` special form is Unchecked"))
     (assoc expr 
            :target ctarget
            u/expr-type (below/maybe-check-below
@@ -427,6 +430,7 @@
 (add-check-method :js-array
   [{:keys [items] :as expr} & [expected]]
   (let [citems (mapv check-expr items)]
+    (u/tc-warning (str "`#js []` special form is Unchecked"))
     (assoc expr 
            :items citems
            u/expr-type (below/maybe-check-below
@@ -461,6 +465,7 @@
 ; TODO check
 (add-check-method :the-var
   [expr & [expected]]
+  (u/tc-warning (str "`var` special form is Unchecked"))
   (assoc expr 
          u/expr-type (below/maybe-check-below
                        (r/ret (r/-unchecked))

@@ -29,6 +29,54 @@
 ; many of these macros resolve to CLJS functions in 
 ; the CLJS ns cljs.core.typed
 
+(defmacro ^:private delay-tc-parse
+  [t]
+  `(let [t# ~t
+         app-outer-context# (bound-fn [f#] (f#))]
+     (delay
+       (require '~'clojure.core.typed.parse-unparse)
+       (let [parse-clj# (impl/v '~'clojure.core.typed.parse-unparse/parse-clj)
+             with-parse-ns*# (impl/v '~'clojure.core.typed.parse-unparse/with-parse-ns*)]
+         (app-outer-context#
+           (fn []
+             (with-parse-ns*#
+               (ns-name *ns*)
+               #(parse-clj# t#))))))))
+
+(defmacro ^:skip-wiki with-current-location
+  [{:keys [form env]} & body]
+  `(let [form# ~form
+         env# ~env]
+     (binding [vs/*current-env* {:ns {:name (or '~((impl/v 'clojure.core.typed.util-cljs/cljs-ns)))}
+                                 :line (or (-> form# meta :line)
+                                           (:line env#)
+                                 :column (or (-> form# meta :column)
+                                             (:column env#)))}]
+       ~@body)))
+
+(defn ^:skip-wiki
+  ann*-macro-time
+  "Internal use only. Use ann."
+  [qsym typesyn check? form env]
+  (let [_ (impl/with-impl impl/clojurescript
+            (when (and (contains? (impl/var-env) qsym)
+                       (not (impl/check-var? qsym))
+                       check?)
+              (err/warn (str "Removing :no-check from var " qsym))
+              (impl/remove-nocheck-var qsym)))
+        _ (impl/with-impl impl/clojurescript
+            (when-not check?
+              (impl/add-nocheck-var qsym)))
+        #_#_ast (with-current-location {:form form :env env}
+              (delay-rt-parse typesyn))
+        tc-type (with-current-location {:form form :env env}
+                  (delay-tc-parse typesyn))]
+    #_(impl/with-impl impl/clojurescript
+      (impl/add-var-env qsym ast))
+    (impl/with-impl impl/clojurescript
+      (impl/add-tc-var-type qsym tc-type)))
+  nil)
+
 (defmacro ann 
   "Annotate varsym with type. If unqualified, qualify in the current namespace.
   If varsym has metadata {:no-check true}, ignore definitions of varsym while type checking.
@@ -42,7 +90,16 @@
       ; don't check this var
       (ann ^:no-check foobar [Integer -> String])"
   [varsym typesyn]
-  `(ann* '~varsym '~typesyn))
+  (let [_ (require 'cljs.analyzer.api)
+        {:keys [name]} ((impl/v 'cljs.analyzer.api/resolve)
+                        &env
+                        varsym)
+        qsym name 
+        opts (meta varsym)
+        check? (not (:no-check opts))]
+    (ann*-macro-time qsym typesyn check? &form &env)
+    `(tc-ignore (ann* '~qsym '~typesyn '~check? '~&form))))
+
 
 (defmacro 
   ^{:forms '[(ann-protocol vbnd varsym & methods)
