@@ -102,9 +102,10 @@
           (subst/substitute-many body argtys names)))
 
       (r/PolyDots? ptype)
-      (let [names (c/PolyDots-fresh-symbols* ptype)
+      (let [names (vec (c/PolyDots-fresh-symbols* ptype))
             body (c/PolyDots-body* names ptype)
-            bbnds (c/PolyDots-bbnds* names ptype)]
+            bbnds (c/PolyDots-bbnds* names ptype)
+            dotted-argtys-start (dec (:nbound ptype))]
         (free-ops/with-bounded-frees (zipmap (-> (map r/make-F names) butlast) (butlast bbnds))
           (doseq [[nme ty bnds] (map vector names argtys bbnds)]
             (let [lower-bound (subst/substitute-many (:lower-bound bnds) argtys names)
@@ -121,7 +122,7 @@
                        " and " (prs/unparse-type upper-bound))))))
           (-> body
             ; expand dotted pre-types in body
-            (trans/trans-dots (last names) ;the bound
-                              (drop (dec (:nbound ptype)) argtys)) ;the types to expand pre-type with
+            (trans/trans-dots (peek names) ;the bound
+                              (subvec argtys dotted-argtys-start)) ;the types to expand pre-type with
             ; substitute normal variables
-            (subst/substitute-many (take nrequired argtys) (butlast names))))))))
+            (subst/substitute-many (subvec argtys 0 dotted-argtys-start) (pop names))))))))

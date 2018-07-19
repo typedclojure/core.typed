@@ -73,4 +73,4 @@
                              [c b a ... a -> b]))
                (defn foo [& args] (second args))
                (t/inst foo t/Str t/Bool :named {c t/Num b t/Sym}))
-           [t/Num t/Sym t/Str t/Bool :-> t/Num]))
+           [t/Num t/Sym t/Str t/Bool :-> t/Sym]))
