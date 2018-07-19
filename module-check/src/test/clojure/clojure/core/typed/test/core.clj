@@ -5709,12 +5709,3 @@
              (when (nil? a)
                :kw))
            [nil :-> ':kw]))
-
-(deftest inst-poly-named-test
-  (is-tc-e (do (t/ann ^:no-check foo 
-                      (t/All [:named [a b]]
-                             [a -> b]))
-               (def foo identity)
-               (t/inst foo :named {a t/Num b t/Num}))
-           [t/Num :-> t/Num]))
-

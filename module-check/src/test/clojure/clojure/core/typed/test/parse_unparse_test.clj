@@ -26,3 +26,51 @@
                :t
                unparse-type
                rest))))
+
+(deftest poly-named-test
+  (is (= (unparse-type
+           (parse-clj 
+             '(clojure.core.typed/All [:named [a b]] [a -> b])))
+         '(clojure.core.typed/All [:named [a b]] [a -> b])))
+  (is (= (unparse-type
+           (parse-clj 
+             '(clojure.core.typed/All [a ... :named [b c]]
+                                      [c b a ... a -> b])))
+         '(clojure.core.typed/All [a ... :named [b c]]
+                                  [c b a ... a -> b])))
+  (is-tc-e (do (t/ann ^:no-check foo 
+                      (t/All [:named [a b]]
+                             [a -> b]))
+               (def foo identity)
+               (t/inst foo :named {a t/Num b t/Num}))
+           [t/Num :-> t/Num])
+  (is-tc-e (do (t/ann ^:no-check foo 
+                      (t/All [:named [a b]]
+                             [a -> b]))
+               (def foo identity)
+               (t/inst foo :named {a t/Num}))
+           [t/Num :-> t/Any])
+  (is-tc-err (do (t/ann ^:no-check foo 
+                        (t/All [:named [a b]]
+                               [a -> b]))
+                 (def foo identity)
+                 (t/inst foo :named {a t/Num}))
+             [t/Any :-> t/Num])
+  (is-tc-e (do (t/ann ^:no-check foo 
+                      (t/All [:named [a b]]
+                             [a -> b]))
+               (def foo identity)
+               (t/inst foo))
+           [t/Any :-> t/Any])
+  (is-tc-e (do (t/ann ^:no-check foo 
+                      (t/All [a ...]
+                             [a ... a -> t/Any]))
+               (defn foo [& args])
+               (t/inst foo t/Str t/Bool))
+           [t/Str t/Bool :-> t/Any])
+  (is-tc-e (do (t/ann ^:no-check foo 
+                      (t/All [a ... :named [b c]]
+                             [c b a ... a -> b]))
+               (defn foo [& args] (second args))
+               (t/inst foo t/Str t/Bool :named {c t/Num b t/Sym}))
+           [t/Num t/Sym t/Str t/Bool :-> t/Num]))

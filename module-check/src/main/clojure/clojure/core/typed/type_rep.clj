@@ -357,7 +357,8 @@
    (map? named)
    (every? symbol? (keys named))
    (every? #(<= 0 % (dec nbound)) (vals named))
-   (apply distinct? (vals named))
+   (or (empty? named)
+       (apply distinct? (vals named)))
    ]
   :methods
   [p/TCType])
@@ -366,7 +367,7 @@
                         bbnds :- (t/U nil (t/Seqable Bounds)),
                         scope :- p/IScope
                         named :- (t/Map t/Sym t/Int)])
-(u/def-type PolyDots [nbound bbnds scope]
+(u/def-type PolyDots [nbound bbnds scope named]
   "A polymorphic type containing n-1 bound variables and 1 ... variable
   `named` is a map of free variable names to de Bruijn indices (range nbound)."
   [(nat-int? nbound)
@@ -377,7 +378,8 @@
    (map? named)
    (every? symbol? (keys named))
    (every? #(<= 0 % (dec nbound)) (vals named))
-   (apply distinct? (vals named))]
+   (or (empty? named)
+       (apply distinct? (vals named)))]
   :methods
   [p/TCType])
 
