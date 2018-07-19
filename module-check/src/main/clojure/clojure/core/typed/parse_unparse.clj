@@ -156,18 +156,29 @@
 ;return a vector of [name bnds]
 (defn parse-free [f]
   {:post [((con/hvector-c? symbol? r/Bounds?) %)]}
-  (if (symbol? f)
-    [f r/no-bounds]
-    (let [[n & {:keys [< >] :as opts}] f]
-      (when (contains? opts :kind)
-        (err/deprecated-warn "Kind annotation for TFn parameters"))
-      (when (:variance opts) 
-        (err/int-error "Variance not supported for variables introduced with All"))
-      [n (let [upper-or-nil (when (contains? opts :<)
-                              (parse-type <))
-               lower-or-nil (when (contains? opts :>)
-                              (parse-type >))]
-           (c/infer-bounds upper-or-nil lower-or-nil))])))
+  (let [validate-sym (fn [s]
+                       (when-not (symbol? s)
+                         (err/int-error (str "Type variable must be a symbol, given: " (pr-str s))))
+                       (when (namespace s)
+                         (err/int-error (str "Type variable must not be namespace qualified: " (pr-str s))))
+                       (when (.contains (name s) ".")
+                         (err/int-error (str "Type variable must not contain dots (.): " (pr-str s))))
+                       (when (#{"true" "nil" "false"} (name s))
+                         (err/int-error (str "Type variable must not be named true, false, or nil: " (pr-str s)))))]
+    (if (symbol? f)
+      (do (validate-sym f)
+          [f r/no-bounds])
+      (let [[n & {:keys [< >] :as opts}] f]
+        (validate-sym n)
+        (when (contains? opts :kind)
+          (err/deprecated-warn "Kind annotation for TFn parameters"))
+        (when (:variance opts) 
+          (err/int-error "Variance not supported for variables introduced with All"))
+        [n (let [upper-or-nil (when (contains? opts :<)
+                                (parse-type <))
+                 lower-or-nil (when (contains? opts :>)
+                                (parse-type >))]
+             (c/infer-bounds upper-or-nil lower-or-nil))]))))
 
 (defn check-forbidden-rec [rec tbody]
   (letfn [(well-formed? [t]

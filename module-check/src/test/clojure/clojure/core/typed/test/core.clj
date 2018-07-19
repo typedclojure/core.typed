@@ -136,27 +136,32 @@
 (deftest trans-dots-test
   (is-clj (= (inst/manual-inst (parse-type '(clojure.core.typed/All [x b ...]
                                                  [x ... b -> x]))
-                               (map parse-type '(Integer Double Float)))
+                               (map parse-type '(Integer Double Float))
+                               {})
              (parse-type '[Integer Integer -> Integer])))
   (is-clj (= (inst/manual-inst (parse-type '(clojure.core.typed/All [x b ...]
                                                  [b ... b -> x]))
-                               (map parse-type '(Integer Double Float)))
+                               (map parse-type '(Integer Double Float))
+                               {})
              (parse-type '[Double Float -> Integer])))
   ;map type
   (is-clj (= (inst/manual-inst (parse-type '(clojure.core.typed/All [c a b ...]
                                                  [[a b ... b -> c] (clojure.lang.Seqable a) (clojure.lang.Seqable b) ... b -> (clojure.lang.Seqable c)]))
-                               (map parse-type '(Integer Double Float)))
+                               (map parse-type '(Integer Double Float))
+                               {})
              (parse-type '[[Double Float -> Integer] (clojure.lang.Seqable Double) (clojure.lang.Seqable Float) -> (clojure.lang.Seqable Integer)])))
   (is-clj (= (clj (inst/manual-inst (parse-type '(clojure.core.typed/All [x b ...]
                                                       ['[x b] ... b -> '['[x b] ... b]]))
-                                    (map parse-type '(Integer Double Float))))
+                                    (map parse-type '(Integer Double Float))
+                                    {}))
              (parse-type '['[Integer Double] '[Integer Float] 
                            -> '['[Integer Double] '[Integer Float]]])))
   ;TODO HSequential
   (is-clj (= (clj
                (inst/manual-inst (parse-type `(All [x# b# ~'...]
                                                    [x# ~'... b# :-> (HSequential [x# ~'... b#])]))
-                                 (map parse-type `(Integer Double Float))))
+                                 (map parse-type `(Integer Double Float))
+                                 {}))
              (parse-type `(IFn [Integer Integer :-> (HSequential [Integer Integer])]))))
   ; completeness check
   (is (check-ns 'clojure.core.typed.test.trans-dots))
@@ -1681,15 +1686,18 @@
 (deftest invoke-tfn-test
   (is-clj (inst/manual-inst (parse-type `(All [[~'x :< (TFn [[~'x :variance :covariant]] Any)]]
                                                 (~'x Any)))
-                            [(parse-type `(TFn [[~'x :variance :covariant]] Number))]))
+                            [(parse-type `(TFn [[~'x :variance :covariant]] Number))]
+                            {}))
   (is-clj (inst/manual-inst (parse-type `(All [[~'x :< (TFn [[~'x :variance :covariant]] Number)]]
                                               (~'x Any)))
-                            [(parse-type `(TFn [[~'x :variance :covariant]] Number))]))
+                            [(parse-type `(TFn [[~'x :variance :covariant]] Number))]
+                            {}))
   (is-clj (inst/manual-inst (parse-type `(All [x#
                                                  [y# :< x#]] 
                                                 Any))
                             [(parse-type `Any)
-                             (parse-type `Any)])))
+                             (parse-type `Any)]
+                            {})))
 
 #_(fully-resolve-type (parse-type '((clojure.core.typed/All [a] (TFn [[x :variance :covariant :< a]] a)) Number)))
 

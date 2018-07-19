@@ -27,11 +27,18 @@
                unparse-type
                rest))))
 
+(deftest bad-dots-Poly-test
+  #_(is (parse-clj '(clojure.core.typed/All [... a] [a -> a]))))
+
 (deftest poly-named-test
   (is (= (unparse-type
            (parse-clj 
              '(clojure.core.typed/All [:named [a b]] [a -> b])))
          '(clojure.core.typed/All [:named [a b]] [a -> b])))
+  (is (= (unparse-type
+           (parse-clj 
+             '(clojure.core.typed/All [:named [a b ...]] [a -> b])))
+         '(clojure.core.typed/All [:named [a b ...]] [a -> b])))
   (is (= (unparse-type
            (parse-clj 
              '(clojure.core.typed/All [a ... :named [b c]]
