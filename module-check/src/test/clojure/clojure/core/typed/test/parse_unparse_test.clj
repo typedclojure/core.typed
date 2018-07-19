@@ -28,7 +28,29 @@
                rest))))
 
 (deftest bad-dots-Poly-test
-  #_(is (parse-clj '(clojure.core.typed/All [... a] [a -> a]))))
+  ;; no dots in variable
+  (is (throws-tc-error?
+        (parse-clj '(clojure.core.typed/All [... a] [a -> a]))))
+  (is (throws-tc-error?
+        (parse-clj '(clojure.core.typed/All [. a] [a -> a]))))
+  (is (throws-tc-error?
+        (parse-clj '(clojure.core.typed/All [. a] [a -> a]))))
+  ; no nil/true/false
+  (is (throws-tc-error?
+        (parse-clj `(clojure.core.typed/All [~(symbol "nil")] [nil :-> nil]))))
+  (is (throws-tc-error?
+        (parse-clj `(clojure.core.typed/All [~(symbol "true")] [nil :-> nil]))))
+  (is (throws-tc-error?
+        (parse-clj `(clojure.core.typed/All [~(symbol "false")] [nil :-> nil]))))
+  ; no ns qualified
+  (is (throws-tc-error?
+        (parse-clj `(clojure.core.typed/All [a/b] [nil :-> nil]))))
+  ; non-symbol
+  (is (throws-tc-error?
+        (parse-clj `(clojure.core.typed/All [:a] [nil :-> nil]))))
+  ; bad kw args
+  (is (throws-tc-error?
+        (parse-clj `(clojure.core.typed/All [:a :b] [nil :-> nil])))))
 
 (deftest poly-named-test
   (is (= (unparse-type
@@ -37,8 +59,8 @@
          '(clojure.core.typed/All [:named [a b]] [a -> b])))
   (is (= (unparse-type
            (parse-clj 
-             '(clojure.core.typed/All [:named [a b ...]] [a -> b])))
-         '(clojure.core.typed/All [:named [a b ...]] [a -> b])))
+             '(clojure.core.typed/All [:named [a b]] [a -> b])))
+         '(clojure.core.typed/All [:named [a b]] [a -> b])))
   (is (= (unparse-type
            (parse-clj 
              '(clojure.core.typed/All [a ... :named [b c]]
