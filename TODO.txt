@@ -7,6 +7,11 @@
     * eg. (clojure.lang.IFn (clojure.lang.IFn [a -> Bool]])) :< (t/All [a] (t/IFn [a -> Bool]))
     * eg. (clojure.lang.IFn (clojure.lang.IFn ':a)) :!< ':a
     * eg. (clojure.lang.IFn (clojure.lang.IFn ':a)) :< (All [a] ['{:a a} -> a])
+* add t/AnyFunction
+  * maybe call it t/AnyIFn ?
+    * kind of ties it to IFn, not Callable/Runnable, but TBH
+      I think that shipped sailed due to the c.l.IFn subtyping rule
+      for t/IFn
 * make MultiFn parameterised by its function + dispatch function
   * (MultiFn f d)
     * eg. (MultiFn [Op -> Any] ':op)
@@ -30,6 +35,7 @@
 * fix JVM primitive coersions
   * eg. int <: long
   * eg. (Val -1) <: long
+  * see clojure.lang.Reflector/boxArg for specific rules
   * add vars for primitives
     * t/int
     * t/char
@@ -39,7 +45,7 @@
     * t/double
     * t/byte
     * t/boolean
-  * (defalias Integer/TYPE t/int)
+  * (defalias Integer/TYPE t/int) etc.
 * JVM arrays
   * t/int<>
   * t/char<>
@@ -50,6 +56,10 @@
   * t/byte<>
   * t/boolean<>
   * (t/Array t)
+    * exclusively for arrays of reference types
+      * (t/Array t/int) <!: t/int<>
+      * (t/Array t/int) <?: (t/Array t/Int)
+        * 
     * deprecate Array/Array2/Array3
 * [BREAKING] make higher-kinded types explicit
   * eg. t/Seq => (t/Seq Any)
@@ -62,6 +72,34 @@
   * (t/HKT t/Map) => (TFn [[a :variance :covariant] [b :variance :covariant]] (IPersistentMap a b))
   * allow currying
     * (t/HKT t/Map t/Int) => (TFn [[b :variance :covariant]] (IPersistentMap t/Int b))
+    * (t/HKT t/Map t/Int t/Int) => (IPersistentMap t/Int t/Int)
+* move all base-env annotations into real .cljc files that can be shared with cljs impl
+* make clojure.core.typed a .cljc file and deprecate cljs.core.typed
+* only use positive information when calculating args to defmethod's
+  * eg. (ann f (t/Multi [Any -> Any] (t/TypeOf number?)))
+        (defmulti f number?)
+        (defmethod f true
+          [a]
+          ; a :- Number
+          )
+        (defmethod f false
+          [a]
+          ; a :- (Not Number)
+          )
+        ;; don't calculate any information here.
+        (defmethod f :default
+          [a]
+          ; a :- Any
+          )
+  * Rationale
+    * defmethod is open to extension anyway, we can't be sure new methods don't exist
+      * obvious case: might be halfway through evaluating a file, and other defmethod's
+        aren't evaluated yet
+    * removes the problem with "unreachable defmethod" in :default
+      * because very often a default method is implementated that just
+        throws an error to handle dynamic errors. we still want to check that code.
+* use information from `derive` to inform isa? comparisons
+  * only positive information?
 
 
 Other ideas
@@ -70,3 +108,4 @@ Other ideas
 * add type parameter to Keyword for singleton types
   * Keyword [[k :variance :covariant <: (I (Instance Keyword) AnyValue)]]
   * ['{:a t/Int} :-> t/Int] <: (Keyword ':a)
+* add t/ucast for unchecked casts
