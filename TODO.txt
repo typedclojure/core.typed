@@ -12,10 +12,13 @@
     * kind of ties it to IFn, not Callable/Runnable, but TBH
       I think that shipped sailed due to the c.l.IFn subtyping rule
       for t/IFn
+* add ToIFn type op
+  * (ToIFn ':a) => (All [x] ['{:a x} :-> x])
 * make MultiFn parameterised by its function + dispatch function
   * (MultiFn f d)
     * eg. (MultiFn [Op -> Any] ':op)
   * replace IFn ancestor with (clojure.lang.IFn f)
+* move out fake IFn ancestor of IPersistentSet into an intersection in t/Set
 * support named arguments in t/IFn
   * [x :- Any, y :- Any :-> Any :object x]
 * sugar for common multimethod dispatch fns
@@ -67,6 +70,7 @@
     * old behaviour is to expand to (TFn [[a :variance :covariant]] (ISeq a))
   * should still allow TFn to expand to itself
     * only applies for symbols naming classes or aliases
+  * alternatively, add support for deprecated warnings on specific classes/aliases
 * add HKT op for explicit TFn
   * (t/HKT t/Seq) => (TFn [[a :variance :covariant]] (ISeq a))
   * (t/HKT t/Map) => (TFn [[a :variance :covariant] [b :variance :covariant]] (IPersistentMap a b))
