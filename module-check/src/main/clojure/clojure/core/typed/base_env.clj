@@ -1030,8 +1030,10 @@ clojure.core/mapv
                [[a b ... b -> c] (U nil (Seqable a)) (U nil (Seqable b)) ... b -> (AVec c)]))
 
 clojure.core/mapcat
-     (All [c b ...]
-          [[b ... b -> (Option (Seqable c))] (Option (Seqable b)) ... b -> (ASeq c)])
+     (All [c a b ...]
+       (IFn
+          [[a :-> (Option (Seqable c))] :-> (Transducer a c)]
+          [[a b ... b -> (Option (Seqable c))] (Option (Seqable a)) (Option (Seqable b)) ... b -> (ASeq c)]))
 
 clojure.core/pmap
      (All [c a b ...]
