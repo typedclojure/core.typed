@@ -430,8 +430,10 @@
                      annotate-do
                      statement-opts-fn
                      analyze-opts-fn
-                     analyze-env-fn]
+                     analyze-env-fn
+                     stop-gildardi-check]
               :or {additional-gilardi-condition (fn [_] true)
+                   stop-gildardi-check (fn [_] false)
                    eval-fn eval-ast
                    annotate-do (fn [a _ _] a)
                    statement-opts-fn identity
@@ -446,7 +448,9 @@
                                                #'ana/macroexpand-1 (get-in opts [:bindings #'ana/macroexpand-1] 
                                                                            macroexpand-1)}
                                  (loop [form form raw-forms []]
-                                   (let [mform (ana/macroexpand-1 form env)]
+                                   (let [mform (if (stop-gildardi-check form env)
+                                                 form
+                                                 (ana/macroexpand-1 form env))]
                                      (if (= mform form)
                                        [mform (seq raw-forms)]
                                        (recur mform (conj raw-forms
@@ -457,7 +461,7 @@
                                                               form)
                                                             form)))))))]
          (if (and (seq? mform) (= 'do (first mform)) (next mform)
-                  (additional-gilardi-condition mform))
+                  (additional-gilardi-condition mform env))
            ;; handle the Gilardi scenario
            (let [[statements ret] (u/butlast+last (rest mform))
                  statements-expr (mapv (fn [s] (analyze+eval s (-> env

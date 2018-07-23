@@ -50,7 +50,7 @@
                          [t/Any (t/U nil ExprType) -> ExprType])
            ;; (fn [vs f] ..)
            ;; FIXME docs
-           :solve-subtype [(t/Vec t/Sym) [t/Sym * :-> [TCType TCType]] :-> (t/U nil (t/Map t/Sym TCType))]
+           ;:solve-subtype [(t/Vec t/Sym) [t/Sym * :-> [TCType TCType]] :-> (t/U nil (t/Map t/Sym TCType))]
            ;; (fn [t1 t2] ..)
            ;; true if t1 is a subtype of t2
            :subtype? [TCType TCType :-> Boolean]
@@ -67,8 +67,9 @@
 (t/ann typing-rule [RuleOpts -> '{:op t/Kw, ::expr-type ExprType}])
 (defmulti typing-rule (fn [{:keys [vsym]}] vsym))
 
+#_
 (defmethod typing-rule 'clojure.core.typed.expand/gather-for-return-type
-  [{[_ ret] :form, :keys [expected check solve-subtype]}]
+  [{[_ ret] :form, :keys [expected check solve]}]
   (assert nil "FIXME args etc.")
   (let [{:keys [::expr-type] :as m} (check ret)
         {:keys [x] :as solved?} (solve-subtype '[x]
@@ -86,6 +87,33 @@
             ~body)
          expected))
 
+;; (solve
+;;   coll
+;;   {:query (t/All [a] [(t/U nil (t/Seqable a)) :-> a])
+;;    :msg-fn (fn [_#]
+;;             (str "Argument number " ~(inc i)
+;;                  " to 'map' must be Seqable"))
+;;    :blame-form ~coll})
+(defmethod typing-rule 'clojure.core.typed.expand/solve
+  [{:keys [expr opts expected check solve delayed-error form maybe-check-expected]}]
+  (let [{:keys [::expr-type] :as m} (check expr)
+        {:keys [query msg-fn blame-form]} opts
+        res (solve expr-type query)]
+    (when-not res
+      (let [form (or (when (contains? opts :blame-form)
+                       blame-form)
+                     form)
+            msg (or (when msg-fn
+                      ((eval msg-fn) {}))
+                    (str "'solve' failed"))]
+        (delayed-error msg {:form form})))
+    (assoc m
+           ::expr-type (maybe-check-expected
+                         ;; need something to check against, expr-type seems almost reasonable?
+                         (or res expr-type)
+                         expected))))
+
+#_
 (defmethod typing-rule 'clojure.core.typed.expand/check-for-expected
   [{[_ {:keys [expr expected-local] :as form-opts} :as form] :form,
     :keys [expr opts expected check locals solve-subtype subtype? delayed-error abbreviate-type
@@ -149,6 +177,7 @@
                   (select-keys opts [:blame-form :msg-fn])
                   %))))
 
+#_
 (defn ann-form-typing-rule 
   [{:keys [expr opts expected check subtype? expected-error]}]
   ;; FIXME use check-below
@@ -164,7 +193,7 @@
                                                  #(merge {:blame-form form}
                                                          %))})))]
     (check expr (merge expected {:type ty}))))
-
+#_#_
 (defmethod typing-rule `t/ann-form [& args] (apply ann-form-typing-rule args))
 (defmethod typing-rule 'clojure.core.typed.macros/ann-form [& args] (apply ann-form-typing-rule args))
 

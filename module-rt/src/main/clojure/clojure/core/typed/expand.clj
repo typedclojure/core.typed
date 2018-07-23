@@ -230,9 +230,17 @@
     `(fn* ~@(when name [name])
           ~@(map expand-sig sigs))))
 
-(defmacro check-for-seq [expr]
-  (throw (Exception. "TODO check-for-seq"))
-  `(rand-nth (seq ~expr)))
+(defmacro solve [expr opts]
+  (assert nil)
+  (prn "bad solve"))
+
+(defmethod -expand-macro `solve
+  [[_ expr opts :as form] _]
+  {:pre [(= 3 (count form))]}
+  `(do ~spc/special-form
+       ::solve
+       '~opts
+       ~expr))
 
 (defmacro expected-as [s body]
   `(do ~spc/special-form
@@ -240,21 +248,12 @@
        '{:sym ~s}
        ~body))
 
-(defmacro gather-for-return-type [ret]
-  (throw (Exception. "gather-for-return-type Not for expansion")))
+(defmacro ignore-expected-if [tst body] body)
 
-(defmacro gather-for-return-type [_ ret]
-  `(do ~spc/special-form
-       ::gather-for-return-type
-       '{}
-       ~ret))
-
-(defmacro check-for-expected [{:keys [expr expected-local]}]
-  (throw (Exception. "check-for-expected Not for expansion")))
-
-(defmethod -expand-macro `check-for-expected [[_ {:keys [expr expected-local]}] _]
-  (assert nil "TODO check-for-expected")
-  expr)
+(defmethod -expand-macro `ignore-expected-if
+  [[_ tst body :as form] _]
+  {:pre [(= 3 (count form))]}
+  body)
 
 (defmethod -expand-macro 'clojure.core/for
   [[_ seq-forms body-form :as form] _]
@@ -266,26 +265,23 @@
                   (:while :when) `(when ~expr ~body)
                   (if (keyword? binding)
                     (throw (Exception. (str "Invalid 'for' keyword: " binding)))
-                    `(let [~binding (check-for-seq
-                                      {:expr ~expr
-                                       :binding ~binding})]
+                    `(let [~binding (solve
+                                      ~expr
+                                      {:query (t/All [a#] [(t/U nil (t/Seqable a#)) :-> a#])
+                                       :blame-form ~expr
+                                       :msg-fn (fn [_#]
+                                                 (str "'for' expects Seqables in binding form"))})]
                        ~body))))
-              `[(check-for-expected
-                  {:expr ~body-form
-                   ;; FIXME should we blame an outer form (if it exists)
-                   ;; if the expected type is incompatible with Seq?
-                   :form ~form
-                   :expected-local ~expg})]
+              `[~body-form]
               (partition 2 (rseq seq-forms)))]
-    `(expected-as ~expg
-                  (gather-for-return-type ~ret))))
-
-(defmacro ignore-expected-if [tst body] body)
-
-(defmethod -expand-macro `ignore-expected-if
-  [[_ tst body :as form] _]
-  {:pre [(= 3 (count form))]}
-  body)
+    ;; FIXME correctly handle expected type 
+    `(check-expected
+       ;; TODO figure out what `solve` even does with the expected type
+       (solve (ignore-expected-if true ~ret)
+              {:query (t/All [a#] [a# :-> (t/Seq a#)])})
+       {:msg-fn (fn [_#]
+                  "The return type of this 'for' expression does not agree with the expected type.")
+        :blame-form ~form})))
 
 (defn expand-typed-fn-macro
   [form _]
@@ -469,29 +465,46 @@
 (defmethod -expand-macro `t/tc-ignore [& args] (apply expand-tc-ignore args))
 (defmethod -expand-macro 'clojure.core.typed.macros/tc-ignore [& args] (apply expand-tc-ignore args))
 
-#_
 (defmethod -expand-inline `core/map [[_ f & colls :as form] _]
+  (prn "start map")
   (if (empty? colls)
-    (assert nil "TODO map transducer arity")
+    (throw (Exception. "TODO map transducer arity"))
     (let [gsyms (repeatedly (count colls) gensym)
           bindings (mapcat (fn [i gsym coll] 
-                             [gsym coll
-                              (gensym '_) `(t/ann-form
-                                             (check-expected
-                                               ~gsym
-                                               {:msg-fn (fn [_#]
-                                                          (str "Argument number " ~(inc i)
-                                                               " to 'map' must be Seqable"))
-                                                :blame-form ~coll})
-                                             (t/U nil (t/Seqable t/Any)))])
-                           (range) gsyms colls)
-          bmap (apply hash-map bindings)
-          fst (gensym 'fst)]
-      `(let ~(into (vec bindings)
-                   [fst `(t/fn :forall [a#]
-                           [c# :- (t/U nil (t/Seqable a#))] :- a#
-                           (throw (Exception.)))])
-         (~f ~@(map #(list fst %) gsyms))))))
+                             [gsym `(solve
+                                      ~coll
+                                      {:query (t/All [a#] [(t/U nil (t/Seqable a#)) :-> a#])
+                                       :msg-fn (fn [_#]
+                                                 (str "Argument number " ~(inc i) " to 'map' must be Seqable"))
+                                       :blame-form ~coll})])
+                           (range) gsyms colls)]
+      (prn "map")
+      `(let ~(vec bindings)
+         ;; FIXME can we push the expected type into `f`?
+         (solve
+           (ignore-expected-if true (~f ~@gsyms))
+           {:query (t/All [a#] [a# :-> (t/Seq a#)])
+            :msg-fn (fn [_#]
+                      "The return type of this 'map' expression does not agree with the expected type.")
+            :blame-form ~form})))))
+
+;; Notes:
+;; - try `->` next
+;;   - good test of inheriting msg-fn etc.
+;; - do we need to special-case comp+transducers?
+(comment
+   (into #{}
+         (comp (filter identity)
+               (map inc))
+         [1 nil 2 nil 3])
+   (into #{}
+         (fn [a]
+           (map inc)
+         (comp (filter identity)
+               (map inc))
+         [1 nil 2 nil 3])
+   )
+   )
 
 
 (comment

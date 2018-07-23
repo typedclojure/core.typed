@@ -643,6 +643,7 @@
 
 (defn invoke-typing-rule
   [vsym {:keys [env] :as expr} expected]
+  ;(prn "invoke-typing-rule" vsym)
   (let [unparse-type-verbose #(binding [vs/*verbose-types* false]
                                 (prs/unparse-type %))
         maybe-map->TCResult #(some-> % cu/map->TCResult)
@@ -650,6 +651,41 @@
                    (let [s (prs/parse-type s)
                          t (prs/parse-type t)]
                      (sub/subtype? s t)))
+        solve (fn [t q]
+                {:pre [(map? t)
+                       (contains? t :type)]
+                 :post [((some-fn nil? map?) %)]}
+                (let [;; atm only support query = (All [x] [in :-> out])
+                      query (prs/parse-type q)
+                      _ (assert (r/Poly? query))
+                      names (c/Poly-fresh-symbols* query)
+                      bbnds (c/Poly-bbnds* names query)
+                      body (c/Poly-body* names query)
+                      _ (assert (r/FnIntersection? body))
+                      _ (assert (= 1 (count (:types body))))
+                      arity (first (:types body))
+                      _ (assert (r/Function? arity))
+                      _ (assert (= 1 (count (:dom arity))))
+                      _ (assert (not-any? #(% arity) [:rest :drest :kws :prest :pdot]))
+                      _ (assert (= (fo/-simple-filter) (:fl (:rng arity))))
+                      _ (assert (= obj/-empty (:o (:rng arity))))
+                      _ (assert (= (r/-flow fl/-top) (:flow (:rng arity))))
+
+                      lhs (prs/parse-type (:type t))
+                      rhs (first (:dom arity))
+                      out (:t (:rng arity))
+                      substitution (cgen/handle-failure
+                                     (cgen/infer
+                                       (zipmap names bbnds)
+                                       {}
+                                       [lhs]
+                                       [rhs]
+                                       out))]
+                  ;(prn "substitution" substitution)
+                  (when substitution
+                    {:type (unparse-type-verbose
+                             (subst/subst-all substitution out))})))
+        #_#_
         solve-subtype (fn [vs f]
                         {:pre [(apply distinct? vs)
                                (every? symbol? vs)]}
@@ -694,7 +730,8 @@
                              (let [ret (some-> expected cu/map->TCResult)
                                    cexpr (check expr ret)]
                                (assoc cexpr ::rules/expr-type (cu/TCResult->map (u/expr-type cexpr))))))
-                   :solve-subtype solve-subtype
+                   ;:solve-subtype solve-subtype
+                   :solve solve
                    :subtype? subtype?
                    :emit-form ast-u/emit-form-fn
                    :abbreviate-type (fn [t]

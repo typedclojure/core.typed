@@ -19,7 +19,7 @@
               :ns-meta {:core.typed {:experimental #{:custom-expansions}}}))
 
 (defmacro is-tc-e [& body]
-  `(is (do (tc-err ~@body)
+  `(is (do (tc-e ~@body)
            true)))
 
 (defmacro is-tc-err [& body]
@@ -250,11 +250,24 @@
   (is-tc-err (let [m {:a []}]
                (update-in m [:a :b] identity))))
 
-#_
 (deftest map-test
+  (is-tc-e (map identity [1 2 3]))
   (is-tc-e (map identity [1 2 3])
            (t/Seq t/Num))
-  (is-tc-err (map identity 'a)))
+  (is-tc-err (map identity [1 2 3])
+             (t/Seq t/Bool))
+  (is-tc-err (map identity 'a))
+
+  ;                vvvvvvvvvvvvvv
+  ;; (map identity ('a asdlfsdf
+  ;;                 ;lsdl;fsdlf) 
+  ;;               ^^^^^^^^^^^^^^
+  ;;      :a :b)
+  ;                vv
+  ;; (map identity 'a
+  ;;               ^^
+  ;;      :a :b)
+  (is-tc-e (map identity)))
 
 (comment
   (defn timet

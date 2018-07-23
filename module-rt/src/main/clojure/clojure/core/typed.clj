@@ -1448,7 +1448,7 @@ for checking namespaces, cf for checking individual forms."}
        ::special-type true}
   U)
 
-(def ^{:doc "Resolves to the type of the var (lazily) or local (eagerly) named by sym."
+(def ^{:doc "(alpha) Resolves to the type of the var (lazily) or local (eagerly) named by sym."
        :forms '[(TypeOf sym)]
        ::special-type true}
   TypeOf)

@@ -421,6 +421,23 @@
      ;#'jana2/run-passes run-passes
      }))
 
+(defn will-custom-expand? [form env]
+  (boolean
+    (when vs/*custom-expansions*
+      (when (seq? form)
+        (let [[op & args] form]
+          (when-not (taj/specials op)
+            (let [v (ta-utils/resolve-sym op env)
+                  m (meta v)
+                  local? (-> env :locals (get op))
+                  macro? (and (not local?) (:macro m)) ;; locals shadow macros
+                  vsym (when (var? v)
+                         (coerce/var->symbol v))]
+              (or (when (and (not local?) vsym)
+                    (expand/custom-inline? vsym))
+                  (when (and macro? vsym)
+                    (expand/custom-expansion? vsym))))))))))
+
 ;; bindings is an atom that records any side effects during macroexpansion. Useful
 ;; for nREPL middleware.
 (defn analyze1
@@ -442,8 +459,12 @@
                        ;; if this is a typed special form like an ann-form, don't treat like
                        ;; a top-level do.
                        :additional-gilardi-condition 
-                       (fn [mform]
+                       (fn [mform env]
                          (not (special-form? mform)))
+                       :stop-gildardi-check 
+                       ;; cut off custom expansions to preserve :original-form's
+                       (fn [mform env]
+                         (will-custom-expand? mform env))
                        ;; propagate inner types to outer `do`
                        :annotate-do
                        (fn [a _ ret]
@@ -555,7 +576,7 @@
               (:original-form opts)
               (emit-form/emit-form ast))
         ;_ (prn "form" frm)
-        #_#_
+        ;#_#_
         _ (binding [;*print-meta* true
                     ;*print-dup* true
                     ;*print-length* 6

@@ -11,6 +11,7 @@
             [clojure.core.typed.current-impl :as impl]
             [clojure.core.typed.lex-env :as lex-env]
             [clojure.core.typed.errors :as err]
+            [clojure.repl :as repl]
             [clojure.core.typed.parse-unparse :as prs])
   (:import (clojure.lang ExceptionInfo)))
 
@@ -165,7 +166,10 @@
                                   (err/print-errors! (vec (concat (delayed-errors-fn) [e])))
                                   (catch Throwable e
                                     e))
-                                e)]
+                                (do
+                                  #_(binding [*out* *err*]
+                                    (prn e))
+                                  e))]
                         (reset! terminal-error e)
                         nil)))
             res (some-> c-ast u/expr-type)
