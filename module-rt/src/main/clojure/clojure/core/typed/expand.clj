@@ -382,7 +382,7 @@
 
 (comment 
   (inline-assoc-in `(assoc-in {:a {:b nil}} [:a :b] 2))
-  (inline-assoc-in {:a {:b {:c nil}}} [:a :b :c] 2)
+  (inline-assoc-in `(assoc-in {:a {:b {:c nil}}} [:a :b :c] 2))
 )
 
 (defmacro type-error [opts]
@@ -406,7 +406,6 @@
 
 (defmethod -expand-inline 'clojure.core/assoc-in [form _]
   {:pre [(= 4 (count form))]}
-  (prn "-expand-inline clojure.core/assoc-in")
   (let [[_ _ path] form
         _ (assert (and (vector? path) (seq path)) "core.typed only supports non-empty vector paths with assoc-in")]
     `(check-expected
@@ -440,6 +439,23 @@
                   "The return type of this 'update-in' expression does not agree with the expected type.")
         :blame-form ~form})))
 
+(defn expand-ann-form [form _]
+  (prn "expand-ann-form")
+  (let [[_ frm ty] form]
+    `(check-expected
+       (do ~spc/special-form
+           ::t/ann-form
+           {:type '~ty}
+           (check-expected
+             ~frm
+             {:blame-form ~frm}))
+       {:msg-fn (fn [_#]
+                  ;; TODO insert actual types in this message
+                  "The annotated type for this 'ann-form' expression did not agree with the expected type from the surrounding context.")
+        :blame-form ~form})))
+
+(defmethod -expand-macro `t/ann-form [& args] (apply expand-ann-form args))
+(defmethod -expand-macro 'clojure.core.typed.macros/ann-form [& args] (apply expand-ann-form args))
 
 (comment
   (update-in m [:a :b] f x y z)

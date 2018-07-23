@@ -1,7 +1,7 @@
 (ns clojure.core.typed.test.frozen-macros
   (:require 
     ; this loads the type system, must go first
-    [clojure.core.typed.test.test-utils :refer :all]
+    [clojure.core.typed.test.test-utils :as tu]
     [clojure.test :refer :all]
     [clojure.core.typed.analyzer2.pre-analyze :as pre]
     [clojure.core.typed.analyzer2.jvm :as ana]
@@ -10,7 +10,21 @@
     [clojure.tools.analyzer.jvm :as taj]
     [clojure.tools.analyzer.jvm.utils :as ju]))
 
-(comment
+(defmacro tc-e [frm & opts]
+  `(tu/tc-e ~frm ~@opts
+            :ns-meta {:core.typed {:experimental #{:custom-expansions}}}))
+
+(defmacro tc-err [frm & opts]
+  `(tu/tc-err ~frm ~@opts
+              :ns-meta {:core.typed {:experimental #{:custom-expansions}}}))
+
+(defmacro is-tc-e [& body]
+  `(is (do (tc-err ~@body)
+           true)))
+
+(defmacro is-tc-err [& body]
+  `(is (tc-err ~@body)))
+
 (deftest ns-test
   (is-tc-e (ns foo) nil)
   (is-tc-err (ns foo) Symbol))
@@ -18,16 +32,19 @@
 (deftest ann-form-test
   (is-tc-e (ann-form 1 Integer))
   ;; blames ann-form form
+  ;; FIXME add types in msg
   (is-tc-err (ann-form 1 Integer) nil)
   (is-tc-err (ann-form 1 nil)))
 
 (deftest tc-ignore-test
   (is-tc-e (tc-ignore #(/ nil nil)))
+  ;; FIXME garbled
   (is-tc-err (tc-ignore #(/ nil nil)) nil))
 
 (deftest typed-fn-test
   (is-tc-e (fn [a :- (U nil Number)]))
   ;; inherits column from outer expression
+  ;; FIXME use entire form if single arity
   (is-tc-err (fn [] :- Number))
   ;; exact column number
   (is-tc-err (fn ([] :- Number))))
@@ -46,6 +63,7 @@
   (is-tc-err (fn [a :- (U nil Number)] :- Number,
                (when a 1)))
   ;; 'then+else' expected error
+  ; FIXME duplicated error
   (is-tc-err (fn [a :- (U nil Number)] :- Number,
                (when a))))
 
@@ -139,6 +157,7 @@
   (binding [*assert* false]
     (is-tc-e #(assert (/ nil nil "foo"))))
   (is-tc-err #(assert (/ nil) "foo"))
+  (is-tc-err #(assert (/ nil nil) "foo"))
   ;; unreachable message
   (is-tc-e #(assert "foo" (/ nil)))
   (is-tc-err #(assert nil (/ nil))))
@@ -217,16 +236,67 @@
              (update-in m [:a] update-in [:b] update-in [:c] str))
            '{:a '{:b '{:c Str}}})
   ;; error is the second 'update-in' call
+  ;; FIXME garbled error
   (is-tc-err (let [m {:a {:b 1}}]
                (update-in m [:a] update-in [:b] update-in [:c] inc)))
   ;; error is (inc "a") call
+  ;; FIXME garbled error
   (is-tc-err (let [m {:a {:b {:c "a"}}}]
                (update-in m [:a] update-in [:b] update-in [:c] inc)))
   (is-tc-e (update-in {:a {:b 1}} [:a :b] inc)
            '{:a '{:b Num}})
   (is-tc-e (update-in {:a {:b 1}} [:a :b] str)
            '{:a '{:b Str}})
-  (is-tc-e (update-in {:a []} [:a :b] identity))
-  (is-tc-e (let [m {:a []}]
-             (update-in m [:a :b] identity))))
+  (is-tc-err (update-in {:a []} [:a :b] identity))
+  (is-tc-err (let [m {:a []}]
+               (update-in m [:a :b] identity))))
+
+(comment
+  (defn timet
+    [expr]
+    (let [start (. System (nanoTime))
+          ret (expr)]
+      (/ (double (- (. System (nanoTime)) start)) 1000000.0)))
+
+  (clojure.pprint/pprint
+  (sort-by val
+           (into {} (map (fn [v]
+                           [v (timet #(clojure.test/test-vars [v]))]))
+                 (filter (every-pred var? (comp :test meta)) (vals (ns-publics *ns*)))))
+  )
+; no custom expansion
+	'([#'clojure.core.typed.test.frozen-macros/tc-ignore-test 171.394456]
+		[#'clojure.core.typed.test.frozen-macros/with-open-test 181.161775]
+		[#'clojure.core.typed.test.frozen-macros/typed-fn-test 233.531726]
+		[#'clojure.core.typed.test.frozen-macros/ann-form-test 235.352863]
+		[#'clojure.core.typed.test.frozen-macros/ns-test 240.44296]
+		[#'clojure.core.typed.test.frozen-macros/get-in-test 341.253694]
+		[#'clojure.core.typed.test.frozen-macros/fn-test 495.774091]
+		[#'clojure.core.typed.test.frozen-macros/when-not-test 542.922632]
+		[#'clojure.core.typed.test.frozen-macros/when-test 546.166276]
+		[#'clojure.core.typed.test.frozen-macros/when-let-test 609.879237]
+		[#'clojure.core.typed.test.frozen-macros/if-let-test 631.63356]
+		[#'clojure.core.typed.test.frozen-macros/assoc-in-inline-test 676.056304]
+		[#'clojure.core.typed.test.frozen-macros/assert-test 694.094945]
+		[#'clojure.core.typed.test.frozen-macros/update-in-inline-test 765.674776]
+		[#'clojure.core.typed.test.frozen-macros/let-test 992.088318]
+		[#'clojure.core.typed.test.frozen-macros/for-test 5778.336702])
+; yes custom expansion
+'([#'clojure.core.typed.test.frozen-macros/ns-test 182.167286]
+	[#'clojure.core.typed.test.frozen-macros/tc-ignore-test 188.358344]
+	[#'clojure.core.typed.test.frozen-macros/with-open-test 221.02634]
+	[#'clojure.core.typed.test.frozen-macros/ann-form-test 274.636581]
+	[#'clojure.core.typed.test.frozen-macros/typed-fn-test 330.160597]
+	[#'clojure.core.typed.test.frozen-macros/get-in-test 388.410054]
+	[#'clojure.core.typed.test.frozen-macros/fn-test 682.037165]
+	[#'clojure.core.typed.test.frozen-macros/assert-test 774.38307]
+	[#'clojure.core.typed.test.frozen-macros/if-let-test 793.200128]
+	[#'clojure.core.typed.test.frozen-macros/when-not-test 807.979324]
+	[#'clojure.core.typed.test.frozen-macros/when-let-test 816.350961]
+	[#'clojure.core.typed.test.frozen-macros/for-test 819.305905]
+	[#'clojure.core.typed.test.frozen-macros/assoc-in-inline-test 820.942907]
+	[#'clojure.core.typed.test.frozen-macros/when-test 865.453885]
+	[#'clojure.core.typed.test.frozen-macros/let-test 1221.219269]
+	[#'clojure.core.typed.test.frozen-macros/update-in-inline-test 1641.337323])
+
 )

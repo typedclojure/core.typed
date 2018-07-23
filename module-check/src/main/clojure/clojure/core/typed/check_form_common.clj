@@ -98,7 +98,8 @@
               vs/*in-check-form* true
               vs/*lexical-env* (lex-env/init-lexical-env)
               ;; custom expansions might not even evaluate
-              vs/*can-rewrite* (not custom-expansions?)]
+              vs/*can-rewrite* (not custom-expansions?)
+              vs/*custom-expansions* custom-expansions?]
       (let [expected (or
                        expected-ret
                        (when type-provided?

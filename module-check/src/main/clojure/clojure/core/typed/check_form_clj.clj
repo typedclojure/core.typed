@@ -19,7 +19,11 @@
    :eval-out-ast (fn eval-out-ast
                    ([ast] (eval-out-ast ast {}))
                    ([ast opts] (ana-clj/eval-ast ast opts)))
-   :custom-expansions? ana-clj/custom-expansions?
+   :custom-expansions? (-> *ns*
+                           meta
+                           :core.typed
+                           :experimental
+                           (contains? :custom-expansions))
    :emit-form ast-u/emit-form-fn})
 
 (defn check-form-info

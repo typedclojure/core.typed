@@ -38,8 +38,6 @@
             [clojure.core.typed.ns-deps-utils :as dep-u])
   (:import (clojure.tools.analyzer.jvm ExceptionThrown)))
 
-(def custom-expansions? false)
-
 ; Updated for Clojure 1.8
 ;  https://github.com/clojure/clojure/commit/7f79ac9ee85fe305e4d9cbb76badf3a8bad24ea0
 (T/ann ^:no-check *typed-macros* (T/Map T/Any T/Any))
@@ -127,21 +125,21 @@
    (fn [&form &env & args]
      `(T/tc-ignore
         ~(apply @#'core/defmacro &form &env args)))
-   }
-  (when-not custom-expansions?
-    {#'clojure.core/for
-     (fn [&form &env seq-exprs body-expr]
-       (@#'T/for &form &env seq-exprs body-expr))})))
+
+   #'clojure.core/for
+   (fn [&form &env seq-exprs body-expr]
+     (@#'T/for &form &env seq-exprs body-expr))}))
 
 (T/ann ^:no-check typed-macro-lookup [T/Any :-> T/Any])
 (defn typed-macro-lookup [var]
   {:post [(ifn? %)]}
-  (or (get *typed-macros* var)
-      (when custom-expansions?
-        (when (expand/custom-expansion? (coerce/var->symbol var))
-          (fn [form locals & _args_]
-            (expand/expand-macro form {:vsym (coerce/var->symbol var)
-                                       :locals locals}))))
+  (or (when vs/*custom-expansions*
+        (let [vsym (coerce/var->symbol var)]
+          (when (expand/custom-expansion? vsym)
+            (fn [form locals & _args_]
+              (expand/expand-macro form {:vsym vsym
+                                         :locals locals})))))
+      (get *typed-macros* var)
       var))
 
 ;; copied from tools.analyze.jvm to insert `*typed-macros*`
@@ -167,7 +165,7 @@
                   macro? (and (not local?) (:macro m)) ;; locals shadow macros
                   inline-arities-f (:inline-arities m)
                   inline? (or
-                            (when custom-expansions?
+                            (when vs/*custom-expansions*
                               (when (and (not local?) (var? v))
                                 (let [vsym (coerce/var->symbol v)]
                                   (when (expand/custom-inline? vsym)
@@ -553,7 +551,7 @@
   ;; based on jvm/analyze+eval
   (let [; FIXME don't allow mixing of runtime inference and custom expansions,
         ; since we want to evaluate the modified AST in runtime inference.
-        frm (if custom-expansions?
+        frm (if vs/*custom-expansions*
               (:original-form opts)
               (emit-form/emit-form ast))
         ;_ (prn "form" frm)
