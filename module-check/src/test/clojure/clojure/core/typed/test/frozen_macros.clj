@@ -272,6 +272,22 @@
   ;;TODO
   #_(is-tc-e (map identity)))
 
+(deftest ->-test
+  (is-tc-e (-> identity
+               (map [1 2 3])))
+  (is-tc-err (-> identity
+                 (map [1 2 3]))
+             (t/Seq t/Bool))
+  ; FIXME big error
+  (is-tc-err (-> identity
+                 (map [1 2 3])
+                 (map [1 2 3]))
+             (t/Seq t/Bool))
+  (is-tc-err (-> identity
+                 (map [1 2 3])
+                 vec)
+             (t/Seq t/Bool)))
+
 (comment
   (defn timet
     [expr]

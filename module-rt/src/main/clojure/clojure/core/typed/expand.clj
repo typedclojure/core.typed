@@ -39,12 +39,14 @@
                        :expression ~expression})
                 ~@(destructure [binding gs])]
            ~form))
-      `(check-if-empty-body
-         (do ~@body-forms)
-         {:msg-fn (fn [_#]
-                     "This 'let' expression returns nil with an empty body, which does not agree with the expected type")
-          :blame-form ~form
-          :original-body ~body-forms})
+      (if (seq body-forms)
+        `(do ~@body-forms)
+        `(check-if-empty-body
+           (do ~@body-forms)
+           {:msg-fn (fn [_#]
+                      "This 'let' expression returns nil with an empty body, which does not agree with the expected type")
+            :blame-form ~form
+            :original-body ~body-forms}))
       (partition 2 (rseq bindings-form)))))
 
 (defmacro check-if-empty-body [e opts]
@@ -488,6 +490,42 @@
            {:msg-fn (fn [_#]
                       "The return type of this 'map' expression does not agree with the expected type.")
             :blame-form ~form})))))
+(comment
+ (-> identity
+     (map [1 2 3])
+     vec)
+ =>
+ (check-expected
+   (vec
+     (check-expected
+       (map identity [1 2 3])
+       {:msg-fn (fn [_#]
+                  "A threaded form with -> threw a type error: (-> ... (map [1 2 3]) ...)")
+        :blame-form (map identity [1 2 3])}))
+   {:msg-fn (fn [_#]
+              "A threaded form with -> threw a type error: (-> ... vec ...)")
+    :blame-form (vec (map identity [1 2 3]))})
+ (clojure.pprint/pprint (-expand-macro '(-> identity (map [1 2 3]) vec) {:vsym `->}))
+ )
+
+(defmethod -expand-macro 'clojure.core/-> [[_ x & forms :as all-form] _]
+  (loop [x x, forms forms, blame-form x]
+    (if forms
+      (let [form (first forms)
+            insert-in (fn [x]
+                        (if (seq? form)
+                          (with-meta `(~(first form) ~x ~@(next form)) (meta form))
+                          (list form x)))
+            threaded (insert-in x)
+            blame-form (insert-in blame-form)
+            threaded `(check-expected
+                        ~threaded
+                        {:msg-fn (fn [_#]
+                                   (str "A threaded form with -> yielded a type error: "
+                                        ~(pr-str (list '-> '... form '...))))
+                         :blame-form ~blame-form})]
+        (recur threaded (next forms) blame-form))
+      x)))
 
 ;; Notes:
 ;; - try `->` next
