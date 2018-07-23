@@ -256,18 +256,21 @@
            (t/Seq t/Num))
   (is-tc-err (map identity [1 2 3])
              (t/Seq t/Bool))
+  ;; FIXME better column number
   (is-tc-err (map identity 'a))
 
-  ;                vvvvvvvvvvvvvv
+  ;               ;vvvvvvvvvvvvvv
   ;; (map identity ('a asdlfsdf
   ;;                 ;lsdl;fsdlf) 
-  ;;               ^^^^^^^^^^^^^^
+  ;;              ;^^^^^^^^^^^^^^
   ;;      :a :b)
-  ;                vv
+  ;               ;vv
   ;; (map identity 'a
-  ;;               ^^
+  ;;              ;^^
   ;;      :a :b)
-  (is-tc-e (map identity)))
+
+  ;;TODO
+  #_(is-tc-e (map identity)))
 
 (comment
   (defn timet

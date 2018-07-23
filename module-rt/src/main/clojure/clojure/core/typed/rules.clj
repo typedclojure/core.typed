@@ -109,8 +109,7 @@
         (delayed-error msg {:form form})))
     (assoc m
            ::expr-type (maybe-check-expected
-                         ;; need something to check against, expr-type seems almost reasonable?
-                         (or res expr-type)
+                         (or res {:type `t/Nothing})
                          expected))))
 
 #_

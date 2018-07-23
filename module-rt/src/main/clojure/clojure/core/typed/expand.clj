@@ -465,8 +465,7 @@
 (defmethod -expand-macro `t/tc-ignore [& args] (apply expand-tc-ignore args))
 (defmethod -expand-macro 'clojure.core.typed.macros/tc-ignore [& args] (apply expand-tc-ignore args))
 
-(defmethod -expand-inline `core/map [[_ f & colls :as form] _]
-  (prn "start map")
+(defmethod -expand-inline 'clojure.core/map [[_ f & colls :as form] _]
   (if (empty? colls)
     (throw (Exception. "TODO map transducer arity"))
     (let [gsyms (repeatedly (count colls) gensym)
@@ -475,16 +474,18 @@
                                       ~coll
                                       {:query (t/All [a#] [(t/U nil (t/Seqable a#)) :-> a#])
                                        :msg-fn (fn [_#]
-                                                 (str "Argument number " ~(inc i) " to 'map' must be Seqable"))
+                                                 (str "Argument number " ~i " to 'map' must be Seqable"))
                                        :blame-form ~coll})])
-                           (range) gsyms colls)]
-      (prn "map")
+                           ;; counting argument #'s to this 'map' form
+                           (range 2 ##Inf)
+                           gsyms colls)]
       `(let ~(vec bindings)
          ;; FIXME can we push the expected type into `f`?
-         (solve
-           (ignore-expected-if true (~f ~@gsyms))
-           {:query (t/All [a#] [a# :-> (t/Seq a#)])
-            :msg-fn (fn [_#]
+         (check-expected
+           (solve
+             (ignore-expected-if true (~f ~@gsyms))
+             {:query (t/All [a#] [a# :-> (t/Seq a#)])})
+           {:msg-fn (fn [_#]
                       "The return type of this 'map' expression does not agree with the expected type.")
             :blame-form ~form})))))
 
