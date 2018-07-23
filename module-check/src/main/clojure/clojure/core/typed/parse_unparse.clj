@@ -27,7 +27,7 @@
                                         DottedPretype Function RClass App TApp
                                         PrimitiveArray DataType Protocol TypeFn Poly PolyDots
                                         Mu HeterogeneousVector HeterogeneousList HeterogeneousMap
-                                        CountRange Name Value Top Unchecked TopFunction B F Result AnyValue
+                                        CountRange Name Value Top TypeOf Unchecked TopFunction B F Result AnyValue
                                         HeterogeneousSeq KwArgsSeq TCError Extends JSNumber JSBoolean
                                         CLJSInteger ArrayCLJS JSNominal JSString TCResult AssocType
                                         GetType HSequential HSet JSUndefined JSNull JSSymbol JSObject
@@ -231,6 +231,29 @@
 (defmethod parse-type-list 'CountRange [t] (parse-CountRange t))
 (defmethod parse-type-list 'clojure.core.typed/CountRange [t] (parse-CountRange t))
 (defmethod parse-type-list 'cljs.core.typed/CountRange [t] (parse-CountRange t))
+
+(declare resolve-type-clj)
+
+(defmethod parse-type-list 'clojure.core.typed/TypeOf [[_ sym :as t]]
+  (impl/assert-clojure)
+  (when-not (= 2 (count t))
+    (err/int-error (str "Wrong number of arguments to TypeOf (" (count t) ")")))
+  (when-not (symbol? sym)
+    (err/int-error "Argument to TypeOf must be a symbol."))
+  (let [locals-frame (get-in vs/*current-expr* [:env :clojure.core.typed.analyzer2.passes.uniquify/locals-frame])
+        uniquified-local (get-in vs/*current-expr* [:env :clojure.core.typed.analyzer2.passes.uniquify/locals-frame-val sym])
+        vsym (let [r (resolve-type-clj sym)]
+               (when (var? r)
+                 (coerce/var->symbol r)))]
+    (if uniquified-local
+      (let [t (ind/type-of-nofail uniquified-local)]
+        (when-not t
+          (err/int-error (str "Could not resolve TypeOf for local " sym)))
+        t)
+      (do
+        (when-not vsym
+          (err/int-error (str "Could not resolve TypeOf for var " sym)))
+        (r/-type-of vsym)))))
 
 (defn parse-ExactCount [[_ & [n :as args]]]
   (when-not (#{1} (count args))
@@ -1435,6 +1458,8 @@
 (defn unp [t] (prn (unparse-type t)))
 
 (defmethod unparse-type* Top [_] (unparse-Name-symbol-in-ns `t/Any))
+;; TODO qualify vsym in current ns
+(defmethod unparse-type* TypeOf [{:keys [vsym] :as t}] (list (unparse-Name-symbol-in-ns `t/TypeOf) vsym))
 (defmethod unparse-type* Unchecked [{:keys [vsym] :as t}]
   (if vsym
     (list 'Unchecked vsym)

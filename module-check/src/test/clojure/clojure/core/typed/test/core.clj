@@ -5720,3 +5720,18 @@
 
 (deftest transducer-test
   (is (check-ns 'clojure.core.typed.test.transducer)))
+
+(deftest TypeOf-test
+  (is-tc-e (let [a :- t/Num, 1]
+             (ann-form 2 (t/TypeOf a))))
+  (is-tc-e (let [a :- t/Bool, true
+                 a :- t/Num, 1]
+             (ann-form 2 (t/TypeOf a))))
+  (is-tc-err (let [a :- t/Num, 1
+                   a :- t/Bool, true]
+               (ann-form 2 (t/TypeOf a))))
+  (is-tc-e (let [f (let [b :- t/Num, 1]
+                     (fn [] :- (t/TypeOf b)
+                       1))]
+             (inc (f))))
+)

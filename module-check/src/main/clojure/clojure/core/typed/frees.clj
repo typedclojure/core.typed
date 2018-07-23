@@ -19,7 +19,7 @@
                                         Mu HeterogeneousVector HeterogeneousList HeterogeneousMap
                                         CountRange Name Value Top Unchecked TopFunction B F Result AnyValue
                                         HeterogeneousSeq Scope TCError Extends AssocType HSequential HSet
-                                        JSObj)
+                                        JSObj TypeOf)
            (clojure.core.typed.filter_rep FilterSet TypeFilter NotTypeFilter ImpFilter
                                           AndFilter OrFilter TopFilter BotFilter)
            (clojure.core.typed.object_rep Path EmptyObject NoObject)
@@ -197,6 +197,7 @@
 (add-frees-method [::any-var Top] [t] {})
 (add-frees-method [::any-var Unchecked] [t] {})
 (add-frees-method [::any-var Name] [t] {})
+(add-frees-method [::any-var TypeOf] [t] {})
 
 (add-frees-method [::any-var DataType]
   [{varis :variances args :poly? :as t}]

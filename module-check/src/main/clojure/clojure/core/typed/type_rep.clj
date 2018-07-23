@@ -13,8 +13,6 @@
 
 (t/defalias SeqNumber Long)
 
-;(set! *warn-on-reflection* true)
-
 ;;; Type rep predicates
 
 (t/defalias Type
@@ -74,6 +72,18 @@
 (defn -unchecked [vsym]
   {:pre [((some-fn nil? symbol?) vsym)]}
   (Unchecked-maker vsym))
+
+(u/ann-record TypeOf [vsym :- t/Sym])
+(u/def-type TypeOf [vsym]
+  "The type of a local or var."
+  []
+  :methods
+  [p/TCType])
+
+(t/ann -type-of [t/Sym :-> Type])
+(defn -type-of [vsym]
+  {:pre [(symbol? vsym)]}
+  (TypeOf-maker vsym))
 
 (u/ann-record Union [types :- (t/SortedSet Type)])
 (u/def-type Union [types]

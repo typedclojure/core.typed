@@ -2,6 +2,7 @@
   "Rewriting rules for custom expansions, to improve type checking
   error messages and reduce local annotations."
   (:require [clojure.core.typed :as t]
+            [clojure.core :as core]
             [clojure.core.typed.special-form :as spc]
             [clojure.pprint :as pp]
             [clojure.core.typed.internal :as internal]))
@@ -440,7 +441,6 @@
         :blame-form ~form})))
 
 (defn expand-ann-form [form _]
-  (prn "expand-ann-form")
   (let [[_ frm ty] form]
     `(check-expected
        (do ~spc/special-form
@@ -456,6 +456,43 @@
 
 (defmethod -expand-macro `t/ann-form [& args] (apply expand-ann-form args))
 (defmethod -expand-macro 'clojure.core.typed.macros/ann-form [& args] (apply expand-ann-form args))
+
+(defn expand-tc-ignore [[_ & body :as form] _]
+  `(check-expected
+     (do ~spc/special-form
+         ::t/tc-ignore
+         ~@(or body [nil]))
+     {:msg-fn (fn [_#]
+                "The surrounding context of this 'tc-ignore' expression expects a more specific type than Any.")
+      :blame-form ~form}))
+
+(defmethod -expand-macro `t/tc-ignore [& args] (apply expand-tc-ignore args))
+(defmethod -expand-macro 'clojure.core.typed.macros/tc-ignore [& args] (apply expand-tc-ignore args))
+
+#_
+(defmethod -expand-inline `core/map [[_ f & colls :as form] _]
+  (if (empty? colls)
+    (assert nil "TODO map transducer arity")
+    (let [gsyms (repeatedly (count colls) gensym)
+          bindings (mapcat (fn [i gsym coll] 
+                             [gsym coll
+                              (gensym '_) `(t/ann-form
+                                             (check-expected
+                                               ~gsym
+                                               {:msg-fn (fn [_#]
+                                                          (str "Argument number " ~(inc i)
+                                                               " to 'map' must be Seqable"))
+                                                :blame-form ~coll})
+                                             (t/U nil (t/Seqable t/Any)))])
+                           (range) gsyms colls)
+          bmap (apply hash-map bindings)
+          fst (gensym 'fst)]
+      `(let ~(into (vec bindings)
+                   [fst `(t/fn :forall [a#]
+                           [c# :- (t/U nil (t/Seqable a#))] :- a#
+                           (throw (Exception.)))])
+         (~f ~@(map #(list fst %) gsyms))))))
+
 
 (comment
   (update-in m [:a :b] f x y z)

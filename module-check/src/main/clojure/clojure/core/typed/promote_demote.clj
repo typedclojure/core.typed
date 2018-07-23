@@ -17,7 +17,7 @@
                                         JSString JSBoolean JSNumber CLJSInteger JSObject
                                         ArrayCLJS FunctionCLJS KwArgsSeq HSequential HSet LTRange
                                         AnyValue TopFunction Scope DissocType AssocType
-                                        GetType GTRange JSUndefined JSNull JSSymbol JSObj)
+                                        GetType GTRange JSUndefined JSNull JSSymbol JSObj TypeOf)
            (clojure.core.typed.filter_rep TopFilter BotFilter TypeFilter NotTypeFilter AndFilter OrFilter
                                           ImpFilter)))
 
@@ -261,7 +261,7 @@
 (promote-demote-id B Name Top Unchecked TCError CountRange JSString
                    JSBoolean JSNumber JSObject CLJSInteger
                    FunctionCLJS LTRange GTRange AnyValue TopFunction JSUndefined
-                   JSNull JSSymbol)
+                   JSNull JSSymbol TypeOf)
 
 (promote-demote GetType
   [T V]

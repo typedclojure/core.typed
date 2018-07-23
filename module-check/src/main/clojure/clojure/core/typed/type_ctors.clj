@@ -33,12 +33,8 @@
                                         Union Intersection F Function Mu B KwArgs KwArgsSeq RClass
                                         Bounds Name Scope CountRange Intersection DataType Extends
                                         JSNominal Protocol HeterogeneousVector GetType HSequential
-                                        HeterogeneousList HeterogeneousSeq HSet AssocType)
+                                        HeterogeneousList HeterogeneousSeq HSet AssocType TypeOf)
            (clojure.lang IPersistentMap IPersistentVector Var)))
-
-(t/tc-ignore
-(alter-meta! *ns* assoc :skip-wiki true)
-  )
 
 (t/ann ^:no-check with-original-names [r/Type (t/U t/Sym (t/Seqable t/Sym)) -> r/Type])
 (defn- with-original-names [t names]
@@ -1358,6 +1354,14 @@
    :post [(r/Type? %)]}
   (find-val-type target key not-found))
 
+(t/ann ^:no-check resolve-TypeOf [TypeOf -> r/Type])
+(defn resolve-TypeOf [{:keys [vsym] :as t}]
+  {:pre [(r/TypeOf? t)]
+   :post [(r/Type? %)]}
+  (let [uniquified (if (namespace vsym)
+  (or (ind/type-of-nofail vsym)
+      (err/int-error (str "Could not resolve TypeOf " vsym))))
+
 (t/ann -resolve [r/Type -> r/Type])
 (defn -resolve [ty]
   {:pre [(r/AnyType? ty)]
@@ -1369,6 +1373,7 @@
     (r/App? ty) (resolve-App ty)
     (r/TApp? ty) (resolve-TApp ty)
     (r/GetType? ty) (resolve-Get ty)
+    (r/TypeOf? ty) (resolve-TypeOf ty)
     :else ty)))
 
 (t/ann requires-resolving? [r/Type -> t/Any])

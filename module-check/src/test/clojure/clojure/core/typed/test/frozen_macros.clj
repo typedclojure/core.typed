@@ -38,7 +38,6 @@
 
 (deftest tc-ignore-test
   (is-tc-e (tc-ignore #(/ nil nil)))
-  ;; FIXME garbled
   (is-tc-err (tc-ignore #(/ nil nil)) nil))
 
 (deftest typed-fn-test
@@ -250,6 +249,12 @@
   (is-tc-err (update-in {:a []} [:a :b] identity))
   (is-tc-err (let [m {:a []}]
                (update-in m [:a :b] identity))))
+
+#_
+(deftest map-test
+  (is-tc-e (map identity [1 2 3])
+           (t/Seq t/Num))
+  (is-tc-err (map identity 'a)))
 
 (comment
   (defn timet

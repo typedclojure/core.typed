@@ -189,6 +189,12 @@
                       (subtype? s lower-bound)))))
         *sub-current-seen*
 
+        (r/TypeOf? s)
+        (subtypeA* *sub-current-seen* (c/resolve-TypeOf s) t)
+
+        (r/TypeOf? t)
+        (subtypeA* *sub-current-seen* s (c/resolve-TypeOf t))
+
         (and (r/Value? s)
              (r/Value? t))
         ;already (not= s t)

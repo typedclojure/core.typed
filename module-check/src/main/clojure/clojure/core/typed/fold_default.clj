@@ -16,7 +16,7 @@
                                         HeterogeneousSeq TCResult TCError FlowSet Extends
                                         JSNumber CLJSInteger JSObject JSString ArrayCLJS
                                         JSBoolean AssocType GetType KwArgsSeq HSequential HSet
-                                        JSUndefined JSNull JSSymbol JSObj)
+                                        JSUndefined JSNull JSSymbol JSObj TypeOf)
            (clojure.core.typed.filter_rep NoFilter TopFilter BotFilter TypeFilter NotTypeFilter
                                           ImpFilter AndFilter OrFilter FilterSet)
            (clojure.core.typed.object_rep NoObject EmptyObject Path)
@@ -275,6 +275,7 @@
 (add-default-fold-case TopFunction ret-first)
 (add-default-fold-case B ret-first)
 (add-default-fold-case F ret-first)
+(add-default-fold-case TypeOf ret-first)
 
 (add-default-fold-case Result 
                        (fn [ty _]
