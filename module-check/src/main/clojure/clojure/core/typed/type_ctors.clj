@@ -1358,7 +1358,6 @@
 (defn resolve-TypeOf [{:keys [vsym] :as t}]
   {:pre [(r/TypeOf? t)]
    :post [(r/Type? %)]}
-  (let [uniquified (if (namespace vsym)
   (or (ind/type-of-nofail vsym)
       (err/int-error (str "Could not resolve TypeOf " vsym))))
 
