@@ -276,9 +276,9 @@
            (t/Transducer t/Num t/Bool))
   (is-tc-err (map boolean [1 2 3])
              (t/Transducer t/Bool t/Num))
-  ;; FIXME calls (boolean 1 2) which breaks inliner (too many arguments)
-  #_
-  (is-tc-e (map boolean [1 2 3] [2 3 4])
+  ;; FIXME better blame-form needed
+  ;; can we check `expected` earlier? before we check arguments?
+  (is-tc-err (map boolean [1 2 3] [2 3 4])
              (t/Transducer t/Bool t/Num))
   ;; FIXME this goes crazy because it inlines to (map (ann-form ... t/Bool))
   ;; FIXME need to override form for inlined inner map

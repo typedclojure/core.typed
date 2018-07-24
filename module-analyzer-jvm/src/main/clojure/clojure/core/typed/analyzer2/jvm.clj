@@ -432,8 +432,8 @@
                      analyze-opts-fn
                      analyze-env-fn
                      stop-gildardi-check]
-              :or {additional-gilardi-condition (fn [_] true)
-                   stop-gildardi-check (fn [_] false)
+              :or {additional-gilardi-condition (fn [form env] true)
+                   stop-gildardi-check (fn [form env] false)
                    eval-fn eval-ast
                    annotate-do (fn [a _ _] a)
                    statement-opts-fn identity
