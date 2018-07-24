@@ -80,7 +80,7 @@
              :filters {:else 'ff}}]
     (assoc m ::expr-type ret)))
 
-(defmethod typing-rule 'clojure.core.typed.expand/expected-as
+(defmethod typing-rule 'clojure.core.typed.expand/expected-type-as
   [{:keys [expr opts expected check delayed-error form with-updated-locals]}]
   (let [{:keys [sym msg-fn blame-form]} opts]
     (if expected
@@ -174,7 +174,7 @@
 
 (defmethod typing-rule 'clojure.core.typed.expand/check-expected
   [{:keys [expr opts expected check]}]
-  (check expr (when expected
+  (check expr (when-let [expected (or expected (:default-expected opts))]
                 (update expected :opts 
                         ;; earlier messages override later ones
                         #(merge

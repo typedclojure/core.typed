@@ -244,7 +244,7 @@
        '~opts
        ~expr))
 
-(defmacro expected-as [s body & [opts & more]]
+(defmacro expected-type-as [s body & [opts & more]]
   {:pre [((some-fn nil? map?) opts)
          (not more)]}
   `(let* [~s (t/ann-form nil t/Any)]
@@ -406,8 +406,10 @@
      (inline-get-in form `(get ~m ~k) ks)
      `(get ~m ~k))))
 
-(defmethod -expand-inline 'clojure.core/assoc-in [form _]
-  {:pre [(= 4 (count form))]}
+(defmethod -expand-inline 'clojure.core/assoc-in [form {:keys [internal-error]}]
+  (when-not (= 4 (count form))
+    (internal-error (str "Must provide 3 arguments to clojure.core/assoc-in, found " (dec (count form))
+                         ": " form)))
   (let [[_ _ path] form
         _ (assert (and (vector? path) (seq path)) "core.typed only supports non-empty vector paths with assoc-in")]
     `(check-expected
@@ -416,8 +418,10 @@
                   "The return type of this 'assoc-in' expression does not agree with the expected type.")
         :blame-form ~form})))
 
-(defmethod -expand-inline 'clojure.core/get-in [form _]
-  {:pre [(#{3 4} (count form))]}
+(defmethod -expand-inline 'clojure.core/get-in [form {:keys [internal-error]}]
+  (when-not (= 4 (count form))
+    (internal-error (str "Must provide 2 or 3 arguments to clojure.core/get-in, found " (dec (count form))
+                         ": " form)))
   (let [[_ _ path] form
         _ (assert (and (vector? path) (seq path)) "core.typed only supports non-empty vector paths with get-in")]
     `(check-expected
@@ -431,8 +435,10 @@
   ([form m ks f args]
    `(assoc-in ~m ~ks (~f (get-in ~m ~ks) ~@args))))
 
-(defmethod -expand-inline 'clojure.core/update-in [form _]
-  {:pre [(<= 4 (count form))]}
+(defmethod -expand-inline 'clojure.core/update-in [form {:keys [internal-error]}]
+  (when-not (<= 4 (count form))
+    (internal-error (str "Must provide at least 3 arguments to clojure.core/update-in, found " (dec (count form))
+                         ": " form)))
   (let [[_ _ path] form
         _ (assert (and (vector? path) (seq path)) "core.typed only supports non-empty vector paths with 'update-in'")]
     `(check-expected
@@ -482,8 +488,8 @@
     (internal-error (str "Must provide 1 or more arguments to clojure.core/map, found " (dec (count form))
                          ": " form)))
   (if (empty? colls)
-    `(expected-as expected#
-       (let [[in# out# :as ab#]
+    `(expected-type-as expected#
+       (let [[in# out#]
              (solve expected#
                     {:query (t/All [a# b#] [(t/Transducer a# b#) :-> '[a# b#]])
                      ;; would be nice to customize this message based on `expected`
@@ -496,18 +502,17 @@
              ([result#] (rf# result#))
              ([result# input#]
               (rf# result#
-                   (t/ann-form 
-                     ;; fake invoke
-                     (check-expected
-                       (~f input#)
-                       {:msg-fn (fn [{:keys [:parse-type]}]
-                                  ;; want expected & actual types here
-                                  (str "'map' transducer did not return a correct type"
-                                       ;": expected " (~'parse-type '(t/TypeOf expected#))
-                                       ;             "Actual: " (list 't/Transducer (t/TypeOf a#) (t/TypeOf #))
-                                       ))
-                        :blame-form ~f})
-                     (t/TypeOf out#)))))))
+                   ;; fake invoke
+                   (check-expected
+                     (~f input#)
+                     {:default-expected {:type (t/TypeOf out#)}
+                      :msg-fn (fn [{parse-type# :parse-type actual# :actual}]
+                                (str "'map' transducer did not return a correct type:"
+                                     "\n\nExpected: \t" (pr-str (parse-type# (list 't/Transducer '(t/TypeOf in#) '(t/TypeOf out#)))) "\n"
+                                     "\n\nActual: \t" (pr-str (parse-type# (list 't/Transducer '(t/TypeOf in#) actual#)))
+                                     "\n\n"
+                                     "in: \t" '~form))
+                      :blame-form (~f input#)}))))))
        {:msg-fn (fn [_#]
                   (str "Must provide expected type to 'map' transducer arity.\n"
                        "Hint: Try (t/ann-form (map ...) (t/Transducer in out))."))

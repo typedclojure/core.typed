@@ -400,7 +400,7 @@
         :return ret-expr)
 
       (and expected (not (sub/subtype? r/-any (r/ret-t expected))))
-      (do (cu/expected-error r/-any (r/ret-t expected))
+      (do (cu/expected-error r/-any expected)
           ret-expr)
       :else
       (let [; this is the actual core.typed type of the thing extending the protocol
@@ -743,10 +743,6 @@
                                       (let [m (prs/parse-type t)]
                                         (binding [vs/*verbose-types* false]
                                           (prs/unparse-type m))))
-                   :expected-error (fn [s t opts]
-                                     (let [opts (update opts :expected cu/maybe-map->TCResult)]
-                                       (apply cu/expected-error (prs/parse-type s) (prs/parse-type t)
-                                              (apply concat opts))))
                    :delayed-error (fn [s opts]
                                     (let [opts (update opts :expected cu/maybe-map->TCResult)]
                                       (apply err/tc-delayed-error s (apply concat opts))))
@@ -1065,7 +1061,7 @@
         cfexpr (check fexpr (r/ret ifn))
         _ (when expected
             (when-not (sub/subtype? ifn (r/ret-t expected))
-              (cu/expected-error ifn (r/ret-t expected))))
+              (cu/expected-error ifn expected)))
         cargs [cfexpr quote-expr]]
     (assoc expr
            :args cargs
@@ -1154,9 +1150,10 @@
       (cond
         (r/HeterogeneousMap? tmap)
         (let [r (c/HMap->KwArgsSeq tmap false)
+              ;; FIXME should be maybe-check-below
               _ (when expected
                   (when-not (sub/subtype? r (r/ret-t expected))
-                    (cu/expected-error r (r/ret-t expected))))]
+                    (cu/expected-error r expected)))]
           (-> expr
               (update-in [:fn] check)
               (assoc u/expr-type (below/maybe-check-below
@@ -1391,7 +1388,7 @@
                         (-> cargs-expr u/expr-type r/ret-t)
                         args-expected-ty)
               (binding [vs/*current-env* (:env args-expr)]
-                (cu/expected-error (-> cargs-expr u/expr-type r/ret-t) args-expected-ty)))
+                (cu/expected-error (-> cargs-expr u/expr-type r/ret-t) (r/ret args-expected-ty))))
           spec-map-ty (reduce (fn [t spec-expr]
                                 (if-let [[keyt valt] (cli/parse-cli-spec check spec-expr)]
                                   (-> t
@@ -1411,7 +1408,7 @@
           _ (when expected
               (when-not (sub/subtype? actual (r/ret-t expected))
                 (cu/expected-error 
-                  actual (r/ret-t expected))))
+                  actual expected)))
           cargs (vec (cons cargs-expr specs-exprs))]
       (-> expr
         (update-in [:fn] check)
@@ -1486,8 +1483,6 @@
 ;;convert apply to normal function application
 (add-invoke-apply-method :default 
   [expr & [expected]]
-; commented: Now done in the invoke-special method for apply
-  #_(maybe-special-apply check expr expected)
   cu/not-special)
 
 (add-check-method :invoke
@@ -1495,7 +1490,7 @@
   {:post [(r/TCResult? (u/expr-type %))
           (vector? (:args %))
           #_(-> % :fn u/expr-type r/TCResult?)]}
-  #_(prn "invoke:" ((some-fn :var :keyword :op) fexpr))
+  ;(prn "invoke:" ((some-fn :var :keyword :op) fexpr))
   (binding [vs/*current-env* env
             vs/*current-expr* expr]
     (let [e (invoke-special expr expected)]
@@ -1874,7 +1869,7 @@
         _ (when-not (sub/subtype? (-> cdisp u/expr-type r/ret-t) expected-mm-disp)
             (binding [vs/*current-expr* cdisp
                       vs/*current-env* (:env cdisp)]
-              (cu/expected-error (-> cdisp u/expr-type r/ret-t) expected-mm-disp)))
+              (cu/expected-error (-> cdisp u/expr-type r/ret-t) (r/ret expected-mm-disp))))
         cargs [(check nme-expr)
                cdisp
                (check default-expr)

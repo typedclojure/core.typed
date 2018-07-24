@@ -58,14 +58,18 @@
     (assert (symbol? method))
     (symbol (str (coerce/Class->symbol c)) (str method))))
 
-;(t/ann expected-error [r/Type r/Type -> nil])
+;(t/ann expected-error [r/Type r/TCResult -> nil])
 (defn expected-error [actual expected & opt]
+  {:pre [(r/Type? actual)
+         (r/TCResult? expected)]}
   (prs/with-unparse-ns (or prs/*unparse-type-in-ns*
                            (when vs/*current-expr*
                              (expr-ns vs/*current-expr*)))
     (apply err/tc-delayed-error (str "Type mismatch:"
-                                     "\n\nExpected: \t" (pr-str (prs/unparse-type expected))
+                                     "\n\nExpected: \t" (pr-str (prs/unparse-type (:t expected)))
                                      "\n\nActual: \t" (pr-str (prs/unparse-type actual)))
+           :expected expected
+           :actual actual
            opt)))
 
 

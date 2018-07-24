@@ -152,6 +152,7 @@
              (and (r/Value? i)
                   (integer? (:val i)))))
       (below/maybe-check-below
+        ;; FIXME replace with path-type?
         (r/ret (nth-type [fexpr-type] (:val (first arg-types)) (second arg-types)))
         expected)
 

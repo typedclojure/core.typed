@@ -1444,7 +1444,7 @@ for checking namespaces, cf for checking individual forms."}
   AnyValue)
 
 (def ^{:doc "TCError is the type of a type error in the type checker. Use only after
-            a type error has been thrown."
+            a type error has been thrown. Only ever use this type in a custom typing rule."
        :forms '[TCError]
        ::special-type true}
   TCError)
