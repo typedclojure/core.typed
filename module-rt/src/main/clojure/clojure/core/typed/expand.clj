@@ -249,7 +249,7 @@
          (not more)]}
   `(let* [~s (t/ann-form nil t/Any)]
      (do ~spc/special-form
-         ::expected-as
+         ::expected-type-as
          '~(merge opts {:sym s})
          ~body)))
 
@@ -508,7 +508,7 @@
                      {:default-expected {:type (t/TypeOf out#)}
                       :msg-fn (fn [{parse-type# :parse-type actual# :actual}]
                                 (str "'map' transducer did not return a correct type:"
-                                     "\n\nExpected: \t" (pr-str (parse-type# (list 't/Transducer '(t/TypeOf in#) '(t/TypeOf out#)))) "\n"
+                                     "\n\nExpected: \t" (pr-str (parse-type# (list 't/Transducer '(t/TypeOf in#) '(t/TypeOf out#))))
                                      "\n\nActual: \t" (pr-str (parse-type# (list 't/Transducer '(t/TypeOf in#) actual#)))
                                      "\n\n"
                                      "in: \t" '~form))
