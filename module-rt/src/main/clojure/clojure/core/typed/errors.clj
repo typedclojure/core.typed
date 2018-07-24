@@ -86,8 +86,6 @@
                (contains? (:opts expected) :blame-form) (-> expected :opts :blame-form)
                (contains? opt :form) form
                :else (ast-u/emit-form-fn uvs/*current-expr*))
-        _ (prn "tc-delayed-error opts" (:opts expected))
-        _ (prn "tc-delayed-error form" form)
         msg (str (when-let [msg-fn (some-> (-> expected :opts :msg-fn) eval)]
                    (str (msg-fn {})
                         "\n\n"

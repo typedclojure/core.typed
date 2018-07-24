@@ -269,8 +269,14 @@
   ;;              ;^^
   ;;      :a :b)
 
-  ;;TODO
-  #_(is-tc-e (map identity)))
+  (is-tc-e (map identity)
+					 (t/Transducer t/Num t/Num))
+  (is-tc-e (map boolean)
+					 (t/Transducer t/Num t/Bool))
+  ;; FIXME better error needed
+  (is-tc-err (map boolean)
+             (t/Transducer t/Bool t/Num))
+)
 
 (deftest ->-test
   (is-tc-e (-> identity
@@ -283,6 +289,7 @@
                  (map [1 2 3])
                  (map [1 2 3]))
              (t/Seq t/Bool))
+  ; FIXME line number
   (is-tc-err (-> identity
                  (map [1 2 3])
                  vec)

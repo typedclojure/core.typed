@@ -468,8 +468,13 @@
 (defmethod -expand-macro 'clojure.core.typed.macros/tc-ignore [& args] (apply expand-tc-ignore args))
 
 (defmethod -expand-inline 'clojure.core/map [[_ f & colls :as form] _]
-  (if (empty? colls)
-    (throw (Exception. "TODO map transducer arity"))
+  (if (empty? colls)  
+    `(fn [rf#]
+       (fn
+         ([] (rf#))
+         ([result#] (rf# result#))
+         ([result# input#]
+          (rf# result# (~f input#)))))
     (let [gsyms (repeatedly (count colls) gensym)
           bindings (mapcat (fn [i gsym coll] 
                              [gsym `(solve
