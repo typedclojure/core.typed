@@ -172,15 +172,16 @@
                   local? (-> env :locals (get op))
                   macro? (and (not local?) (:macro m)) ;; locals shadow macros
                   inline-arities-f (:inline-arities m)
-                  inline? (or
-                            (when vs/*custom-expansions*
-                              (when (and (not local?) (var? v))
-                                (let [vsym (coerce/var->symbol v)]
-                                  (when (expand/custom-inline? vsym)
-                                    (fn [& _args_]
-                                      (expand/expand-inline form
-                                                            (merge custom-expansion-opts
-                                                                   {:vsym vsym})))))))
+                  ;; disable :inline with custom expansions to avoid arity errors
+                  ;; in symbolic execution.
+                  inline? (if vs/*custom-expansions*
+                            (when (and (not local?) (var? v))
+                              (let [vsym (coerce/var->symbol v)]
+                                (when (expand/custom-inline? vsym)
+                                  (fn [& _args_]
+                                    (expand/expand-inline form
+                                                          (merge custom-expansion-opts
+                                                                 {:vsym vsym}))))))
                             (and (not local?)
                                  (or (not inline-arities-f)
                                      (inline-arities-f (count args)))

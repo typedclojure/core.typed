@@ -125,7 +125,7 @@
 
 (defn invoke-nth [check-fn {:keys [args] :as expr} expected & {:keys [cargs]}]
   {:pre [((some-fn nil? vector?) cargs)
-         (#{:static-call} (:op expr))]
+         (#{:static-call :invoke} (:op expr))]
    :post [(or (#{cu/not-special} %)
               (-> % u/expr-type r/TCResult?))]}
   (let [_ (assert (#{2 3} (count args)) (str "nth takes 2 or 3 arguments, actual " (count args)))

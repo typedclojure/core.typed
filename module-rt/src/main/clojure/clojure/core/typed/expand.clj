@@ -490,6 +490,7 @@
                      :msg-fn (fn [_#]
                                (str "'map' transducer arity requires an expected type which is a subtype of (t/Transducer t/Nothing t/Any)"))
                      :blame-form ~form})]
+         (t/print-env "out#")
          (fn [rf#]
            (fn
              ([] (rf#))

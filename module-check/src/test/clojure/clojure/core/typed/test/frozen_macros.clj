@@ -281,6 +281,7 @@
   (is-tc-e (map boolean [1 2 3] [2 3 4])
              (t/Transducer t/Bool t/Num))
   ;; FIXME this goes crazy because it inlines to (map (ann-form ... t/Bool))
+  ;; FIXME need to override form for inlined inner map
   (is-tc-err (map map)
              (t/Transducer t/Bool t/Num))
   ;; FIXME better blame-form needed

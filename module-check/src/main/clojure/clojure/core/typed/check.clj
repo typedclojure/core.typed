@@ -1216,6 +1216,15 @@
       (method/check-invoke-method check expr expected
                                   :cargs cargs))))
 
+(add-invoke-special-method 'clojure.core/nth
+  [{fexpr :fn :keys [args] :as expr} & [expected]]
+  {:post [(-> % u/expr-type r/TCResult?)]}
+  (let [cargs (mapv check args)
+        r (nth/invoke-nth check expr expected :cargs cargs)]
+    (if-not (#{cu/not-special} r)
+      r
+      (invoke/normal-invoke check expr fexpr args expected :cargs cargs))))
+
 ;nthnext
 (add-invoke-special-method 'clojure.core/nthnext
   [{fexpr :fn :keys [args] :as expr} & [expected]]
