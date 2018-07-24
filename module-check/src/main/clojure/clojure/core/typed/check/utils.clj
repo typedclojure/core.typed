@@ -581,3 +581,5 @@
                fl/-top)))
     (assoc :opts (or (:opts expected) {}))))
 
+(defn maybe-map->TCResult [m]
+  (some-> m map->TCResult))

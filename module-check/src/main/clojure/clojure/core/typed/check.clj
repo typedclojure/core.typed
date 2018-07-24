@@ -646,7 +646,6 @@
   ;(prn "invoke-typing-rule" vsym)
   (let [unparse-type-verbose #(binding [vs/*verbose-types* false]
                                 (prs/unparse-type %))
-        maybe-map->TCResult #(some-> % cu/map->TCResult)
         subtype? (fn [s t]
                    (let [s (prs/parse-type s)
                          t (prs/parse-type t)]
@@ -655,7 +654,7 @@
                 {:pre [(map? t)
                        (contains? t :type)]
                  :post [((some-fn nil? map?) %)]}
-                (let [;; atm only support query = (All [x] [in :-> out])
+                (let [;; atm only support query = (All [x+] [in :-> out])
                       query (prs/parse-type q)
                       _ (assert (r/Poly? query))
                       names (c/Poly-fresh-symbols* query)
@@ -681,7 +680,6 @@
                                        [lhs]
                                        [rhs]
                                        out))]
-                  ;(prn "substitution" substitution)
                   (when substitution
                     {:type (unparse-type-verbose
                              (subst/subst-all substitution out))})))
@@ -709,11 +707,18 @@
                                                [(gvs->vs k)
                                                 (unparse-type-verbose (:type v))])))
                                   (select-keys substitution gvs)))))
+        with-updated-locals (fn [locals f]
+                              (let [locals (zipmap (map prs/uniquify-local (keys locals))
+                                                   (map prs/parse-type (vals locals)))]
+                                (lex/with-locals locals
+                                  (f))))
         rule-args {:vsym vsym
                    :opts (typing-rule-opts expr)
                    :expr (typing-rule-expr expr)
                    :locals (:locals env)
                    :expected (some-> expected cu/TCResult->map)
+                   ;:uniquify-local prs/uniquify-local
+                   :with-updated-locals with-updated-locals
                    :maybe-check-expected (fn [actual expected]
                                            {:pre [(map? actual)
                                                   ((some-fn nil? map?) expected)]
@@ -721,7 +726,7 @@
                                            (->
                                              (below/maybe-check-below
                                                (cu/map->TCResult actual)
-                                               (maybe-map->TCResult expected))
+                                               (cu/maybe-map->TCResult expected))
                                              cu/TCResult->map))
                    :check (fn check-fn
                             ([expr] (check-fn expr nil))
@@ -739,15 +744,15 @@
                                         (binding [vs/*verbose-types* false]
                                           (prs/unparse-type m))))
                    :expected-error (fn [s t opts]
-                                     (let [opts (update opts :expected maybe-map->TCResult)]
+                                     (let [opts (update opts :expected cu/maybe-map->TCResult)]
                                        (apply cu/expected-error (prs/parse-type s) (prs/parse-type t)
                                               (apply concat opts))))
                    :delayed-error (fn [s opts]
-                                    (let [opts (update opts :expected maybe-map->TCResult)]
+                                    (let [opts (update opts :expected cu/maybe-map->TCResult)]
                                       (apply err/tc-delayed-error s (apply concat opts))))
                    :internal-error (fn [s opts]
                                      ;; TODO args
-                                     (let [opts (update opts :expected maybe-map->TCResult)]
+                                     (let [opts (update opts :expected cu/maybe-map->TCResult)]
                                        (apply err/int-error s (apply concat opts))))}
 
         ; throw away checked expr

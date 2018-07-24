@@ -234,14 +234,16 @@
 
 (declare resolve-type-clj)
 
+(defn uniquify-local [sym]
+  (get-in vs/*current-expr* [:env :clojure.core.typed.analyzer2.passes.uniquify/locals-frame-val sym]))
+
 (defmethod parse-type-list 'clojure.core.typed/TypeOf [[_ sym :as t]]
   (impl/assert-clojure)
   (when-not (= 2 (count t))
     (err/int-error (str "Wrong number of arguments to TypeOf (" (count t) ")")))
   (when-not (symbol? sym)
     (err/int-error "Argument to TypeOf must be a symbol."))
-  (let [locals-frame (get-in vs/*current-expr* [:env :clojure.core.typed.analyzer2.passes.uniquify/locals-frame])
-        uniquified-local (get-in vs/*current-expr* [:env :clojure.core.typed.analyzer2.passes.uniquify/locals-frame-val sym])
+  (let [uniquified-local (uniquify-local sym)
         vsym (let [r (resolve-type-clj sym)]
                (when (var? r)
                  (coerce/var->symbol r)))]
@@ -1000,6 +1002,8 @@
 (defmethod parse-type-symbol 'clojure.core.typed/Any [_] r/-any)
 (defmethod parse-type-symbol 'cljs.core.typed/Any [_] r/-any)
 
+(defmethod parse-type-symbol 'clojure.core.typed/TCError [t] (r/TCError-maker))
+
 (defmethod parse-type-symbol 'Nothing [_] 
   (err/deprecated-plain-op 'Nothing)
   (r/Bottom))
@@ -1464,7 +1468,7 @@
   (if vsym
     (list 'Unchecked vsym)
     'Unchecked))
-(defmethod unparse-type* TCError [_] 'Error)
+(defmethod unparse-type* TCError [_] (unparse-Name-symbol-in-ns `t/TCError))
 (defmethod unparse-type* Name [{:keys [id]}] (unparse-Name-symbol-in-ns id))
 (defmethod unparse-type* AnyValue [_] (unparse-Name-symbol-in-ns `t/AnyValue))
 

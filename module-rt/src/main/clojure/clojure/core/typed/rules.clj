@@ -81,11 +81,19 @@
     (assoc m ::expr-type ret)))
 
 (defmethod typing-rule 'clojure.core.typed.expand/expected-as
-  [{[_ s body :as form] :form, :keys [expected check]}]
-  (assert nil "FIXME args etc.")
-  (check `(let* [~s '~expected]
-            ~body)
-         expected))
+  [{:keys [expr opts expected check delayed-error form with-updated-locals]}]
+  (let [{:keys [sym msg-fn blame-form]} opts]
+    (if expected
+      (with-updated-locals {sym (:type expected)}
+        #(check expr expected))
+      (do
+        (delayed-error (if msg-fn
+                         ((eval msg-fn) {})
+                         "Must provide expected to this expression")
+                       {:form (if (contains? opts :blame-form)
+                                blame-form
+                                form)})
+        (assoc expr ::expr-type {:type `t/TCError})))))
 
 ;; (solve
 ;;   coll
@@ -100,17 +108,40 @@
         {:keys [query msg-fn blame-form]} opts
         res (solve expr-type query)]
     (when-not res
-      (let [form (or (when (contains? opts :blame-form)
-                       blame-form)
-                     form)
-            msg (or (when msg-fn
-                      ((eval msg-fn) {}))
-                    (str "'solve' failed"))]
+      (let [form (if (contains? opts :blame-form)
+                   blame-form
+                   form)
+            msg (if msg-fn
+                  ((eval msg-fn) {})
+                  (str "'solve' failed"))]
         (delayed-error msg {:form form})))
     (assoc m
            ::expr-type (maybe-check-expected
-                         (or res {:type `t/Nothing})
+                         (or res {:type `t/TCError})
                          expected))))
+
+(defmethod typing-rule 'clojure.core.typed.expand/require-expected
+  [{:keys [expr opts expected check solve delayed-error form maybe-check-expected subtype?]}]
+  (let [sub-check (:subtype opts)
+        msg-fn (:msg-fn opts)]
+    (cond
+      (or (not expected)
+          (and expected
+               (contains? opts :subtype)
+               (not (subtype? (:type expected) sub-check))))
+      (let [form (if-let [[_ bf] (find opts :blame-form)]
+                   bf
+                   form)
+            msg (if msg-fn
+                  ((eval msg-fn) {})
+                  (str "An expected type "
+                       (when (contains? opts :subtype)
+                         (str "which is a subtype of " (pr-str sub-check)))
+                       " is required for this expression."))]
+        (delayed-error msg {:form form})
+        (assoc expr ::expr-type {:type `t/TCError}))
+
+      :else (check expr expected))))
 
 #_
 (defmethod typing-rule 'clojure.core.typed.expand/check-for-expected
@@ -165,7 +196,7 @@
   [{:keys [expr opts delayed-error]}]
   (let [{:keys [msg-fn form]} opts]
     (delayed-error ((eval msg-fn) {}) {:form form})
-    (assoc expr ::expr-type {:type `t/Nothing})))
+    (assoc expr ::expr-type {:type `t/TCError})))
 
 (defmethod typing-rule 'clojure.core.typed.expand/with-post-blame-context
   [{:keys [expr opts env expected check]} ]

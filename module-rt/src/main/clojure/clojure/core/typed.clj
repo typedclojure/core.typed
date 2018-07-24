@@ -1443,6 +1443,12 @@ for checking namespaces, cf for checking individual forms."}
        ::special-type true}
   AnyValue)
 
+(def ^{:doc "TCError is the type of a type error in the type checker. Use only after
+            a type error has been thrown."
+       :forms '[TCError]
+       ::special-type true}
+  TCError)
+
 (def ^{:doc "U represents a union of types"
        :forms '[(U type*)]
        ::special-type true}

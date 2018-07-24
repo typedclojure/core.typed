@@ -130,6 +130,12 @@
    (fn [&form &env seq-exprs body-expr]
      (@#'T/for &form &env seq-exprs body-expr))}))
 
+(def custom-expansion-opts {:internal-error (fn [s & [opts]]
+                                              ;; TODO opts (line numbers, blame form etc.)
+                                              (let [;; can't access check.utils ns from here (circular deps)
+                                                    #_#_opts (update opts :expected cu/maybe-map->TCResult)]
+                                                (apply err/int-error s (apply concat opts))))})
+
 (T/ann ^:no-check typed-macro-lookup [T/Any :-> T/Any])
 (defn typed-macro-lookup [var]
   {:post [(ifn? %)]}
@@ -137,8 +143,10 @@
         (let [vsym (coerce/var->symbol var)]
           (when (expand/custom-expansion? vsym)
             (fn [form locals & _args_]
-              (expand/expand-macro form {:vsym vsym
-                                         :locals locals})))))
+              (expand/expand-macro form 
+                                   (merge custom-expansion-opts
+                                          {:vsym vsym
+                                           :locals locals}))))))
       (get *typed-macros* var)
       var))
 
@@ -170,7 +178,9 @@
                                 (let [vsym (coerce/var->symbol v)]
                                   (when (expand/custom-inline? vsym)
                                     (fn [& _args_]
-                                      (expand/expand-inline form {:vsym vsym}))))))
+                                      (expand/expand-inline form
+                                                            (merge custom-expansion-opts
+                                                                   {:vsym vsym})))))))
                             (and (not local?)
                                  (or (not inline-arities-f)
                                      (inline-arities-f (count args)))

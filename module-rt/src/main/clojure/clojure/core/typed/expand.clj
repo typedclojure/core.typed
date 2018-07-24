@@ -244,11 +244,14 @@
        '~opts
        ~expr))
 
-(defmacro expected-as [s body]
-  `(do ~spc/special-form
-       ::expected-as
-       '{:sym ~s}
-       ~body))
+(defmacro expected-as [s body & [opts & more]]
+  {:pre [((some-fn nil? map?) opts)
+         (not more)]}
+  `(let* [~s (t/ann-form nil t/Any)]
+     (do ~spc/special-form
+         ::expected-as
+         '~(merge opts {:sym s})
+         ~body)))
 
 (defmacro ignore-expected-if [tst body] body)
 
@@ -467,14 +470,47 @@
 (defmethod -expand-macro `t/tc-ignore [& args] (apply expand-tc-ignore args))
 (defmethod -expand-macro 'clojure.core.typed.macros/tc-ignore [& args] (apply expand-tc-ignore args))
 
-(defmethod -expand-inline 'clojure.core/map [[_ f & colls :as form] _]
-  (if (empty? colls)  
-    `(fn [rf#]
-       (fn
-         ([] (rf#))
-         ([result#] (rf# result#))
-         ([result# input#]
-          (rf# result# (~f input#)))))
+(defmacro require-expected [expr opts]
+  {:pre [(map? opts)]}
+  `(do ~spc/special-form
+       ::require-expected
+       '~opts
+       ~expr))
+
+(defmethod -expand-inline 'clojure.core/map [[_ f & colls :as form] {:keys [internal-error]}]
+  (when-not (<= 2 (count form))
+    (internal-error (str "Must provide 1 or more arguments to clojure.core/map, found " (dec (count form))
+                         ": " form)))
+  (if (empty? colls)
+    `(expected-as expected#
+       (let [[in# out# :as ab#]
+             (solve expected#
+                    {:query (t/All [a# b#] [(t/Transducer a# b#) :-> '[a# b#]])
+                     ;; would be nice to customize this message based on `expected`
+                     :msg-fn (fn [_#]
+                               (str "'map' transducer arity requires an expected type which is a subtype of (t/Transducer t/Nothing t/Any)"))
+                     :blame-form ~form})]
+         (fn [rf#]
+           (fn
+             ([] (rf#))
+             ([result#] (rf# result#))
+             ([result# input#]
+              (rf# result#
+                   (t/ann-form 
+                     (check-expected
+                       (~f input#)
+                       {:msg-fn (fn [{:keys [:parse-type]}]
+                                  ;; want expected & actual types here
+                                  (str "'map' transducer did not return a correct type"
+                                       #_(": expected " (~'parse-type '(t/TypeOf expected#))
+                                                    "Actual: " (list 't/Transducer (t/TypeOf a#) (t/TypeOf #))
+                                       ))
+                        :blame-form ~f})
+                     (t/TypeOf out#)))))))
+       {:msg-fn (fn [_#]
+                  (str "Must provide expected type to 'map' transducer arity.\n"
+                       "Hint: Try (t/ann-form (map ...) (t/Transducer in out))."))
+        :blame-form ~form})
     (let [gsyms (repeatedly (count colls) gensym)
           bindings (mapcat (fn [i gsym coll] 
                              [gsym `(solve

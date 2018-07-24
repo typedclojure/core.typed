@@ -434,19 +434,24 @@
                     (keyword? (.val S)) (cs-gen V X Y (c/DataType-of 'cljs.core/Keyword) T)
                     :else (fail! S T)))))
 
-        ;; constrain body to be below T, but don't mention the new vars
-        (r/Poly? S)
-        (let [nms (c/Poly-fresh-symbols* S)
-              body (c/Poly-body* nms S)
-              bbnds (c/Poly-bbnds* nms S)]
-          (free-ops/with-bounded-frees (zipmap (map r/F-maker nms) bbnds)
-                   (cs-gen (set/union (set nms) V) X Y body T)))
-
         (r/Name? S)
         (cs-gen V X Y (c/resolve-Name S) T)
 
         (r/Name? T)
         (cs-gen V X Y S (c/resolve-Name T))
+
+        (and (r/TApp? S)
+             (r/TApp? T)
+             (= (:rator S) (:rator T)))
+        (cs-gen-TApp V X Y S T)
+
+        (and (r/TApp? S)
+             (not (r/F? (:rator S))))
+        (cs-gen V X Y (c/resolve-TApp S) T)
+
+        (and (r/TApp? T)
+             (not (r/F? (:rator T))))
+        (cs-gen V X Y S (c/resolve-TApp T))
 
         ; copied from TR's infer-unit
         ;; if we have two mu's, we rename them to have the same variable
@@ -460,13 +465,13 @@
         (r/Mu? S) (cs-gen V X Y (c/unfold S) T)
         (r/Mu? T) (cs-gen V X Y S (c/unfold T))
 
-        (and (r/TApp? S)
-             (not (r/F? (:rator S))))
-        (cs-gen V X Y (c/resolve-TApp S) T)
+        ;; similar to Mu+Mu case
+        (and (r/Poly? S)
+             (r/Poly? T)
+             (= (:nbound S) (:nbound T))
+             (= (:bbnds S) (:bbnds T)))
+        (cs-gen V X Y (r/Poly-body-unsafe* S) (r/Poly-body-unsafe* T))
 
-        (and (r/TApp? T)
-             (not (r/F? (:rator T))))
-        (cs-gen V X Y S (c/resolve-TApp T))
 
         ;constrain *each* element of S to be below T, and then combine the constraints
         (r/Union? S)
@@ -548,6 +553,14 @@
 
         (r/App? T)
         (cs-gen V X Y S (c/resolve-App T))
+
+        ;; constrain body to be below T, but don't mention the new vars
+        (r/Poly? S)
+        (let [nms (c/Poly-fresh-symbols* S)
+              body (c/Poly-body* nms S)
+              bbnds (c/Poly-bbnds* nms S)]
+          (free-ops/with-bounded-frees (zipmap (map r/F-maker nms) bbnds)
+                   (cs-gen (set/union (set nms) V) X Y body T)))
 
         (and (r/DataType? S)
              (r/DataType? T)) (cs-gen-datatypes-or-records V X Y S T)
@@ -840,10 +853,6 @@
           (cs-gen V X Y Sv T)
           (fail! S T))
         
-        (and (r/TApp? S)
-             (r/TApp? T))
-        (cs-gen-TApp V X Y S T)
-
         (and (r/FnIntersection? S)
              (r/FnIntersection? T))
         (cs-gen-FnIntersection V X Y S T)
@@ -1158,20 +1167,19 @@
     ;;FIXME do something here
     :else (fail! s t)))
 
-(declare cs-gen-Function)
+(declare cs-gen-Function cs-gen-list-with-variances)
 
-;FIXME handle variance
 (defn cs-gen-TApp
   [V X Y S T]
   {:pre [(r/TApp? S)
-         (r/TApp? T)]}
-  (when-not (= (:rator S) (:rator T)) 
-    (fail! S T))
-  (cset-meet*
-    (mapv (t/fn [s1 :- r/Type 
-                 t1 :- r/Type]
-            (cs-gen V X Y s1 t1))
-          (:rands S) (:rands T))))
+         (r/TApp? T)
+         (= (:rator S) (:rator T))]}
+  (let [tfn (-> T :rator c/fully-resolve-type)]
+    (assert (r/TypeFn? tfn) "Found something other than a TFn in a TApp")
+    (cs-gen-list-with-variances 
+      V X Y
+      (:variances tfn)
+      (:rands S) (:rands T))))
 
 (defn cs-gen-FnIntersection
   [V X Y ^FnIntersection S ^FnIntersection T] 
@@ -1217,8 +1225,7 @@
   (when-not (= (:the-class S) (:the-class T)) 
     (fail! S T))
   (if (seq (:poly? S))
-    ;TODO variance
-    (cs-gen-list V X Y (:poly? S) (:poly? T))
+    (cs-gen-list-with-variances V X Y (:variances T) (:poly? S) (:poly? T))
     (cr/empty-cset X Y)))
 
 ; constrain si and ti according to variance
@@ -1272,16 +1279,11 @@
   ;    (prn "relevant-S" (prs/unparse-type relevant-S)))
     (cond
       relevant-S
-      (cset-meet*
-        (cons (cr/empty-cset X Y)
-              (doall
-                (map (t/fn [vari :- r/Variance 
-                            si :- r/Type 
-                            ti :- r/Type]
-                       (cs-gen-with-variance V X Y vari si ti))
-                     (:variances T)
-                     (:poly? relevant-S)
-                     (:poly? T)))))
+      (cs-gen-list-with-variances 
+        V X Y
+        (:variances T)
+        (:poly? relevant-S)
+        (:poly? T))
       :else (fail! S T))))
 
 (defn cs-gen-Protocol
@@ -1810,14 +1812,18 @@
 ;; Y : (setof symbol?) - index variables that must have entries
 ;; R : Type? - result type into which we will be substituting
 ;TODO no-check, very slow!
-(t/ann ^:no-check subst-gen [cset (t/Set t/Sym) r/AnyType -> (t/U nil cr/SubstMap)])
-(defn subst-gen [C Y R]
+(t/ann ^:no-check subst-gen [cset (t/Set t/Sym) r/AnyType & :optional {:T (t/U nil (t/Seqable r/Type))} -> (t/U nil cr/SubstMap)])
+(defn subst-gen [C Y R & {:keys [T]}]
   {:pre [(cr/cset? C)
          ((con/set-c? symbol?) Y)
-         (r/AnyType? R)]
+         (r/AnyType? R)
+         (every? r/Type? T)]
    :post [((some-fn nil? cr/substitution-c?) %)]}
   (u/p :cs-gen/subst-gen
-  (let [var-hash (frees/fv-variances R)
+  (let [var-hash (apply frees/combine-frees
+                        (frees/fv-variances R)
+                        (mapv frees/fv-variances T))
+        ;_ (prn "var-hash" var-hash)
         idx-hash (frees/idx-variances R)]
     (letfn> 
            [
@@ -1835,7 +1841,7 @@
                     inferred (case var
                                (:constant :covariant) S
                                :contravariant T
-                               :invariant S)]
+                               :invariant (c/Un S T))]
                 inferred))
             ;TODO implement generalize
             ;                  (let [gS (generalize S)]
@@ -2090,6 +2096,7 @@
         cs (cset-meet cs-short cs-dotted)
         ;_ (prn "cs" cs)
         ]
+    ;; FIXME pass variances via :T
     (subst-gen (cset-meet cs expected-cset) #{dotted-var} R))))
 
 (declare infer)
@@ -2158,6 +2165,7 @@
         cs (cset-meet cs-short cs-dotted)
         ;_ (prn "cs" cs)
         ]
+    ;; FIXME pass variances via :T
     (subst-gen (cset-meet cs expected-cset) #{dotted-var} R))))
 
 ;; like infer-vararg, but T-var is the prest type:
@@ -2275,7 +2283,7 @@
      ;(prn "final cs" cs*)
      (if R
        (u/p :cs-gen/infer-inner-subst-gen
-         (subst-gen cs* (set (keys Y)) R))
+         (subst-gen cs* (set (keys Y)) R :T T))
        true)))))
 
 (ind-u/add-indirection ind/infer infer)
