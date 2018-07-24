@@ -497,13 +497,14 @@
              ([result# input#]
               (rf# result#
                    (t/ann-form 
+                     ;; fake invoke
                      (check-expected
                        (~f input#)
                        {:msg-fn (fn [{:keys [:parse-type]}]
                                   ;; want expected & actual types here
                                   (str "'map' transducer did not return a correct type"
-                                       #_(": expected " (~'parse-type '(t/TypeOf expected#))
-                                                    "Actual: " (list 't/Transducer (t/TypeOf a#) (t/TypeOf #))
+                                       ;": expected " (~'parse-type '(t/TypeOf expected#))
+                                       ;             "Actual: " (list 't/Transducer (t/TypeOf a#) (t/TypeOf #))
                                        ))
                         :blame-form ~f})
                      (t/TypeOf out#)))))))
