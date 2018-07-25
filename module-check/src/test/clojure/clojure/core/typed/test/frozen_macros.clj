@@ -257,7 +257,7 @@
   (is-tc-err (map identity [1 2 3])
              (t/Seq t/Bool))
   ;; FIXME better column number
-  (is-tc-err (map identity 'a))
+  (is-tc-e (map identity 'a))
   (is-tc-err (map))
 
   ;               ;vvvvvvvvvvvvvv

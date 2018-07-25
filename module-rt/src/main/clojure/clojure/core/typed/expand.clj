@@ -522,8 +522,9 @@
                              [gsym `(solve
                                       ~coll
                                       {:query (t/All [a#] [(t/U nil (t/Seqable a#)) :-> a#])
-                                       :msg-fn (fn [_#]
-                                                 (str "Argument number " ~i " to 'map' must be Seqable"))
+                                       :msg-fn (fn [{actual# :actual}]
+                                                 (str "Argument number " ~i " to 'map' must be Seqable, given: "
+                                                      actual#))
                                        :blame-form ~coll})])
                            ;; counting argument #'s to this 'map' form
                            (range 2 ##Inf)
@@ -532,7 +533,7 @@
          ;; FIXME can we push the expected type into `f`?
          (check-expected
            (solve
-             (ignore-expected-if true (~f ~@gsyms))
+             (~f ~@gsyms)
              {:query (t/All [a#] [a# :-> (t/Seq a#)])})
            {:msg-fn (fn [_#]
                       "The return type of this 'map' expression does not agree with the expected type.")

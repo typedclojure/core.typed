@@ -88,18 +88,23 @@
 (defn tc-delayed-error [msg & {:keys [return form expected] :as opt}]
   (let [form (cond
                (contains? (:opts expected) :blame-form) (-> expected :opts :blame-form)
+               (contains? opt :blame-form) (:blame-form opt)
                (contains? opt :form) form
                :else (ast-u/emit-form-fn uvs/*current-expr*))
-        msg (str (when-let [msg-fn (some-> (-> expected :opts :msg-fn) eval)]
+        msg (str (when-let [msg-fn (some-> (or (-> expected :opts :msg-fn)
+                                               (:msg-fn opt))
+                                           eval)]
                    (str (msg-fn (merge (msg-fn-opts)
                                        (when-let [[_ actual] (find opt :actual)]
                                          (require 'clojure.core.typed.parse-unparse)
                                          (let [unparse-type (impl/v 'clojure.core.typed.parse-unparse/unparse-type)]
                                            {:actual (unparse-type actual)}))))
-                        "\n\n"
-                        "====================\n"
-                        "  More information  \n"
-                        "====================\n\n"))
+                        (when msg
+                          (str
+                            "\n\n"
+                            "====================\n"
+                            "  More information  \n"
+                            "====================\n\n"))))
                  msg)
         e (ex-info msg (merge {:type-error tc-error-parent}
                               (when (or (contains? opt :form)

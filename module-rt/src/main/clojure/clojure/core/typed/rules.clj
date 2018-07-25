@@ -110,11 +110,10 @@
     (when-not res
       (let [form (if (contains? opts :blame-form)
                    blame-form
-                   form)
-            msg (if msg-fn
-                  ((eval msg-fn) {})
-                  (str "'solve' failed"))]
-        (delayed-error msg {:form form})))
+                   form)]
+        ;; msg-fn should provide message
+        (delayed-error nil (merge {:form form :actual (:type expr-type)}
+                                  (select-keys opts [:msg-fn :blame-form])))))
     (assoc m
            ::expr-type (maybe-check-expected
                          (or res {:type `t/TCError})

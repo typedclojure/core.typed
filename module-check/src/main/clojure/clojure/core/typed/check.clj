@@ -744,7 +744,10 @@
                                         (binding [vs/*verbose-types* false]
                                           (prs/unparse-type m))))
                    :delayed-error (fn [s opts]
-                                    (let [opts (update opts :expected cu/maybe-map->TCResult)]
+                                    (let [opts (update opts :expected cu/maybe-map->TCResult)
+                                          opts (if (contains? opts :actual)
+                                                 (update opts :actual prs/parse-type)
+                                                 opts)]
                                       (apply err/tc-delayed-error s (apply concat opts))))
                    :internal-error (fn [s opts]
                                      ;; TODO args
