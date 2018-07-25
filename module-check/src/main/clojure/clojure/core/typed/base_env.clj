@@ -1044,6 +1044,12 @@ clojure.core/pcalls
       (All [r]
            [[-> r] * -> (ASeq r)])
 
+#_#_
+clojure.core/halt-when
+(All [a d]
+  [[a :-> t/Any] :-> (Transducer a a)]
+  [[a :-> t/Any] (U nil [t/Any a :-> a]) :-> (Transducer a a)])
+
 clojure.core/*clojure-version* '{:major Any
                                  :minor Any
                                  :incremental Any
@@ -1081,6 +1087,8 @@ clojure.core/reduce
             [(IFn [a c -> (U (Reduced a) a)] [-> (U (Reduced a) a)]) (Option (Seqable c)) -> a]
             ; default
             ; (reduce + 3 my-coll)
+            ; (reduce (fn [a b] a) (reduced 1) nil) 
+            ; ;=> (reduced 1)
             [[a c -> (U (Reduced a) a)] a (Option (Seqable c)) -> a]))
 
 clojure.core/reduce-kv

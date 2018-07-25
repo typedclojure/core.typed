@@ -5735,3 +5735,8 @@
                        1))]
              (inc (f))))
 )
+
+(deftest cf-throws-test
+  (is (thrown? Throwable (cf (nil))))
+  (is (thrown? Throwable (cf (clojure.core/fn [:- :a]))))
+)

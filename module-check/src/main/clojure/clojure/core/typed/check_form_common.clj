@@ -196,9 +196,11 @@
 
 (defn check-form*
   [{:keys [impl unparse-ns] :as config} form expected type-provided?]
-  (let [{:keys [delayed-errors ret]} (check-form-info config form
+  (let [{:keys [ex delayed-errors ret]} (check-form-info config form
                                                       :expected expected 
                                                       :type-provided? type-provided?)]
     (if-let [errors (seq delayed-errors)]
       (err/print-errors! errors)
-      (prs/unparse-TCResult-in-ns ret unparse-ns))))
+      (if ex
+        (throw ex)
+        (prs/unparse-TCResult-in-ns ret unparse-ns)))))
