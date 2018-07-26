@@ -97,6 +97,9 @@
   {:op :unanalyzed
    :form form
    :env env
+   ;; ::config will be inherited by the node in :analyzed-atom
+   ;; when this :unanalyzed node is replaced by it
+   ::config {}
    ;; update this atom when this node has been analyzed
    :analyzed-atom (atom nil)})
 

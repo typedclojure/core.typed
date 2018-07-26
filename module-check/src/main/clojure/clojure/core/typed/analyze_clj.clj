@@ -13,6 +13,7 @@
             [clojure.tools.analyzer.passes.jvm.warn-on-reflection :as warn-reflect]
             [clojure.core.typed.analyzer2.jvm :as jana2]
             [clojure.core.typed.analyzer2 :as ana2]
+            [clojure.core.typed.analyzer2.passes.beta-reduce :as beta-reduce]
             [clojure.tools.reader :as tr]
             [clojure.tools.reader.reader-types :as readers]
             [clojure.tools.analyzer.passes.jvm.validate :as validate]
@@ -160,9 +161,8 @@
   ([form] (macroexpand-1 form (taj/empty-env)))
   ([form env]
    ;(prn "macroexpand-1" form)
-     (ta-env/ensure (taj/global-env)
-       (cond
-
+    (ta-env/ensure (taj/global-env)
+      (cond
         (seq? form)
         (let [[op & args] form]
           (if (taj/specials op)
@@ -189,24 +189,24 @@
                   t (:tag m)]
               (cond
 
-               macro?
-               (let [res (apply (typed-macro-lookup v) form (:locals env) (rest form))] ; (m &form &env & args)
-                 (taj/update-ns-map!)
-                 (if (ta-utils/obj? res)
-                   (vary-meta res merge (meta form))
-                   res))
+                macro?
+                (let [res (apply (typed-macro-lookup v) form (:locals env) (rest form))] ; (m &form &env & args)
+                  (taj/update-ns-map!)
+                  (if (ta-utils/obj? res)
+                    (vary-meta res merge (meta form))
+                    res))
 
-               inline?
-               (let [res (apply inline? args)]
-                 (taj/update-ns-map!)
-                 (if (ta-utils/obj? res)
-                   (vary-meta res merge
-                              (and t {:tag t})
-                              (meta form))
-                   res))
+                inline?
+                (let [res (apply inline? args)]
+                  (taj/update-ns-map!)
+                  (if (ta-utils/obj? res)
+                    (vary-meta res merge
+                               (and t {:tag t})
+                               (meta form))
+                    res))
 
-               :else
-               (taj/desugar-host-expr form env)))))
+                :else
+                (taj/desugar-host-expr form env)))))
 
         (symbol? form)
         (taj/desugar-symbol form env)
@@ -232,6 +232,7 @@
 (declare eval-ast)
 (T/ann ^:no-check eval-ast [(T/Map T/Any T/Any) (T/Map T/Any T/Any) :-> T/Any])
 (T/ann ^:no-check analyze+eval [T/Any :-> T/Any])
+;; UNUSED ATM - see jana2/analyze+eval
 (defn analyze+eval
   "Like analyze but evals the form after the analysis and attaches the
    returned value in the :result field of the AST node.
@@ -448,6 +449,20 @@
                     (expand/custom-inline? vsym))
                   (when (and macro? vsym)
                     (expand/custom-expansion? vsym))))))))))
+(comment
+  (clojure.pprint/pprint
+    (jana2/schedule (conj jana2/default-passes
+                          #'beta-reduce/beta-reduce-pre
+                          #'beta-reduce/beta-reduce-post
+                          )
+                    {:debug? true}))
+  )
+
+(def scheduled-passes-for-custom-expansions
+  (delay
+    (jana2/schedule (conj jana2/default-passes
+                          #'beta-reduce/beta-reduce-pre
+                          #'beta-reduce/beta-reduce-post))))
 
 ;; bindings is an atom that records any side effects during macroexpansion. Useful
 ;; for nREPL middleware.
@@ -457,7 +472,16 @@
   ([form env {:keys [bindings-atom] :as opts}]
    {:pre [((some-fn nil? con/atom?) bindings-atom)]}
    (u/trace "Analyze1 form" *file* form)
-   (let [old-bindings (or (some-> bindings-atom deref) {})]
+   (let [old-bindings (or (some-> bindings-atom deref) {})
+         analyze-fn (fn [form env opts]
+                      (let [env (assoc env :ns (ns-name *ns*))
+                            opts (-> opts
+                                     (dissoc :bindings-atom)
+                                     (assoc-in [:bindings #'*ns*] *ns*))]
+                        (if (not vs/*custom-expansions*)
+                          (jana2/analyze form env opts)
+                          (binding [jana2/run-passes #(@scheduled-passes-for-custom-expansions %)]
+                            (jana2/analyze form env opts)))))]
      (with-bindings old-bindings
        ;(prn "analyze1 namespace" *ns*)
        (let [ana (jana2/analyze+eval 
@@ -485,14 +509,7 @@
                        :statement-opts-fn
                        (fn [opts]
                          (dissoc opts :expected))
-                       :analyze-env-fn
-                       (fn [env]
-                         (assoc env :ns (ns-name *ns*)))
-                       :analyze-opts-fn
-                       (fn [opts]
-                         (-> opts 
-                             (dissoc :bindings-atom)
-                             (assoc-in [:bindings #'*ns*] *ns*))))))]
+                       :analyze-fn analyze-fn)))]
          ;; only record vars that were already bound
          (when bindings-atom
            (reset! bindings-atom (select-keys (get-thread-bindings) (keys old-bindings))))

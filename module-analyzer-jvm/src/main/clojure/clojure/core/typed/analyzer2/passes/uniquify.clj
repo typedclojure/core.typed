@@ -35,6 +35,7 @@
   [ast]
   (-> ast
       (assoc-in [:env ::locals-frame] *locals-frame*)
+      ;; immutable copy for type resolution later
       (assoc-in [:env ::locals-frame-val] @*locals-frame*)
       (assoc-in [:env ::locals-counter] *locals-counter*)))
 

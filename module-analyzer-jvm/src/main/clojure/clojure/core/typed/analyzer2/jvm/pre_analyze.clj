@@ -232,7 +232,7 @@
   [ast]
   ;(prn "pre-analyze" (:op ast))
   (case (:op ast)
-    :unanalyzed (let [{:keys [analyzed-atom form env]} ast
+    :unanalyzed (let [{:keys [analyzed-atom form env ::pre/config]} ast
                       ;_ (prn "pre-analyze form" form)
                       ast (if-some [ast @analyzed-atom]
                             ast
@@ -240,5 +240,5 @@
                               (reset! analyzed-atom ast)
                               ast))]
                   (assert (not= :unanalyzed (:op ast)))
-                  ast)
+                  (assoc ast ::pre/config config))
     ast))

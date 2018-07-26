@@ -295,6 +295,40 @@
   (is-tc-err (map (fn [a :- t/Any] a)))
 )
 
+(comment
+  (((fn []
+      map))
+   identity
+   [1 2 3])
+  ;=>
+  (map
+    identity
+    [1 2 3])
+
+  ((fn [f]
+     (f 1))
+   (fn [d]
+     (inc d)))
+  ;=>
+  ((let [f (fn [d]
+             (inc d))]
+     (fn [d]
+       (inc d)))
+   1)
+  ;=>
+  ((let [f (fn [d]
+             (inc d))]
+     (let [d 1]
+       inc))
+   1)
+)
+
+(deftest symbolic-fnapp-test
+  (is-tc-e ((fn [f]
+              (f 1))
+            (fn [d]
+              (inc d)))))
+
 (deftest ->-test
   (is-tc-e (-> identity
                (map [1 2 3])))
@@ -311,6 +345,10 @@
                  (map [1 2 3])
                  vec)
              (t/Seq t/Bool)))
+
+(deftest beta-reduce-test
+  (is-tc-e ((fn [a] a)
+            1)))
 
 (comment
   (defn timet
