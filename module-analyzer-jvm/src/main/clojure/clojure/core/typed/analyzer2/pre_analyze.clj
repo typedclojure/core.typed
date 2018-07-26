@@ -364,6 +364,7 @@
                            (u/-source-info form env)))))
   (let [env (dissoc env :in-try)
         local {:op    :binding
+               ::atom (atom {})
                :env   env
                :form  ename
                :name  ename
@@ -417,6 +418,7 @@
     (let [binds (reduce (fn [binds name]
                           (assoc binds name
                                  {:op    :binding
+                                  ::atom (atom {})
                                   :env   env
                                   :name  name
                                   :form  name
@@ -454,6 +456,7 @@
                                  (u/-source-info form env))))
           (let [init-expr (pre-analyze-child init env)
                 bind-expr {:op       :binding
+                           ::atom    (atom {})
                            :env      env
                            :name     name
                            :init     init-expr
@@ -538,6 +541,7 @@
                              :variadic? (and variadic?
                                              (= id (dec arity)))
                              :op        :binding
+                             ::atom     (atom {})
                              :arg-id    id
                              :local     :arg})
                           params-names (range))
@@ -586,6 +590,7 @@
                      [(first args) (next args)]
                      [nil (seq args)])
          name-expr {:op    :binding
+                    ::atom (atom {})
                     :env   env
                     :form  n
                     :local :fn

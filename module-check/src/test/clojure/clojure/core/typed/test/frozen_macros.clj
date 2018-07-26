@@ -347,8 +347,9 @@
              (t/Seq t/Bool)))
 
 (deftest beta-reduce-test
-  (is-tc-e ((fn [a] a)
-            1)))
+  (is-tc-e ((fn* [a] a) 1))
+  (is-tc-e (map identity))
+  )
 
 (comment
   (defn timet
