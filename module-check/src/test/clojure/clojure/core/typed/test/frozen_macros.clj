@@ -360,6 +360,9 @@
   (is-tc-e (((fn* [a] a) :a)
             ((fn* [a] a) {:a :b}))
            ':b)
+  (is-tc-e (((fn* [f] (f :a)) (fn* [a] a)) {:a :b}) ':b)
+  (is-tc-e (((fn* [f b] (f b)) (fn* [c] c) :a) {:a :b}) ':b)
+  (is-tc-e (((fn* [f a] (f a)) (fn* [a] a) :a) {:a :b}) ':b)
   (is-tc-e (((fn* [f a] (f a)) (fn* [a] a) :a) ((fn* [a] a) {:a :b})) ':b)
   (is-tc-e (((fn* [f a] (f a)) identity :a) ((fn* [a] a) {:a :b})) ':b)
   (is-tc-e (((fn* [f a] (f a)) (fn* [a] a) :a)
@@ -383,6 +386,10 @@
   (is-tc-e (fn* ([] (inc (inc (inc (inc (inc ((fn* ([x] (inc (x x)))) (fn* ([x] (inc (x x)))))))))))))
 	(is-tc-e (fn* ([] (inc (inc (inc (inc (inc (inc ((fn* ([x] (inc (x x)))) (fn* ([x] (inc (x x))))))))))))))
   (is-tc-e (map identity))
+  ;variadic fn
+  (is-tc-e ((fn* [& a] (map inc a)) 1))
+  (is-tc-err ((fn* [& a] (map inc a)) :a))
+  (is-tc-e ((fn* [a] (map inc (seq [a]))) 1))
   )
 
 (comment
