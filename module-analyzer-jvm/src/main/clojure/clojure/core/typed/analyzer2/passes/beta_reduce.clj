@@ -73,64 +73,72 @@
   {:pass-info {:walk :post
                :before #{#'annotate-tag/annotate-tag
                          #'analyze-host-expr/analyze-host-expr
-                         #'classify-invoke/classify-invoke}}}
-  [{:keys [op] :as ast}]
+                         #'classify-invoke/classify-invoke}
+               :state (fn [] (atom {::expansions 0}))}}
+  [state {:keys [op] :as ast}]
   {:post [(:op %)]}
-  (case op
-    :invoke (let [{the-fn :fn :keys [args]} ast]
-              (push-tail-pos
-                the-fn 
-                (fn [tail-ast]
-                  (let [fn-form (emit-form tail-ast)
-                        form (with-meta
-                               (list* fn-form (map emit-form args))
-                               (meta fn-form))
-                        env (:env tail-ast)
-                        mform (ana/macroexpand-1 form env)]
-                    (if (= mform form)
-                      (let [unwrapped-fn (unwrap-with-meta tail-ast)
-                            special-case
-                            (case (:op unwrapped-fn)
-                              :fn (when-let [{:keys [params body variadic? fixed-arity env]}
-                                             (find-matching-method unwrapped-fn (count args))]
-                                    (let [[fixed-params variadic-param] (if variadic?
-                                                                          [(pop params) (peek params)]
-                                                                          [params nil])
-                                          [fixed-args variadic-args] (split-at fixed-arity args)
-                                          subst (merge (zipmap (map :name fixed-params) fixed-args)
-                                                       (when variadic-param
-                                                         (let [the-fn {:op :var
-                                                                       :var #'seq
-                                                                       :env env
-                                                                       :form `seq}
-                                                               args [{:op :vector
-                                                                      :env env
-                                                                      :items (vec variadic-args)
-                                                                      :form (mapv :form variadic-args)
-                                                                      :children [:items]}]
-                                                               invoke-expr {:op :invoke
-                                                                            :fn the-fn
-                                                                            :env env
-                                                                            :args args
-                                                                            :form (list* (:form the-fn)
-                                                                                         (map :form args))
-                                                                            :children [:fn :args]}]
-                                                         {(:name variadic-param) invoke-expr})))]
-                                      (prn "subst" (zipmap (keys subst) (map emit-form (vals subst))))
-                                      (-> body
-                                          (subst-locals subst)
-                                          jana2/run-passes)))
-                              nil)]
-                        (or special-case
-                            (cond
-                              ;; return original :invoke where possible
-                              (= the-fn tail-ast) ast
-                              :else {:op :invoke
-                                     :form form
-                                     :fn tail-ast
-                                     :args args
-                                     :env env
-                                     :children [:fn :args]})))
-                      (jana2/pre-parse+run-passes mform env))))))
-    ast))
+  (prn (::expansions @state))
+  (if (< beta-limit (::expansions @state))
+    (do
+      (prn "beta limit reached")
+      ast)
+    (case op
+      :invoke (let [{the-fn :fn :keys [args]} ast]
+                (push-tail-pos
+                  the-fn 
+                  (fn [tail-ast]
+                    (let [fn-form (emit-form tail-ast)
+                          form (with-meta
+                                 (list* fn-form (map emit-form args))
+                                 (meta fn-form))
+                          env (:env tail-ast)
+                          mform (ana/macroexpand-1 form env)]
+                      (if (= mform form)
+                        (let [unwrapped-fn (unwrap-with-meta tail-ast)
+                              special-case
+                              (case (:op unwrapped-fn)
+                                :fn (when-let [{:keys [params body variadic? fixed-arity env]}
+                                               (find-matching-method unwrapped-fn (count args))]
+                                      (let [[fixed-params variadic-param] (if variadic?
+                                                                            [(pop params) (peek params)]
+                                                                            [params nil])
+                                            [fixed-args variadic-args] (split-at fixed-arity args)
+                                            subst (merge (zipmap (map :name fixed-params) fixed-args)
+                                                         (when variadic-param
+                                                           (let [the-fn {:op :var
+                                                                         :var #'seq
+                                                                         :env env
+                                                                         :form `seq}
+                                                                 args [{:op :vector
+                                                                        :env env
+                                                                        :items (vec variadic-args)
+                                                                        :form (mapv :form variadic-args)
+                                                                        :children [:items]}]
+                                                                 invoke-expr {:op :invoke
+                                                                              :fn the-fn
+                                                                              :env env
+                                                                              :args args
+                                                                              :form (list* (:form the-fn)
+                                                                                           (map :form args))
+                                                                              :children [:fn :args]}]
+                                                             {(:name variadic-param) invoke-expr})))]
+                                        (-> body
+                                            (subst-locals subst)
+                                            jana2/run-passes)))
+                                nil)
+                              _ (when special-case
+                                  (swap! state update ::expansions inc))]
+                          (or special-case
+                              (cond
+                                ;; return original :invoke where possible
+                                (= the-fn tail-ast) ast
+                                :else {:op :invoke
+                                       :form form
+                                       :fn tail-ast
+                                       :args args
+                                       :env env
+                                       :children [:fn :args]})))
+                        (do (swap! state update ::expansions inc)
+                            (jana2/pre-parse+run-passes mform env)))))))
+      ast)))
 

@@ -350,6 +350,8 @@
   (is-tc-e ((fn* [a] a) :a) ':a)
   (is-tc-err ((fn* [a] a) :a) ':b)
   (is-tc-e ((fn* [a] ((fn* [a] ((fn* [a] a) a)) a)) :a) ':a)
+  ;; TODO preserve original form in error msg somewhere? or indicate
+  ;; it's been symbolically expanded
   (is-tc-err ((fn* [a] ((fn* [a] ((fn* [a] a) a)) a)) :a) ':b)
   (is-tc-e (:a {:a :b}) ':b)
   (is-tc-e ((let* [] :a) {:a :b}) ':b)

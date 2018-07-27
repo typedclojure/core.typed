@@ -89,19 +89,23 @@
                      (reduce (fn [f pass]
                                (let [i (info pass)
                                      pass (cond
+                                            ;; passes with :state meta take 2 arguments: state and ast
                                             (:state i)
                                             (fn [ast]
                                               (let [pass-state (-> ast :env ::state (get pass))]
                                                 (pass pass-state ast)))
+                                            ;; otherwise, a pass just takes ast
                                             :else pass)]
                                  #(pass (f %))))
                              (fn [ast] ast)
                              passes))
         pre-passes  (pfns-fn pre-passes)
-        post-passes  (pfns-fn post-passes)]
-    (fn analyze [ast]
-      (let [state (or (::state ast)
-                      (u/update-vals state #(%)))]
+        post-passes (pfns-fn post-passes)]
+    (fn [ast]
+      (let [state (or (-> ast :env ::state)
+                      (do
+                        (prn "generating new global state")
+                        (u/update-vals state #(%))))]
         (ast/walk (assoc-in ast [:env ::state] state)
                   pre-passes
                   post-passes)))))

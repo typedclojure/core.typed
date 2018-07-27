@@ -131,7 +131,6 @@
                            nil
                            file-mapping)
             eval-ast (fn [ast {:keys [expected] :as opt}]
-                       (prn "eval-ast" (emit-form ast))
                        (do (p/p :check-form/collect
                              (collect-expr ast))
                            (let [c-ast (do 
