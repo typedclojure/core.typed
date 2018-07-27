@@ -379,15 +379,14 @@
             (((fn* [f a] (f a)) (fn* [a] a) :a)
              ((fn* [a] a) {:a :b}))]
            (Seqable ':b))
-  ; real y combinator
-  (is-tc-e (fn* ([] ((fn* [f] ((fn* [x] (f (x x))) (fn* [y] (f (y y))))) inc))))
-  (is-tc-e (fn* ([] (inc ((fn* ([x] (inc (x x)))) (fn* ([x] (inc (x x)))))))))
-  (is-tc-e (fn* ([] (inc (inc ((fn* ([x] (inc (x x)))) (fn* ([x] (inc (x x))))))))))
-  (is-tc-e (fn* ([] (inc (inc (inc ((fn* ([x] (inc (x x)))) (fn* ([x] (inc (x x)))))))))))
-  (is-tc-e (fn* ([] (inc (inc (inc (inc ((fn* ([x] (inc (x x)))) (fn* ([x] (inc (x x))))))))))))
-  (is-tc-e (fn* ([] (inc (inc (inc (inc (inc ((fn* ([x] (inc (x x)))) (fn* ([x] (inc (x x)))))))))))))
-	(is-tc-e (fn* ([] (inc (inc (inc (inc (inc (inc ((fn* ([x] (inc (x x)))) (fn* ([x] (inc (x x))))))))))))))
-  (is-tc-e (map identity))
+  ; real y combinator, all should hit the beta limit
+  (is-tc-err (fn* ([] ((fn* [f] ((fn* [x] (f (x x))) (fn* [y] (f (y y))))) inc))))
+  (is-tc-err (fn* ([] (inc ((fn* ([x] (inc (x x)))) (fn* ([x] (inc (x x)))))))))
+  (is-tc-err (fn* ([] (inc (inc ((fn* ([x] (inc (x x)))) (fn* ([x] (inc (x x))))))))))
+  (is-tc-err (fn* ([] (inc (inc (inc ((fn* ([x] (inc (x x)))) (fn* ([x] (inc (x x)))))))))))
+  (is-tc-err (fn* ([] (inc (inc (inc (inc ((fn* ([x] (inc (x x)))) (fn* ([x] (inc (x x))))))))))))
+  (is-tc-err (fn* ([] (inc (inc (inc (inc (inc ((fn* ([x] (inc (x x)))) (fn* ([x] (inc (x x)))))))))))))
+	(is-tc-err (fn* ([] (inc (inc (inc (inc (inc (inc ((fn* ([x] (inc (x x)))) (fn* ([x] (inc (x x))))))))))))))
   ;variadic fn
   (is-tc-e ((fn* [& a] (map inc a)) 1))
   (is-tc-err ((fn* [& a] (map inc a)) :a))

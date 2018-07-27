@@ -9,7 +9,7 @@
             [clojure.tools.analyzer.jvm :as taj]
             [clojure.tools.analyzer.passes.jvm.emit-form :as emit-form]
             [clojure.tools.analyzer.passes :as passes]
-            [clojure.tools.analyzer.passes.trim :as trim]
+            #_[clojure.tools.analyzer.passes.trim :as trim]
             #_[clojure.tools.analyzer.passes.jvm.box :as box]
             #_[clojure.tools.analyzer.passes.jvm.warn-on-reflection :as warn-on-reflection]
             #_[clojure.tools.analyzer.passes.warn-earmuff :as warn-earmuff]
@@ -92,7 +92,7 @@
                                             ;; passes with :state meta take 2 arguments: state and ast
                                             (:state i)
                                             (fn [ast]
-                                              (let [pass-state (-> ast :env ::state (get pass))]
+                                              (let [pass-state (-> ast :env ::ana/state (get pass))]
                                                 (pass pass-state ast)))
                                             ;; otherwise, a pass just takes ast
                                             :else pass)]
@@ -102,11 +102,9 @@
         pre-passes  (pfns-fn pre-passes)
         post-passes (pfns-fn post-passes)]
     (fn [ast]
-      (let [state (or (-> ast :env ::state)
-                      (do
-                        (prn "generating new global state")
-                        (u/update-vals state #(%))))]
-        (ast/walk (assoc-in ast [:env ::state] state)
+      (let [state (or (-> ast :env ::ana/state)
+                      (u/update-vals state #(%)))]
+        (ast/walk (assoc-in ast [:env ::ana/state] state)
                   pre-passes
                   post-passes)))))
 
@@ -208,10 +206,10 @@
                      {:debug? true}))
   )
 
-(defn ^:dynamic run-passes
+(defn run-passes
   "Function that will be invoked on the AST tree immediately after it has been constructed,
    by default runs the passes declared in #'default-passes, should be rebound if a different
-   set of passes is required.
+   set of passes is required (via analyze2/run-passes).
 
    Use #'clojure.tools.analyzer.passes/schedule to get a function from a set of passes that
    run-passes can be bound to."
@@ -225,9 +223,6 @@
    :collect/top-level?              false
    :collect-closed-overs/where      #{:deftype :reify :fn :loop :try}
    :collect-closed-overs/top-level? false})
-
-(defn pre-parse+run-passes [form env]
-  (run-passes (pre/pre-analyze-child form env)))
 
 (defn analyze
   "Analyzes a clojure form using tools.analyzer augmented with the JVM specific special ops
@@ -252,13 +247,14 @@
      (with-bindings (merge {Compiler/LOADER     (RT/makeClassLoader)
                             #'ana/macroexpand-1 macroexpand-1
                             #'ana/create-var    taj/create-var
-                            #'pre/pre-parse  jpre/pre-parse
+                            #'ana/run-passes    run-passes
+                            #'pre/pre-parse     jpre/pre-parse
                             #'ana/var?          var?
                             #'*ns*              (the-ns (:ns env))}
                            (:bindings opts))
        (env/ensure (taj/global-env)
          (doto (env/with-env (u/mmerge (env/deref-env) {:passes-opts (get opts :passes-opts default-passes-opts)})
-                 (pre-parse+run-passes form env))
+                 (ana/run-passes (pre/pre-analyze-child form env)))
            (do (taj/update-ns-map!)))))))
 
 (deftype ExceptionThrown [e ast])

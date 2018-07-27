@@ -8,13 +8,12 @@
             [clojure.tools.analyzer.passes.source-info :as source-info]
             [clojure.tools.analyzer.ast :as ast]
             [clojure.core.typed.analyzer2.pre-analyze :as pre]
-            [clojure.core.typed.analyzer2.jvm.pre-analyze :as jpre]
             [clojure.core.typed.analyzer2.jvm :as jana2]
             [clojure.pprint :as pprint]
             [clojure.core.typed.analyzer2 :as ana]
             [clojure.core.typed.analyzer2.passes.uniquify :as uniquify]))
 
-(def beta-limit 100)
+(def beta-limit 500)
 
 (defn find-matching-method [ast nargs]
   {:pre [(= :fn (:op ast))
@@ -33,24 +32,22 @@
 
 ; Ast [TailAst -> Ast] -> Ast
 (defn push-tail-pos [ast f]
-  (let [id (gensym 'tail)]
-    (ast/prewalk (assoc-in ast [::pre/config ::tail] id)
-                 (fn [ast]
-                   (if-not (= id (get-in ast [::pre/config ::tail]))
-                     (reduced ast)
-                     (case (:op ast)
-                       :do (assoc-in ast [:ret ::pre/config ::tail] id)
-                       :if (-> ast
-                               (assoc-in [:then ::pre/config ::tail] id)
-                               (assoc-in [:else ::pre/config ::tail] id))
-                       (:let :letfn) (assoc-in ast [:body ::pre/config ::tail] id)
-                       (reduced (f ast))))))))
+  (let [id (gensym 'tail)
+        rec #(push-tail-pos % f)]
+    (case (:op ast)
+      :do (update ast :ret rec)
+      :if (-> ast
+              (update :then rec)
+              (update :else rec))
+      (:let :letfn) (update ast :body rec)
+      (f ast))))
 
 (defn unwrap-with-meta [ast]
   (if (= :with-meta (:op ast))
     (recur (:expr ast))
     ast))
 
+;; assumption: none of (keys subst) occur in (vals subst)
 (defn subst-locals [ast subst]
   (ast/postwalk ast
                 (fn [ast]
@@ -77,10 +74,12 @@
                :state (fn [] (atom {::expansions 0}))}}
   [state {:keys [op] :as ast}]
   {:post [(:op %)]}
-  (prn (::expansions @state))
+  ;(prn "expansions" (::expansions @state))
   (if (< beta-limit (::expansions @state))
     (do
-      (prn "beta limit reached")
+      (when-not (::reached-beta-limit @state)
+        (prn "beta limit reached")
+        (swap! state assoc ::reached-beta-limit true))
       ast)
     (case op
       :invoke (let [{the-fn :fn :keys [args]} ast]
@@ -97,8 +96,12 @@
                         (let [unwrapped-fn (unwrap-with-meta tail-ast)
                               special-case
                               (case (:op unwrapped-fn)
+                                ; ((fn* ([params*] body)) args*)
+                                ; ;=> body[args*/params*]
                                 :fn (when-let [{:keys [params body variadic? fixed-arity env]}
                                                (find-matching-method unwrapped-fn (count args))]
+                                      ;; update before any recursive calls (ie. run-passes)
+                                      (swap! state update ::expansions inc)
                                       (let [[fixed-params variadic-param] (if variadic?
                                                                             [(pop params) (peek params)]
                                                                             [params nil])
@@ -124,10 +127,8 @@
                                                              {(:name variadic-param) invoke-expr})))]
                                         (-> body
                                             (subst-locals subst)
-                                            jana2/run-passes)))
-                                nil)
-                              _ (when special-case
-                                  (swap! state update ::expansions inc))]
+                                            ana/run-passes)))
+                                nil)]
                           (or special-case
                               (cond
                                 ;; return original :invoke where possible
@@ -139,6 +140,6 @@
                                        :env env
                                        :children [:fn :args]})))
                         (do (swap! state update ::expansions inc)
-                            (jana2/pre-parse+run-passes mform env)))))))
+                            (ana/run-passes (pre/pre-parse mform env))))))))
       ast)))
 

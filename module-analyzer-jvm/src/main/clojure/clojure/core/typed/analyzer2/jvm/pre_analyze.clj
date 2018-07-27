@@ -215,7 +215,7 @@
      :children    [:test :tests :thens :default]}))
 
 (defn pre-parse
-  "Extension to tools.analyzer/-parse for JVM special forms"
+  "Extension to clojure.core.typed.analyzer2.pre-analyze/-pre-parse for JVM special forms"
   [form env]
   ((case (first form)
      monitor-enter        pre-parse-monitor-enter
@@ -227,6 +227,7 @@
      #_:else              pre/-pre-parse)
    form env))
 
+;; should this be in an implementation agnostic ns?
 (defn pre-analyze
   ""
   [ast]

@@ -452,7 +452,6 @@
 (comment
   (clojure.pprint/pprint
     (jana2/schedule (conj jana2/default-passes
-                          ;#'beta-reduce/beta-reduce
                           #'beta-reduce/push-invoke
                           )
                     {:debug? true}))
@@ -461,7 +460,6 @@
 (def scheduled-passes-for-custom-expansions
   (delay
     (jana2/schedule (conj jana2/default-passes
-                          ;#'beta-reduce/beta-reduce
                           #'beta-reduce/push-invoke
                           ))))
 
@@ -476,13 +474,14 @@
    (let [old-bindings (or (some-> bindings-atom deref) {})
          analyze-fn (fn [form env opts]
                       (let [env (assoc env :ns (ns-name *ns*))
-                            opts (-> opts
-                                     (dissoc :bindings-atom)
-                                     (assoc-in [:bindings #'*ns*] *ns*))]
-                        (if (not vs/*custom-expansions*)
-                          (jana2/analyze form env opts)
-                          (binding [jana2/run-passes #(@scheduled-passes-for-custom-expansions %)]
-                            (jana2/analyze form env opts)))))]
+                            opts (cond->
+                                   (-> opts
+                                       (dissoc :bindings-atom)
+                                       (assoc-in [:bindings #'*ns*] *ns*))
+                                   vs/*custom-expansions*
+                                   (assoc-in [:bindings #'ana2/run-passes]
+                                             #(@scheduled-passes-for-custom-expansions %)))]
+                        (jana2/analyze form env opts)))]
      (with-bindings old-bindings
        ;(prn "analyze1 namespace" *ns*)
        (let [ana (jana2/analyze+eval 

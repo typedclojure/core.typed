@@ -12,6 +12,8 @@
             [clojure.core.typed.lex-env :as lex-env]
             [clojure.core.typed.errors :as err]
             [clojure.repl :as repl]
+            [clojure.core.typed.analyzer2 :as ana]
+            [clojure.core.typed.analyzer2.passes.beta-reduce :as beta-reduce]
             [clojure.core.typed.parse-unparse :as prs])
   (:import (clojure.lang ExceptionInfo)))
 
@@ -131,7 +133,18 @@
                            nil
                            file-mapping)
             eval-ast (fn [ast {:keys [expected] :as opt}]
-                       (do (p/p :check-form/collect
+                       (prn "eval-ast" (-> ast :env keys vec)
+                            (-> ast :env (contains? ::ana/state)))
+                       (do (when-let [state (-> ast
+                                                :env
+                                                ::ana/state
+                                                (get #'clojure.core.typed.analyzer2.passes.beta-reduce/push-invoke))]
+                             (prn "got state")
+                             (when (::beta-reduce/reached-beta-limit @state)
+                               (err/int-error
+                                 (str "Exceeded the limit of symbolic beta reductions in a single form "
+                                      "(" (::beta-reduce/expansions @state) ")"))))
+                           (p/p :check-form/collect
                              (collect-expr ast))
                            (let [c-ast (do 
                                          (reset-caches/reset-caches)

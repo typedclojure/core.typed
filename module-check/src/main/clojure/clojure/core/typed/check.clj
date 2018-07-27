@@ -9,8 +9,6 @@
             [clojure.core.typed.check-below :as below]
             [clojure.core.typed.abo :as abo]
             [clojure.core.typed.analyze-clj :as ana-clj]
-            [clojure.core.typed.analyzer2.jvm :as jana2]
-            [clojure.core.typed.analyzer2.pre-analyze :as pre]
             [clojure.tools.analyzer.passes.jvm.validate :as validate]
             [clojure.tools.analyzer.passes.jvm.analyze-host-expr :as ana-host]
             [clojure.core.typed.array-ops :as arr-ops]
