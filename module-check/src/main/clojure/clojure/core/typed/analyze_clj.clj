@@ -452,8 +452,7 @@
 (comment
   (clojure.pprint/pprint
     (jana2/schedule (conj jana2/default-passes
-                          #'beta-reduce/beta-reduce-pre
-                          #'beta-reduce/beta-reduce-post
+                          #'beta-reduce/beta-reduce
                           )
                     {:debug? true}))
   )
@@ -461,8 +460,7 @@
 (def scheduled-passes-for-custom-expansions
   (delay
     (jana2/schedule (conj jana2/default-passes
-                          #'beta-reduce/beta-reduce-pre
-                          #'beta-reduce/beta-reduce-post))))
+                          #'beta-reduce/beta-reduce))))
 
 ;; bindings is an atom that records any side effects during macroexpansion. Useful
 ;; for nREPL middleware.

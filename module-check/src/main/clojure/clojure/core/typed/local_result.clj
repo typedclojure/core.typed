@@ -20,6 +20,8 @@
   {:pre [(symbol? sym)]
    :post [(r/TCResult? %)]}
   (let [[obj t] ((juxt lex/lookup-alias lex/lookup-local) sym)]
+    (when-not t
+      (err/int-error (str "Could not find type for local variable " sym)))
     (r/ret t 
            (if (c/overlap t (c/Un r/-nil r/-false))
              (fo/-FS (fo/-not-filter-at r/-falsy obj)

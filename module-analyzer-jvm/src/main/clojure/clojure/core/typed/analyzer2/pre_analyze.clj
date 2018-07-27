@@ -621,6 +621,7 @@
                        (merge {:form form}
                               (u/-source-info form env)))))
      (merge {:op              :fn
+             ::atom           (atom {})
              :env             env
              :form            form
              :variadic?       variadic?

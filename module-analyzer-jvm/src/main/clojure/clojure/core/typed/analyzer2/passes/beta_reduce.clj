@@ -1,3 +1,4 @@
+;; should be a JVM pass since it calls `run-passes`
 (ns clojure.core.typed.analyzer2.passes.beta-reduce
   (:require [clojure.core.typed.analyzer2.passes.add-binding-atom :as add-binding-atom]
             [clojure.core.typed.analyzer2.passes.jvm.classify-invoke :as classify-invoke]
@@ -5,89 +6,143 @@
             [clojure.tools.analyzer.passes.jvm.analyze-host-expr :as analyze-host-expr]
             [clojure.tools.analyzer.passes.jvm.emit-form :refer [emit-form]]
             [clojure.tools.analyzer.passes.source-info :as source-info]
+            [clojure.tools.analyzer.ast :as ast]
             [clojure.core.typed.analyzer2.pre-analyze :as pre]
             [clojure.core.typed.analyzer2.jvm.pre-analyze :as jpre]
-            [clojure.pprint :as pprint]))
+            [clojure.core.typed.analyzer2.jvm :as jana2]
+            [clojure.pprint :as pprint]
+            [clojure.core.typed.analyzer2 :as ana]
+            [clojure.core.typed.analyzer2.passes.uniquify :as uniquify]))
 
-(defn beta-reduce-pre
-  ""
-  ;; want this to go just after pre-analyze so we can call pre-analyze again
-  {:pass-info {:walk :pre :before #{#'source-info/source-info}}}
-  [{{:keys [::beta-reduce-opts]} ::pre/config, :keys [op] :as ast}]
-  {:pre [op]
-   :post [(:op %)]}
-  (case op
-    :invoke (let [beta-reduced-flag (atom nil)]
-              (assert (= :unanalyzed (:op (:fn ast)))
-                      (:op (:fn ast)))
-              (-> ast
-                  (assoc ::beta-reduced-flag beta-reduced-flag)
-                  (assoc-in [:fn ::pre/config ::beta-reduce-opts]
-                            {::beta-reduced-flag beta-reduced-flag
-                             ::args (:args ast)})))
-    :fn (if-let [{:keys [::args ::beta-reduced-flag]} beta-reduce-opts]
-          (let [nargs (count args)
-                matching-method (->> ast
-                                     :methods
-                                     (filter (fn [a]
-                                               ; inline fixed arities only for now
-                                               (and (not (:variadic? a))
-                                                    (= (:fixed-arity a) nargs))))
-                                     first)]
-            (if-let [{:keys [params body]} matching-method]
-              (let [_ (reset! beta-reduced-flag true)
-                    ;; never clashes with uniquify, since that changes :name
-                    param-names (mapv :form params)
-                    _ (run! (fn [[param arg]]
-                              (swap! (::pre/atom param) assoc ::subst-to arg))
-                            (map vector params args))]
-                ;; FIXME
-                ;; should return `body` if we want ((fn [a] a) 1) => 1
-                ;; however, for the moment we have ((fn [a] a) 1) => ((fn [a] 1) 1)
-                ;; because :with-meta nodes still hang around the fn.
-                ;; eg. (^:line (fn [a] a) 1) ;=> ^:line 1
-                ;; we can probably fix it.
-                #_body
-                ast)
-              ast))
-          ast)
-    ;; pass opts to tail position
-    :do (cond-> ast
-          beta-reduce-opts
-          (assoc-in [:ret ::pre/config ::beta-reduce-opts] beta-reduce-opts))
-    (:let :letfn) (cond-> ast
-                    beta-reduce-opts
-                    (assoc-in [:body ::pre/config ::beta-reduce-opts] beta-reduce-opts))
-    :with-meta (cond-> ast
-                 beta-reduce-opts
-                 (assoc-in [:expr ::pre/config ::beta-reduce-opts] beta-reduce-opts))
-    ;do we want to do this in pre or post?
-    ; probably in pre so we can reuse all the other :pre passes.
-    ; need to make sure the tag inference etc. doesn't get confused
-    ;; subst locals
-    :local (if-let [sbt (::subst-to @(::pre/atom ast))]
-             (-> sbt
-                 (assoc-in [::pre/config ::beta-reduce-opts] beta-reduce-opts)
-                 jpre/pre-analyze
-                 ;; hmmm do we need/want to recur here?
-                 #_beta-reduce-pre)
-             ast)
-    ast))
+(def beta-limit 100)
 
-(defn beta-reduce-post
-  ""
-  {:pass-info {:walk :post :before #{#'annotate-tag/annotate-tag
-                                     #'analyze-host-expr/analyze-host-expr
-                                     #'classify-invoke/classify-invoke}}}
+(defn find-matching-method [ast nargs]
+  {:pre [(= :fn (:op ast))
+         (nat-int? nargs)]
+   :post [((some-fn nil? (comp #{:fn-method} :op)) %)]}
+  (let [matching-method (->> ast
+                             :methods
+                             (filter (fn [a]
+                                       ; inline fixed arities only for now
+                                       (and (not (:variadic? a))
+                                            (= (:fixed-arity a) nargs))))
+                             first)]
+    matching-method))
+
+(comment
+                                   ;; try and macroexpand
+                                   :var (let [;; TODO cache analysis results for args
+                                              form (list* (emit-form ast) (map emit-form args))
+                                              ;; because we have already fully analyzed the args,
+                                              ;; I think using the :var's :env is correct.
+                                              env (:env ast)
+                                              _ (prn "calling macroexpand-1" (:var ast))
+                                              mform (ana/macroexpand-1 form env)]
+                                          (if (= form mform)
+                                            ;; FIXME do we need this reduced?
+                                            (reduced
+                                              {:op :invoke
+                                               :form form
+                                               :fn ast
+                                               :args args
+                                               :env env
+                                               :children [:fn :args]})
+                                            (do
+                                              (swap! state update ::beta-count inc)
+                                              (prn "rerun passes" (::beta-count @state))
+                                              ;; FIXME do we need this reduced?
+                                              (reduced (jana2/pre-parse+run-passes mform env)))))
+                                   :fn (if-let [{:keys [params body]} (find-matching-method ast (count args))]
+                                         ;; substitute locals
+                                         (let [subst (zipmap (map :name params) args)
+                                               subst-fn (fn [ast]
+                                                          {:post [((some-fn map? reduced?) %)]}
+                                                          (assert (:op ast) (pr-str (class ast)))
+                                                          (cond
+                                                            (< beta-limit (::beta-count @state)) (do
+                                                                                                   (prn "reached beta reduction limit")
+                                                                                                   (reduced ast))
+                                                            (= (:op ast) :local) (if-let [sast (subst (:name ast))]
+                                                                                   (do
+                                                                                     (swap! state update ::beta-count inc)
+                                                                                     (reduced sast))
+                                                                                   ast)
+                                                            :else ast))]
+                                           (prn "found :fn")
+                                           (swap! state update ::beta-count inc)
+                                           ;; FIXME do we need this reduced?
+                                           (reduced (ast/prewalk body subst-fn)))
+                                         ast)
+  )
+
+; Ast [TailAst -> Ast] -> Ast
+(defn push-tail-pos [ast f]
+  (ast/prewalk (assoc-in ast [::pre/config ::tail] true)
+               (fn [ast]
+                 (if-not (get-in ast [::pre/config ::tail])
+                   (reduced ast)
+                   (case (:op ast)
+                     :do (assoc-in ast [:ret ::pre/config ::tail] true)
+                     :if (-> ast
+                             (assoc-in [:then ::pre/config ::tail] true)
+                             (assoc-in [:else ::pre/config ::tail] true))
+                     (:let :letfn) (assoc-in ast [:body ::pre/config ::tail] true)
+                     (reduced (f ast)))))))
+
+(defn push-invoke
+  "Push arguments into the function position of an :invoke
+  so the function and arguments are both in the
+  same :invoke node.
+  
+  eg. ((let [a 1] identity) 2)
+      ;=> (let [a 1] (identity 2))
+  eg. ((if c identity first) [1])
+      ;=> (if c (identity [1]) (first [1]))
+  "
+  {:pass-info {:walk :post
+               :before #{#'annotate-tag/annotate-tag
+                         #'analyze-host-expr/analyze-host-expr
+                         #'classify-invoke/classify-invoke}}}
   [{:keys [op] :as ast}]
   {:post [(:op %)]}
-  (prn "post op" (pprint/pprint (emit-form ast)))
   (case op
-    :invoke (if (some-> (::beta-reduced-flag ast) deref)
-              (do
-                (prn "yes")
-                (:fn ast))
-              (do
-                (prn "no")
+    :invoke (let [{the-fn :fn :keys [args]} ast]
+              (push-tail-pos the-fn 
+                             (fn [tail-ast]
+                               (let [form (list* (:form tail-ast) (map :form args))]
+                                 {:op :invoke
+                                  :form form
+                                  :fn tail-ast
+                                  :args args
+                                  :env (:env tail-ast)
+                                  :children [:fn :args]}))))
+    ast))
+
+(defn unwrap-with-meta [ast]
+  (if (= :with-meta (:op ast))
+    (unwrap-with-meta (:expr ast))
+    ast))
+
+(defn subst-locals [ast subst]
+  (ast/prewalk ast
+               (fn [ast]
+                 (case (:op ast)
+                   :local (if-let [sast (subst (:name ast))]
+                            (reduced sast)
+                            ast)
+                   ast))))
+
+(defn beta-reduce
+  {:pass-info {:walk :post
+               :depends #{#'push-invoke}
+               :state (fn [] (atom {::beta-count 0}))}}
+  [state {:keys [op] :as ast}]
+  (case op
+    :invoke (let [{:keys [args]} ast
+                  the-fn (unwrap-with-meta (:fn ast))]
+              (case (:op the-fn)
+                :fn (if-let [{:keys [params body]} (find-matching-method the-fn (count args))]
+                      (subst-locals body (zipmap (map :name params) args))
+                      ast)
                 ast))
     ast))

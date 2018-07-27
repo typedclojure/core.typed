@@ -85,45 +85,26 @@
   (let [with-state (filter (comp :state info) (concat pre-passes post-passes))
         state      (zipmap with-state (mapv #(:state (info %)) with-state))
 
-        pfns-fn    (fn [passes direction]
-                     (reduce (fn [f p]
-                               (let [i (info p)
-                                     p (cond
-                                         (:state i)
-                                         (fn [_ s ast] 
-                                           ;(prn (str "before state " direction " pass" p))
-                                           ;(clojure.pprint/pprint ast)
-                                           (let [ast (p (s p) ast)]
-                                             ;(prn (str "after state " direction " pass" p))
-                                             ;(clojure.pprint/pprint ast)
-                                             ast))
-                                         (:affects i)
-                                         (fn [a _ ast]
-                                           (assert nil "affects not allowed, single pass only")
-                                           ;(prn (str "before affects " direction " pass" p))
-                                           ;(clojure.pprint/pprint ast)
-                                           (let [ast ((p a) ast)]
-                                             ;(prn (str "after affects " direction " pass" p))
-                                             ;(clojure.pprint/pprint ast)
-                                             ast))
-                                         :else
-                                         (fn [_ _ ast] 
-                                           ;(prn (str "before normal " direction " pass" p))
-                                           ;(prn (:op ast) (emit-form/emit-form ast))
-                                           (let [ast (p ast)]
-                                             ;(prn (str "after normal " direction " pass" p))
-                                             ;(prn (:op ast) (emit-form/emit-form ast))
-                                             ast)))]
-                                 (fn [a s ast]
-                                   (p a s (f a s ast)))))
-                             (fn [_ _ ast] ast)
+        pfns-fn    (fn [passes]
+                     (reduce (fn [f pass]
+                               (let [i (info pass)
+                                     pass (cond
+                                            (:state i)
+                                            (fn [ast]
+                                              (let [pass-state (-> ast :env ::state (get pass))]
+                                                (pass pass-state ast)))
+                                            :else pass)]
+                                 #(pass (f %))))
+                             (fn [ast] ast)
                              passes))
-        pre-pfns  (pfns-fn pre-passes :pre)
-        post-pfns  (pfns-fn post-passes :post)]
+        pre-passes  (pfns-fn pre-passes)
+        post-passes  (pfns-fn post-passes)]
     (fn analyze [ast]
-      (ast/walk ast
-                (partial pre-pfns analyze (u/update-vals state #(%)))
-                (partial post-pfns analyze (u/update-vals state #(%)))))))
+      (let [state (or (::state ast)
+                      (u/update-vals state #(%)))]
+        (ast/walk (assoc-in ast [:env ::state] state)
+                  pre-passes
+                  post-passes)))))
 
 (defn schedule
   "Takes a set of Vars that represent tools.analyzer passes and returns a function
@@ -241,6 +222,9 @@
    :collect-closed-overs/where      #{:deftype :reify :fn :loop :try}
    :collect-closed-overs/top-level? false})
 
+(defn pre-parse+run-passes [form env]
+  (run-passes (pre/pre-analyze-child form env)))
+
 (defn analyze
   "Analyzes a clojure form using tools.analyzer augmented with the JVM specific special ops
    and returns its AST, after running #'run-passes on it.
@@ -270,7 +254,7 @@
                            (:bindings opts))
        (env/ensure (taj/global-env)
          (doto (env/with-env (u/mmerge (env/deref-env) {:passes-opts (get opts :passes-opts default-passes-opts)})
-                 (run-passes (pre/pre-analyze-child form env)))
+                 (pre-parse+run-passes form env))
            (do (taj/update-ns-map!)))))))
 
 (deftype ExceptionThrown [e ast])
