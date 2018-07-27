@@ -52,13 +52,13 @@
     ast))
 
 (defn subst-locals [ast subst]
-  (ast/prewalk ast
-               (fn [ast]
-                 (case (:op ast)
-                   :local (if-let [sast (subst (:name ast))]
-                            (reduced sast)
-                            ast)
-                   ast))))
+  (ast/postwalk ast
+                (fn [ast]
+                  (case (:op ast)
+                    :local (if-let [sast (subst (:name ast))]
+                             sast
+                             ast)
+                    ast))))
 
 (defn push-invoke
   "Push arguments into the function position of an :invoke
@@ -97,8 +97,7 @@
                                                                           [(pop params) (peek params)]
                                                                           [params nil])
                                           [fixed-args variadic-args] (split-at fixed-arity args)
-                                          subst (merge (zipmap (map :name fixed-params)
-                                                               fixed-args)
+                                          subst (merge (zipmap (map :name fixed-params) fixed-args)
                                                        (when variadic-param
                                                          (let [the-fn {:op :var
                                                                        :var #'seq
@@ -117,6 +116,7 @@
                                                                                          (map :form args))
                                                                             :children [:fn :args]}]
                                                          {(:name variadic-param) invoke-expr})))]
+                                      (prn "subst" (zipmap (keys subst) (map emit-form (vals subst))))
                                       (-> body
                                           (subst-locals subst)
                                           jana2/run-passes)))

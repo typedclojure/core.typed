@@ -390,6 +390,10 @@
   (is-tc-e ((fn* [& a] (map inc a)) 1))
   (is-tc-err ((fn* [& a] (map inc a)) :a))
   (is-tc-e ((fn* [a] (map inc (seq [a]))) 1))
+  (is-tc-e ((fn* [a z] (map inc (seq [a z]))) 1 2))
+  (is-tc-e ((fn* [_ z] (inc z)) nil 1))
+  (is-tc-e ((fn* [a z] (inc z)) nil 1))
+  (is-tc-e ((fn* [a z] (+ a z)) 2 1))
   )
 
 (comment
