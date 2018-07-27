@@ -1,4 +1,5 @@
 ;; adapted from tools.analyzer
+;TODO move this ns into clojure.core.typed.analyzer2
 (ns clojure.core.typed.analyzer2.pre-analyze
   (:refer-clojure :exclude [macroexpand-1 macroexpand var? record? boolean?])
   (:require [clojure.tools.analyzer.utils :as u]

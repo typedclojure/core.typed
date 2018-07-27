@@ -575,6 +575,17 @@
         (recur threaded (next forms) blame-form))
       x)))
 
+(defmethod -expand-inline 'clojure.core/comp [[_ & fs :as all-form] _]
+  (let [fs (vec fs)
+        args (gensym 'args)]
+    `(fn* [& ~args]
+       ~(reduce (fn [res g]
+                  (list g res))
+                `(apply ~(if (seq fs) (peek fs) `identity) ~args)
+                (when (seq fs)
+                  (pop fs))))))
+
+
 ;; Notes:
 ;; - try `->` next
 ;;   - good test of inheriting msg-fn etc.

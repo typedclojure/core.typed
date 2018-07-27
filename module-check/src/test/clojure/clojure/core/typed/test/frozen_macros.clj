@@ -395,6 +395,13 @@
   (is-tc-e ((fn* [_ z] (inc z)) nil 1))
   (is-tc-e ((fn* [a z] (inc z)) nil 1))
   (is-tc-e ((fn* [a z] (+ a z)) 2 1))
+  ;TODO keyword invocations
+  #_(is-tc-e ((:a {:a (fn [a] a)}) :b) ':b)
+  ;comp
+  (is-tc-e ((comp inc dec) 1) Num)
+  (is-tc-e ((comp inc :a) {:a 1}) Num)
+  (is-tc-e ((comp inc (constantly nil)) 1))
+  ;TODO constantly
   )
 
 (comment

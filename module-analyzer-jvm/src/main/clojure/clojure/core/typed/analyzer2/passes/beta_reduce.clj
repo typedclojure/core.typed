@@ -128,6 +128,16 @@
                                         (-> body
                                             (subst-locals subst)
                                             ana/run-passes)))
+                                ;;TODO
+                                :const (case (:type ast)
+                                         #_:keyword #_(when (= 1 (count args))
+                                                        (let [[map-arg] args]
+                                                          ))
+                                         #_:symbol
+                                         #_:map
+                                         #_:vector
+                                         #_:set
+                                         nil)
                                 nil)]
                           (or special-case
                               (cond
