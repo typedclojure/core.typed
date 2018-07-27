@@ -99,6 +99,8 @@
   eg. ((if c identity first) [1])
       ;=> (if c (identity [1]) (first [1]))
   "
+  ;; tempting to make :pre, but I think we want the arguments to
+  ;; be fully analyzed before we substitute them
   {:pass-info {:walk :post
                :before #{#'annotate-tag/annotate-tag
                          #'analyze-host-expr/analyze-host-expr
@@ -137,9 +139,11 @@
                :depends #{#'push-invoke}
                :state (fn [] (atom {::beta-count 0}))}}
   [state {:keys [op] :as ast}]
+  (prn "beta-reduce" (emit-form ast))
   (case op
     :invoke (let [{:keys [args]} ast
                   the-fn (unwrap-with-meta (:fn ast))]
+              (prn "(:op the-fn)" (:op the-fn))
               (case (:op the-fn)
                 :fn (if-let [{:keys [params body]} (find-matching-method the-fn (count args))]
                       (subst-locals body (zipmap (map :name params) args))
