@@ -133,8 +133,10 @@
                            nil
                            file-mapping)
             eval-ast (fn [ast {:keys [expected] :as opt}]
-                       (prn "eval-ast" (-> ast :env keys vec)
-                            (-> ast :env (contains? ::ana/state)))
+                       (binding [*print-length* nil
+                                 *print-level* nil]
+                         (prn "eval-ast")
+                         (clojure.pprint/pprint (emit-form ast)))
                        (do (when-let [state (-> ast
                                                 :env
                                                 ::ana/state

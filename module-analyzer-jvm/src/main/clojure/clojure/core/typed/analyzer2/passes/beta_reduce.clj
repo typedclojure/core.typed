@@ -11,6 +11,7 @@
             [clojure.core.typed.analyzer2.jvm :as jana2]
             [clojure.pprint :as pprint]
             [clojure.core.typed.analyzer2 :as ana]
+            [clojure.tools.analyzer.utils :as u]
             [clojure.core.typed.analyzer2.passes.uniquify :as uniquify]))
 
 (def beta-limit 500)
@@ -57,6 +58,89 @@
                              ast)
                     ast))))
 
+(defn var->vsym [^clojure.lang.Var v]
+  (symbol (some-> (.ns v) ns-name str) (str (.sym v))))
+
+(defn splice-seqable-expr
+  "If ast is a seqable with a known size, returns a vector
+  of the members. Otherwise nil."
+  [{:keys [op env] :as ast}]
+  {:post [((some-fn nil? vector?) %)]}
+  (prn "splice-seqable-expr" op (emit-form ast))
+  (case op
+    (:vector :set) (with-meta (:items ast)
+                              {::type op})
+    :map (-> (mapv (fn [k v]
+                     {:op :vector
+                      :env env
+                      :items [k v]
+                      :form [(:form k) (:form v)]
+                      :children [:items]})
+                   (:keys ast)
+                   (:vals ast))
+             (with-meta {::type op}))
+    :const (when (seqable? (:val ast))
+             (-> (mapv #(pre/pre-analyze-const % env) (:val ast))
+                 (with-meta {::type (:type ast)})))
+    :do (splice-seqable-expr (:ret ast))
+    (:let :let-fn) (splice-seqable-expr (:body ast))
+    ;TODO lift `if` statements around invoke nodes so they are
+    ; automatically handled (if performant)
+    :invoke (let [{:keys [args]} ast
+                  cargs (count args)
+                  ufn (unwrap-with-meta (:fn ast))]
+              (prn "invoke case")
+              (case (:op ufn)
+                :var (let [vsym (var->vsym (:var ufn))]
+                       (prn "vsym" vsym)
+                       (case vsym
+                         clojure.core/concat
+                         (some->
+                           (reduce (fn [c arg]
+                                     (let [spliced (splice-seqable-expr arg)]
+                                       (if spliced
+                                         (into c spliced)
+                                         (reduced nil))))
+                                   []
+                                   args)
+                           (with-meta {::type :seq}))
+                         clojure.core/seq
+                         (when (= 1 cargs)
+                           (prn "seq")
+                           (let [spliced (splice-seqable-expr (first args))]
+                             (some-> spliced
+                                     (with-meta {::type (if (seq spliced)
+                                                          :seq
+                                                          :nil)}))))
+                         clojure.core/first
+                         (when (= 1 cargs)
+                           (when-let [spliced (splice-seqable-expr (first args))]
+                             (if (<= 1 (count spliced))
+                               (splice-seqable-expr (nth spliced 0))
+                               (with-meta [] {::type :nil}))))
+                         clojure.core/second
+                         (when (= 1 cargs)
+                           (when-let [spliced (splice-seqable-expr (first args))]
+                             (if (<= 2 (count spliced))
+                               (splice-seqable-expr (nth spliced 1))
+                               (with-meta [] {::type :nil}))))
+                         clojure.core/nth
+                         (when (#{2 3} cargs)
+                           (let [[coll-expr idx-expr default-expr] args]
+                             (when (and (= :const (:op idx-expr))
+                                        (nat-int? (:val idx-expr)))
+                               (when-let [spliced (splice-seqable-expr coll-expr)]
+                                 (let [idx (:val idx-expr)]
+                                   (case (-> spliced :meta ::type)
+                                     :nil (with-meta [] {::type :nil})
+                                     (:seq :vector) (if (< idx (count spliced))
+                                                      (splice-seqable-expr (nth spliced 1))
+                                                      (some-> default-expr splice-seqable-expr))
+                                     nil))))))
+                         nil))
+                nil))
+    nil))
+
 (defn push-invoke
   "Push arguments into the function position of an :invoke
   so the function and arguments are both in the
@@ -90,16 +174,18 @@
                           form (with-meta
                                  (list* fn-form (map emit-form args))
                                  (meta fn-form))
+                          _ (prn "form" form)
                           env (:env tail-ast)
                           mform (ana/macroexpand-1 form env)]
+                      (prn "mform" mform)
                       (if (= mform form)
-                        (let [unwrapped-fn (unwrap-with-meta tail-ast)
+                        (let [ufn (unwrap-with-meta tail-ast)
                               special-case
-                              (case (:op unwrapped-fn)
+                              (case (:op ufn)
                                 ; ((fn* ([params*] body)) args*)
                                 ; ;=> body[args*/params*]
                                 :fn (when-let [{:keys [params body variadic? fixed-arity env]}
-                                               (find-matching-method unwrapped-fn (count args))]
+                                               (find-matching-method ufn (count args))]
                                       ;; update before any recursive calls (ie. run-passes)
                                       (swap! state update ::expansions inc)
                                       (let [[fixed-params variadic-param] (if variadic?
@@ -128,6 +214,22 @@
                                         (-> body
                                             (subst-locals subst)
                                             ana/run-passes)))
+                                :var (case (var->vsym (:var ufn))
+                                       ; (apply f args* collarg)
+                                       ; ;=> (f args* ~@collarg)
+                                       clojure.core/apply
+                                       (when (<= 1 (count args))
+                                         (prn "apply special case")
+                                         (let [[single-args collarg] ((juxt pop peek) args)
+                                               spliced (splice-seqable-expr collarg)]
+                                           (prn "spliced" (class spliced))
+                                           (when spliced
+                                             (let [form (doall (map emit-form (concat single-args spliced)))
+                                                   _ (prn "rewrite apply to" form)
+                                                   res (ana/run-passes (pre/pre-parse form env))]
+                                               (prn "ast rewrite apply to" (emit-form res))
+                                               res))))
+                                       nil)
                                 ;;TODO
                                 :const (case (:type ast)
                                          #_:keyword #_(when (= 1 (count args))
@@ -150,6 +252,11 @@
                                        :env env
                                        :children [:fn :args]})))
                         (do (swap! state update ::expansions inc)
-                            (ana/run-passes (pre/pre-parse mform env))))))))
+                            (prn "reparsing invoke" (first mform))
+                            ;; TODO like pre-analyze-seq, perhaps we can reuse the implemenation
+                            (ana/run-passes
+                              (-> (pre/pre-analyze-form mform env)
+                                  (update-in [:raw-forms] (fnil conj ())
+                                             (vary-meta form assoc ::pre/resolved-op (u/resolve-sym (first form) env)))))))))))
       ast)))
 

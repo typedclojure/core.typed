@@ -397,10 +397,29 @@
   (is-tc-e ((fn* [a z] (+ a z)) 2 1))
   ;TODO keyword invocations
   #_(is-tc-e ((:a {:a (fn [a] a)}) :b) ':b)
+  ;apply
+  (is-tc-e (apply inc [2])
+           Int)
+  (is-tc-e (apply inc (seq [2])) Int)
+  (is-tc-e (apply inc [(second (first {:a 2}))]) Int)
+  (is-tc-e (apply map (seq [identity [1]]))
+           (Seqable Num))
+  (is-tc-e (apply map [identity])
+           (Transducer Num Num))
+  (is-tc-err (apply map [identity])
+             (Transducer Num Bool))
+  (is-tc-err (apply map [identity]))
   ;comp
   (is-tc-e ((comp inc dec) 1) Num)
   (is-tc-e ((comp inc :a) {:a 1}) Num)
+  (is-tc-e ((comp identity :a) {:a 1}) Num)
+  (is-tc-e ((comp identity :a) {:a 1}) '1)
   (is-tc-e ((comp inc (constantly nil)) 1))
+  (is-tc-e (sequence (comp (map inc) (map dec)) [1]))
+  ;TODO improved matching arities, so [:-> ] <: [f :-> g]
+  #_
+  (is-tc-e (comp (map inc) (map dec))
+           (Transducer Num Num))
   ;TODO constantly
   )
 

@@ -1516,16 +1516,17 @@
             :else (invoke/normal-invoke check expr fexpr args expected :cfexpr cfexpr)))))))
 
 (defn check-rest-fn [remain-dom & {:keys [rest drest kws prest pdot]}]
-  {:pre [(or (r/Type? rest)
-             (r/Type? prest)
-             (r/DottedPretype? drest)
-             (r/Type? pdot)
-             (r/KwArgs? kws))
-         (#{1} (count (filter identity [rest drest kws prest pdot])))
+  {:pre [((some-fn nil? r/Type?) rest)
+         ((some-fn nil? r/Type?) prest)
+         ((some-fn nil? r/DottedPretype?) drest)
+         ((some-fn nil? r/Type?) pdot)
+         ((some-fn nil? r/KwArgs?) kws)
+         (#{0 1} (count (filter identity [rest drest kws prest pdot])))
          (every? r/Type? remain-dom)]
    :post [(r/Type? %)]}
   (cond
-    (or rest drest)
+    (or rest drest
+        (zero? (count (filter identity [rest drest kws prest pdot]))))
     ; rest argument is always a nilable non-empty seq. Could
     ; be slightly more clever here if we have a `rest`, but what about
     ; `drest`?
@@ -1535,9 +1536,12 @@
                          :drest drest)
                 (r/make-CountRange 1)))
 
+    (seq remain-dom) (err/nyi-error "Rest parameter with remaining fixed domain for prest/post/KwArgs")
+
     prest (c/Un r/-nil prest)
     pdot (c/Un r/-nil pdot)
 
+    ;kws
     :else (c/KwArgs->Type kws)))
 
 (defmacro prepare-check-fn [env expr & body]

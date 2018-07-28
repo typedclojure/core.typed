@@ -8,6 +8,7 @@
             [clojure.core.typed.internal :as internal]))
 
 (defmulti -expand-macro (fn [form {:keys [vsym]}] vsym))
+;; TODO equivalent to :inline-arities
 (defmulti -expand-inline (fn [form {:keys [vsym]}] vsym))
 
 (defn custom-expansion? [vsym]

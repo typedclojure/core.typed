@@ -86,29 +86,13 @@
         ;_ (prn "open-result expected-rng" expected-rng)
         ;_ (prn "open-result expected-rng filters" (some->> expected-rng :fl ((juxt :then :else)) (map fl/infer-top?)))
         ;ensure Function fits method
-        _ (when-not ((if (or rest drest kws prest pdot) <= =) (count required-params) (count dom))
+        _ (when-not (or ((if (or rest drest kws prest pdot) <= =) (count required-params) (count dom))
+                        rest-param)
             (err/int-error (str "Checking method with incorrect number of expected parameters"
                               ", expected " (count dom) " required parameter(s) with"
                               (if rest " a " " no ") "rest parameter, found " (count required-params)
                               " required parameter(s) and" (if rest-param " a " " no ")
                               "rest parameter.")))
-
-        _ (when-not (or (not rest-param)
-                        (some identity [drest rest kws prest pdot]))
-            (err/int-error (str "No type for rest parameter")))
-
-        ;;unhygienic version
-        ;        ; Update filters that reference bindings that the params shadow.
-        ;        ; Abstracting references to parameters is handled later in abstract-result, but
-        ;        ; suffers from bugs due to un-hygienic macroexpansion (see `abstract-result`).
-        ;        ; In short, don't shadow parameters if you want meaningful filters.
-        ;        props (mapv (fn [oldp]
-        ;                      (reduce (fn [p sym]
-        ;                                {:pre [(fl/Filter? p)
-        ;                                       (symbol? sym)]}
-        ;                                (subst-filter p sym obj/-empty true))
-        ;                              oldp (map :sym required-params)))
-        ;                    (:props (lex/lexical-env)))
 
         props (:props (lex/lexical-env))
         crequired-params (map (fn [p t] (assoc p u/expr-type (r/ret t)))

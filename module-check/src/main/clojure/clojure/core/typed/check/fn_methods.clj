@@ -42,16 +42,15 @@
   "Takes a :method AST node and a single Function arity type,
   and returns the Function if the :method node should be checked
   against the Function, otherwise returns nil."
-  [{:keys [fixed-arity] :as method}
-   {:keys [dom rest drest kws pdot prest] :as f}]
+  [{:keys [fixed-arity variadic?] :as method}
+   {:keys [dom rest drest kws pdot prest] :as f}
+   all-methods]
   {:pre [(method? method)
          (r/Function? f)]
    :post [((some-fn nil? r/Function?) %)]}
   ;; fn-method-u/*check-fn-method1-rest-type*, and check-fn-method1
   ;; actually distribute the types amongst the fixed and rest parameters
-  (let [ndom (count dom)
-        variadic?   (ast-u/variadic-method? method)
-        fixed-arity (ast-u/fixed-arity method)]
+  (let [ndom (count dom)]
     (cond
       (or rest drest pdot prest)
       (cond
@@ -73,7 +72,14 @@
       ; no variable arity
       (= nil rest drest kws pdot prest)
       (cond
-        variadic? nil
+        ;; ensure no other fixed arities would match this Function
+        variadic? (when (empty? (filter (fn [m]
+                                          (and (not (:variadic? m))
+                                               (= ndom (:fixed-arity m))))
+                                        all-methods))
+                    ; extra domains flow into the rest argument
+                    (when (<= fixed-arity ndom)
+                      f))
         (== ndom fixed-arity) f
         :else nil))))
 
@@ -124,7 +130,7 @@
                                  (let [ms (into #{}
                                                 (comp
                                                   (map-indexed (fn [i m]
-                                                                 (when (expected-for-method m t)
+                                                                 (when (expected-for-method m t mthods)
                                                                    i)))
                                                   (keep identity))
                                                 mthods)]
