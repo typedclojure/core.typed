@@ -13,6 +13,8 @@
             [clojure.tools.analyzer.passes.jvm.warn-on-reflection :as warn-reflect]
             [clojure.core.typed.analyzer2.jvm :as jana2]
             [clojure.core.typed.analyzer2 :as ana2]
+            [clojure.core.typed.analyzer2.pre-analyze :as pre]
+            [clojure.core.typed.analyzer2.jvm.pre-analyze :as jpre]
             [clojure.core.typed.analyzer2.passes.beta-reduce :as beta-reduce]
             [clojure.tools.reader :as tr]
             [clojure.tools.reader.reader-types :as readers]
@@ -427,11 +429,17 @@
   (typed-schedule ast))
 
 ;; (All [x ...] [-> '{(Var x) x ...})])
-(defn thread-bindings []
+(defn thread-bindings [& [opts]]
   (t/tc-ignore
-    {#'ana2/macroexpand-1 macroexpand-1
-     ;#'jana2/run-passes run-passes
-     }))
+    {Compiler/LOADER     (clojure.lang.RT/makeClassLoader)
+     #'ana2/macroexpand-1 macroexpand-1
+     #'ana2/run-passes    (if vs/*custom-expansions*
+                            #(@scheduled-passes-for-custom-expansions %)
+                            jana2/run-passes)
+     #'pre/pre-parse      jpre/pre-parse
+     #'ana2/var?          var?
+     #'*ns*               (the-ns (or (-> opts :env :ns)
+                                      *ns*))}))
 
 (defn will-custom-expand? [form env]
   (boolean
@@ -474,13 +482,9 @@
    (let [old-bindings (or (some-> bindings-atom deref) {})
          analyze-fn (fn [form env opts]
                       (let [env (assoc env :ns (ns-name *ns*))
-                            opts (cond->
-                                   (-> opts
-                                       (dissoc :bindings-atom)
-                                       (assoc-in [:bindings #'*ns*] *ns*))
-                                   vs/*custom-expansions*
-                                   (assoc-in [:bindings #'ana2/run-passes]
-                                             #(@scheduled-passes-for-custom-expansions %)))]
+                            opts (-> opts
+                                     (dissoc :bindings-atom)
+                                     (assoc-in [:bindings #'*ns*] *ns*))]
                         (jana2/analyze form env opts)))]
      (with-bindings old-bindings
        ;(prn "analyze1 namespace" *ns*)

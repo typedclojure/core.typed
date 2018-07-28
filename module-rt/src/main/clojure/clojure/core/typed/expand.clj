@@ -489,6 +489,13 @@
     (internal-error (str "Must provide 1 or more arguments to clojure.core/map, found " (dec (count form))
                          ": " form)))
   (if (empty? colls)
+    `(fn* [rf#]
+       (fn*
+         ([] (rf#))
+         ([result#] (rf# result#))
+         ([result# input#]
+          (rf# result# (~f input#)))))
+    #_
     `(expected-type-as expected#
        (let [[in# out#]
              (solve expected#
@@ -497,8 +504,8 @@
                      :msg-fn (fn [_#]
                                (str "'map' transducer arity requires an expected type which is a subtype of (t/Transducer t/Nothing t/Any)"))
                      :blame-form ~form})]
-         (fn [rf#]
-           (fn
+         (fn* [rf#]
+           (fn*
              ([] (rf#))
              ([result#] (rf# result#))
              ([result# input#]

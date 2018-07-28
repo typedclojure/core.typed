@@ -20,7 +20,12 @@
             [clojure.core.typed.check.recur-utils :as recur-u]
             [clojure.core.typed.util-vars :as vs]
             [clojure.core.typed.subtype :as sub]
-            [clojure.core.typed.check.utils :as cu]))
+            [clojure.core.typed.check.utils :as cu]
+            [clojure.core.typed.parse-unparse :as prs]
+            [clojure.core.typed.analyze-clj :as ana-clj]
+            [clojure.core.typed.analyzer2 :as ana]
+            [clojure.core.typed.analyzer2.pre-analyze :as pre]
+            [clojure.core.typed.analyzer2.passes.beta-reduce :as beta-reduce]))
 
 ;check method is under a particular Function, and return inferred Function
 ; if ignore-rng is true, otherwise return expression with original expected type.
@@ -172,7 +177,30 @@
                           (recur-u/RecurTarget-maker dom rest drest nil))
                   _ (assert (recur-u/RecurTarget? rec))]
               (recur-u/with-recur-target rec
-                (check-fn-method1-checkfn body expected-rng))))))
+                (let [body (if (and vs/*custom-expansions*
+                                    rest-param
+                                    (not-any? identity [rest drest kws prest pdot]))
+                             ;; substitute away the rest argument to try and trigger
+                             ;; any beta reductions
+                             (with-bindings* (ana-clj/thread-bindings {:env (:env method)})
+                               #(-> body
+                                    (beta-reduce/subst-locals 
+                                      {(:name rest-param) (beta-reduce/fake-seq-invoke
+                                                            (mapv (fn [t]
+                                                                    (beta-reduce/make-invoke-expr
+                                                                      (beta-reduce/make-var-expr
+                                                                        #'cu/special-typed-expression
+                                                                        (:env method))
+                                                                      [(pre/pre-parse-quote
+                                                                         (binding [vs/*verbose-types* true]
+                                                                           `'~(prs/unparse-type t))
+                                                                         (:env method))]
+                                                                      (:env method)))
+                                                                  dom)
+                                                            (:env method))})
+                                    ana/run-passes))
+                             body)]
+                  (check-fn-method1-checkfn body expected-rng)))))))
 
         ; Apply the filters of computed rng to the environment and express
         ; changes to the lexical env as new filters, and conjoin with existing filters.

@@ -1418,6 +1418,17 @@
                              (r/ret actual)
                              expected))))))
 
+(add-invoke-special-method 'clojure.core.typed.check.utils/special-typed-expression
+  [{[type-expr] :args :keys [env] :as expr} & [expected]]
+  (let [_ (assert (= :quote (:op type-expr)))
+        _ (assert (= :const (-> type-expr :expr :op))
+                  (-> type-expr :expr :op))
+        t (prs/parse-type (-> type-expr :expr :val))]
+    (assoc expr
+           u/expr-type (below/maybe-check-below
+                         (r/ret t)
+                         expected))))
+
 ; FIXME this needs a line number from somewhere!
 (add-instance-method-special-method 'clojure.lang.MultiFn/addMethod
   [{[dispatch-val-expr method-expr :as args] :args target :instance :keys [env] :as expr} & [expected]]

@@ -587,3 +587,6 @@
 
 (defn maybe-map->TCResult [m]
   (some-> m map->TCResult))
+
+(defn special-typed-expression [& args]
+  )

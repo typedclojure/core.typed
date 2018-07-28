@@ -416,10 +416,13 @@
   (is-tc-e ((comp identity :a) {:a 1}) '1)
   (is-tc-e ((comp inc (constantly nil)) 1))
   (is-tc-e (sequence (comp (map inc) (map dec)) [1]))
-  ;TODO improved matching arities, so [:-> ] <: [f :-> g]
-  #_
+  ;;TODO play with the map transducer expander, use fn instead of fn*
+  ;; and figure out how to play nicely with its mexpansion
   (is-tc-e (comp (map inc) (map dec))
            (Transducer Num Num))
+  ;; horrible error msg
+  (is-tc-err (comp (map inc) (map dec))
+             (Transducer Num Bool))
   ;TODO constantly
   )
 

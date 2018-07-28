@@ -141,6 +141,31 @@
                 nil))
     nil))
 
+(defn make-invoke-expr [the-fn args env]
+  {:op :invoke
+   :fn the-fn
+   :env env
+   :args args
+   :form (list* (:form the-fn)
+                (map :form args))
+   :children [:fn :args]})
+
+(defn make-var-expr [var env]
+  {:op :var
+   :var var
+   :env env
+   :form (var->vsym var)})
+
+(defn fake-seq-invoke [seq-args env]
+  (let [the-fn (make-var-expr #'seq env)
+        args [{:op :vector
+               :env env
+               :items (vec seq-args)
+               :form (mapv :form seq-args)
+               :children [:items]}]
+        invoke-expr (make-invoke-expr the-fn args env)]
+    invoke-expr))
+
 (defn push-invoke
   "Push arguments into the function position of an :invoke
   so the function and arguments are both in the
@@ -194,23 +219,7 @@
                                             [fixed-args variadic-args] (split-at fixed-arity args)
                                             subst (merge (zipmap (map :name fixed-params) fixed-args)
                                                          (when variadic-param
-                                                           (let [the-fn {:op :var
-                                                                         :var #'seq
-                                                                         :env env
-                                                                         :form `seq}
-                                                                 args [{:op :vector
-                                                                        :env env
-                                                                        :items (vec variadic-args)
-                                                                        :form (mapv :form variadic-args)
-                                                                        :children [:items]}]
-                                                                 invoke-expr {:op :invoke
-                                                                              :fn the-fn
-                                                                              :env env
-                                                                              :args args
-                                                                              :form (list* (:form the-fn)
-                                                                                           (map :form args))
-                                                                              :children [:fn :args]}]
-                                                             {(:name variadic-param) invoke-expr})))]
+                                                           {(:name variadic-param) (fake-seq-invoke variadic-args env)}))]
                                         (-> body
                                             (subst-locals subst)
                                             ana/run-passes)))
