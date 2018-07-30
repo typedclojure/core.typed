@@ -2332,6 +2332,8 @@ for checking namespaces, cf for checking individual forms."}
                      If a fatal error occurs, mapped to nil.
   - :no-eval         If true, don't evaluate :out-form. Removes :result return value.
                      It is highly recommended to evaluate :out-form manually.
+  - :beta-limit      A natural integer which denotes the maximum number of beta reductions
+                     the type system can perform on a single top-level form (post Gilardi-scenario).
   
   Default return map
   - :ret             TCResult inferred for the current form

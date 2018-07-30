@@ -66,6 +66,8 @@
 ;;                     It is highly recommended to evaluate :out-form manually.
 ;;  - :bindings-atom   an atom which contains a value suitable for with-bindings.
 ;;                     Will be updated during macroexpansion and evaluation.
+;;  - :beta-limit      A natural integer which denotes the maximum number of beta reductions
+;;                     the type system can perform.
 ;;  
 ;;  Default return map
 ;;  - :ret             TCResult inferred for the current form
@@ -89,7 +91,7 @@
            unparse-ns
            analyze-bindings-fn]}
    form & {:keys [expected-ret expected type-provided? profile file-mapping
-                  checked-ast no-eval bindings-atom]}]
+                  checked-ast no-eval bindings-atom beta-limit]}]
   {:pre [((some-fn nil? con/atom?) bindings-atom)
          ((some-fn nil? symbol?) unparse-ns)]}
   (assert (not (and expected-ret type-provided?)))
@@ -103,7 +105,10 @@
               vs/*lexical-env* (lex-env/init-lexical-env)
               ;; custom expansions might not even evaluate
               vs/*can-rewrite* (not custom-expansions?)
-              vs/*custom-expansions* custom-expansions?]
+              vs/*custom-expansions* custom-expansions?
+              vs/*beta-count* (when custom-expansions?
+                                (atom {:count 0
+                                       :limit (or beta-limit 500)}))]
       (let [expected (or
                        expected-ret
                        (when type-provided?

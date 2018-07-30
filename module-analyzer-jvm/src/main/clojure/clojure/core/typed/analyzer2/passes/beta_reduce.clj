@@ -61,26 +61,15 @@
   (symbol (some-> (.ns v) ns-name str) (str (.sym v))))
 
 (defn splice-seqable-expr
-  "If ast is a seqable with a known size, returns a vector
+  "If ast is a seqable with a known size and sequential, returns a vector
   of the members. Otherwise nil."
   [{:keys [op env] :as ast}]
   {:post [((some-fn nil? vector?) %)]}
   (prn "splice-seqable-expr" op (emit-form ast))
   (case op
-    (:vector :set) (with-meta (:items ast)
-                              {::type op})
-    :map (-> (mapv (fn [k v]
-                     {:op :vector
-                      :env env
-                      :items [k v]
-                      :form [(:form k) (:form v)]
-                      :children [:items]})
-                   (:keys ast)
-                   (:vals ast))
-             (with-meta {::type op}))
-    :const (when (seqable? (:val ast))
-             (-> (mapv #(pre/pre-analyze-const % env) (:val ast))
-                 (with-meta {::type (:type ast)})))
+    :vector (:items ast)
+    :const (when (sequential? (:val ast))
+             (mapv #(pre/pre-analyze-const % env) (:val ast)))
     :do (splice-seqable-expr (:ret ast))
     (:let :let-fn) (splice-seqable-expr (:body ast))
     ;TODO lift `if` statements around invoke nodes so they are
@@ -88,54 +77,38 @@
     :invoke (let [{:keys [args]} ast
                   cargs (count args)
                   ufn (unwrap-with-meta (:fn ast))]
-              (prn "invoke case")
               (case (:op ufn)
                 :var (let [vsym (var->vsym (:var ufn))]
-                       (prn "vsym" vsym)
                        (case vsym
                          clojure.core/concat
-                         (some->
-                           (reduce (fn [c arg]
-                                     (let [spliced (splice-seqable-expr arg)]
-                                       (if spliced
-                                         (into c spliced)
-                                         (reduced nil))))
-                                   []
-                                   args)
-                           (with-meta {::type :seq}))
+                         (reduce (fn [c arg]
+                                   (if-let [spliced (splice-seqable-expr arg)]
+                                     (into c spliced)
+                                     (reduced nil)))
+                                 []
+                                 args)
                          clojure.core/seq
                          (when (= 1 cargs)
-                           (prn "seq")
-                           (let [spliced (splice-seqable-expr (first args))]
-                             (some-> spliced
-                                     (with-meta {::type (if (seq spliced)
-                                                          :seq
-                                                          :nil)}))))
-                         clojure.core/first
-                         (when (= 1 cargs)
-                           (when-let [spliced (splice-seqable-expr (first args))]
-                             (if (<= 1 (count spliced))
-                               (splice-seqable-expr (nth spliced 0))
-                               (with-meta [] {::type :nil}))))
-                         clojure.core/second
-                         (when (= 1 cargs)
-                           (when-let [spliced (splice-seqable-expr (first args))]
-                             (if (<= 2 (count spliced))
-                               (splice-seqable-expr (nth spliced 1))
-                               (with-meta [] {::type :nil}))))
-                         clojure.core/nth
-                         (when (#{2 3} cargs)
-                           (let [[coll-expr idx-expr default-expr] args]
-                             (when (and (= :const (:op idx-expr))
-                                        (nat-int? (:val idx-expr)))
-                               (when-let [spliced (splice-seqable-expr coll-expr)]
-                                 (let [idx (:val idx-expr)]
-                                   (case (-> spliced :meta ::type)
-                                     :nil (with-meta [] {::type :nil})
-                                     (:seq :vector) (if (< idx (count spliced))
-                                                      (splice-seqable-expr (nth spliced 1))
-                                                      (some-> default-expr splice-seqable-expr))
-                                     nil))))))
+                           (splice-seqable-expr (first args)))
+                         ;FIXME something fishy about all these. I don't think they
+                         ; should return vectors, don't we need to resplice the results?
+                         ;clojure.core/first
+                         ;(when (= 1 cargs)
+                         ;  (when-let [spliced (splice-seqable-expr (first args))]
+                         ;    [(nth spliced 0 (pre/pre-analyze-const nil env))]))
+                         ;clojure.core/second
+                         ;(when (= 1 cargs)
+                         ;  (when-let [spliced (splice-seqable-expr (first args))]
+                         ;    [(nth spliced 1 (pre/pre-analyze-const nil env))]))
+                         ;clojure.core/nth
+                         ;(when (#{2 3} cargs)
+                         ;  (let [[coll-expr idx-expr default-expr] args]
+                         ;    (when (and (= :const (:op idx-expr))
+                         ;               (nat-int? (:val idx-expr)))
+                         ;      (when-let [spliced (splice-seqable-expr coll-expr)]
+                         ;        (let [idx (:val idx-expr)]
+                         ;          [(nth spliced idx (or default-expr
+                         ;                                (pre/pre-analyze-const nil env)))])))))
                          nil))
                 nil))
     nil))
@@ -198,6 +171,18 @@
         (when err-f
           (err-f (::expansions @state))))))
 
+; (apply f args* collarg)
+; ;=> (f args* ~@collarg)
+(defn maybe-beta-reduce-apply [{:keys [env] :as ufn} args & [{:keys [before-reduce] :as opts}]]
+  {:pre [(= 'clojure.core/apply (var->vsym (:var ufn)))
+         (vector? args)]}
+  (when (<= 1 (count args))
+    (let [[single-args collarg] ((juxt pop peek) args)]
+      (when-let [spliced (splice-seqable-expr collarg)]
+        (let [form (doall (map emit-form (concat single-args spliced)))]
+          (when before-reduce (before-reduce))
+          (ana/run-passes (pre/pre-analyze-form form env)))))))
+
 (defn push-invoke
   "Push arguments into the function position of an :invoke
   so the function and arguments are both in the
@@ -242,20 +227,7 @@
                                 ;manually called by core.typed
                                 ;:fn (maybe-beta-reduce-fn ufn args {:before-reduce #(swap! state update ::expansions inc)})
                                 :var (case (var->vsym (:var ufn))
-                                       ; (apply f args* collarg)
-                                       ; ;=> (f args* ~@collarg)
-                                       clojure.core/apply
-                                       (when (<= 1 (count args))
-                                         (prn "apply special case")
-                                         (let [[single-args collarg] ((juxt pop peek) args)
-                                               spliced (splice-seqable-expr collarg)]
-                                           (prn "spliced" (class spliced))
-                                           (when spliced
-                                             (let [form (doall (map emit-form (concat single-args spliced)))
-                                                   _ (prn "rewrite apply to" form)
-                                                   res (ana/run-passes (pre/pre-parse form env))]
-                                               (prn "ast rewrite apply to" (emit-form res))
-                                               res))))
+                                       clojure.core/apply (maybe-beta-reduce-apply ufn args)
                                        nil)
                                 ;;TODO
                                 :const (case (:type ast)

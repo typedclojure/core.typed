@@ -9,7 +9,6 @@
             [clojure.core.typed.check-below :as below]
             [clojure.core.typed.abo :as abo]
             [clojure.core.typed.analyze-clj :as ana-clj]
-            [clojure.tools.analyzer :as ana1]
             [clojure.tools.analyzer.utils :as tau]
             [clojure.tools.analyzer.passes.jvm.validate :as validate]
             [clojure.tools.analyzer.passes.jvm.analyze-host-expr :as ana-host]
@@ -251,56 +250,45 @@
         _ (some-> expr ::replace-invoke-atom (reset! cred))]
     nil))
 
-(defn ensure-within-beta-limit [ast]
-  ;; TODO state doesn't exist since we removed the pass
-  #_
-  (let [state (-> ast
-                  :env
-                  ::ana2/state
-                  (get #'beta-reduce/push-invoke))]
+(defn ensure-within-beta-limit []
+  (let [state vs/*beta-count*]
     (assert state)
-    (beta-reduce/ensure-within-beta-limit
-      state
-      (fn [nexpansions]
-        (err/int-error
-          (str "Exceeded the limit of symbolic beta reductions in a single form "
-               "(" nexpansions ")"))))))
-
-(defn record-beta-reduction [ast]
-  ;; TODO state doesn't exist since we removed the pass
-  #_
-  (let [state (-> ast
-                  :env
-                  ::ana2/state
-                  (get #'beta-reduce/push-invoke))]
-    (assert state)
-    (beta-reduce/record-beta-reduction state)))
+    (if (< (:limit @state) (:count @state))
+      (err/int-error
+        (str "Exceeded the limit of symbolic beta reductions in a single form "
+             "(" (:limit @state) ")"))
+      (swap! state update :count inc))))
 
 (defmethod -check :var
   [{:keys [var env] :as expr} expected]
   {:pre [(var? var)]}
   ;(prn " checking var" var)
-  (or (when vs/*current-expr* 
+  (or (when vs/*custom-expansions* 
         (when-let [args (::invoke-args expr)]
           (when-not expected
-            (let [vsym (ast-u/emit-form-fn expr)
-                  _ (assert (= (ns-resolve (:ns env) vsym)
-                               (ns-resolve (:ns env) (coerce/var->symbol vsym))))
-                  form (with-meta (list* vsym (map ast-u/emit-form-fn args))
-                                  (meta vsym))
-                  mform (ana1/macroexpand-1 form env)]
-              (prn "mform" mform)
-              (when (not= form mform)
-                (ensure-within-beta-limit expr)
-                (record-beta-reduction expr)
-                (let [cred (-> mform
-                               (pre/pre-analyze-form env)
-                               (update-in [:raw-forms] (fnil conj ())
-                                          (vary-meta form assoc ::pre/resolved-op (tau/resolve-sym (first form) env)))
-                               ana2/run-passes
-                               (check-expr (::invoke-expected expr)))]
-                  (set-erase-atoms expr cred)
-                  cred))))))
+            (case (coerce/var->symbol var)
+              ;; FIXME what if we break up final argument and it has an ann-form around it?
+              ;; eg. (apply map [(ann-form identity [Any -> Any]))
+              ;; eg. (apply map (ann-form [identity] (Seqable [Any -> Any])))
+              clojure.core/apply (when-let [red (beta-reduce/maybe-beta-reduce-apply expr args
+                                                                                {:before-reduce ensure-within-beta-limit})]
+                                   (let [cred (check-expr red (::invoke-expected expr))]
+                                     (set-erase-atoms expr cred)
+                                     cred))
+              (let [vsym (ast-u/emit-form-fn expr)
+                    form (with-meta (list* vsym (map ast-u/emit-form-fn args))
+                                    (meta vsym))
+                    mform (ana2/macroexpand-1 form env)]
+                (when (not= form mform)
+                  (ensure-within-beta-limit)
+                  (let [cred (-> mform
+                                 (pre/pre-analyze-form env)
+                                 (update-in [:raw-forms] (fnil conj ())
+                                            (vary-meta form assoc ::pre/resolved-op (tau/resolve-sym (first form) env)))
+                                 ana2/run-passes
+                                 (check-expr (::invoke-expected expr)))]
+                    (set-erase-atoms expr cred)
+                    cred)))))))
       (check-var expr expected)))
 
 (defmethod -check :the-var
@@ -330,21 +318,19 @@
                                   (fo/-true-filter))
                            expected)))))
 
-(defmulti invoke-special (fn [{fexpr :fn :keys [op] :as expr} & args] 
-                           {:pre [(#{:invoke} op)]
-                            :post [((some-fn nil? symbol?) %)]}
-                           (when (#{:var} (:op fexpr))
-                             (when-let [var (:var fexpr)]
-                               (coerce/var->symbol var)))))
-(u/add-defmethod-generator invoke-special)
+(defmulti -invoke-special (fn [{fexpr :fn :keys [op] :as expr} & args] 
+                            {:pre [(#{:invoke} op)]
+                             :post [((some-fn nil? symbol?) %)]}
+                            (when (#{:var} (:op fexpr))
+                              (when-let [var (:var fexpr)]
+                                (coerce/var->symbol var)))))
 
-(defmulti invoke-apply (fn [{[fexpr] :args :keys [op] :as expr} & args]
-                         {:pre [(#{:invoke} op)]
-                          :post [((some-fn nil? symbol?) %)]}
-                         (when (#{:var} (:op fexpr))
-                           (when-let [var (:var fexpr)]
-                             (coerce/var->symbol var)))))
-(u/add-defmethod-generator invoke-apply)
+(defmulti -invoke-apply (fn [{[fexpr] :args :keys [op] :as expr} & args]
+                          {:pre [(#{:invoke} op)]
+                           :post [((some-fn nil? symbol?) %)]}
+                          (when (#{:var} (:op fexpr))
+                            (when-let [var (:var fexpr)]
+                              (coerce/var->symbol var)))))
 
 (defmulti static-method-special (fn [expr & args]
                                   {:post [((some-fn nil? symbol?) %)]}
@@ -361,7 +347,7 @@
 
 
 ; only handle special case that the first argument is literal class
-(add-invoke-special-method 'clojure.core/cast
+(defmethod -invoke-special 'clojure.core/cast
   [{:keys [args] :as expr} & [expected]]
   {:post [(or (#{:default} %)
               (and (r/TCResult? (u/expr-type %))
@@ -380,7 +366,7 @@
                                        expected)))))))
       :default))
 
-(add-invoke-special-method 'clojure.core.typed/var>*
+(defmethod -invoke-special 'clojure.core.typed/var>*
   [{[sym-expr :as args] :args fexpr :fn :as expr} & [expected]]
   {:post [(and (r/TCResult? (u/expr-type %))
                (vector? (:args %)))]}
@@ -400,7 +386,7 @@
                              expected)))))
 
 ; ignore some keyword argument related intersections
-(add-invoke-special-method 'clojure.core/seq?
+(defmethod -invoke-special 'clojure.core/seq?
   [{fexpr :fn :keys [args] :as expr} & [expected]]
   {:post [(and (r/TCResult? (u/expr-type %))
                (vector? (:args %)))]}
@@ -429,7 +415,7 @@
       :else (invoke/normal-invoke check-expr expr fexpr args expected
                            :cargs cargs))))
 
-(add-invoke-special-method 'clojure.core/extend
+(defmethod -invoke-special 'clojure.core/extend
   [{[atype & protos :as args] :args :as expr} & [expected]]
   {:post [(and (r/TCResult? (u/expr-type %))
                (vector? (:args %)))]}
@@ -498,7 +484,7 @@
 ;
 ; Usage: (into-array> javat cljt coll)
 ;        (into-array> cljt coll)
-(add-invoke-special-method 'clojure.core.typed/into-array>*
+(defmethod -invoke-special 'clojure.core.typed/into-array>*
   [{:keys [args] :as expr} & [expected]]
   {:post [(and (r/TCResult? (u/expr-type %))
                (vector? (:args %)))]}
@@ -532,7 +518,7 @@
                              expected)))))
 
 ;not
-(add-invoke-special-method 'clojure.core/not
+(defmethod -invoke-special 'clojure.core/not
   [{:keys [args] :as expr} & [expected]]
   {:post [(-> % u/expr-type r/TCResult?)
           (vector? (:args %))]}
@@ -550,7 +536,7 @@
                          expected))))
 
 ;get
-(add-invoke-special-method 'clojure.core/get
+(defmethod -invoke-special 'clojure.core/get
   [{fexpr :fn :keys [args] :as expr} & [expected]]
   {:post [(-> % u/expr-type r/TCResult?)]}
   (let [cargs (mapv check-expr args)
@@ -649,7 +635,7 @@
 ;binding
 ;FIXME use `check-normal-def`
 ;FIXME record checked-var-def info
-(add-invoke-special-method 'clojure.core/push-thread-bindings
+(defmethod -invoke-special 'clojure.core/push-thread-bindings
   [{[bindings-expr & other-args :as args] :args :as expr} & [expected]]
   {:post [((every-pred vector? #(= 1 (count %))) (:args %))
           (-> % u/expr-type r/TCResult?)]}
@@ -854,7 +840,7 @@
 ;swap!
 ;
 ; attempt to rewrite a call to swap! to help type inference
-(add-invoke-special-method 'clojure.core/swap!
+(defmethod -invoke-special 'clojure.core/swap!
   [{fexpr :fn :keys [args env] :as expr} & [expected]]
   (let [target-expr (first args)
         ctarget-expr (check-expr target-expr)
@@ -905,7 +891,7 @@
       :default)))
 
 ;=
-(add-invoke-special-method 'clojure.core/= 
+(defmethod -invoke-special 'clojure.core/= 
   [{:keys [args] :as expr} & [expected]]
   {:post [(vector? (:args %))
           (-> % u/expr-type r/TCResult?)]}
@@ -934,7 +920,7 @@
            u/expr-type (equiv/tc-equiv := (map u/expr-type cargs) expected))))
 
 ;isa? (2 arity is special)
-(add-invoke-special-method 'clojure.core/isa?
+(defmethod -invoke-special 'clojure.core/isa?
   [{:keys [args] :as expr} & [expected]]
   (cond
     (#{2} (count args))
@@ -949,12 +935,8 @@
 
 (declare maybe-special-apply)
 
-;FIXME need to review if any repeated "check"s happen between invoke-apply and specials
-;apply
-(add-invoke-special-method 'clojure.core/apply
-  [expr & [expected]]
-  ;(prn "special apply:")
-  (let [e (invoke-apply expr expected)
+(defn check-apply [expr expected]
+  (let [e (-invoke-apply expr expected)
         e (if (= e cu/not-special)
             (maybe-special-apply check-expr expr expected)
             e)]
@@ -962,10 +944,20 @@
       :default
       e)))
 
+;FIXME need to review if any repeated "check"s happen between -invoke-apply and specials
+;apply
+(defmethod -invoke-special 'clojure.core/apply
+  [expr & [expected]]
+  ;(prn "special apply:")
+  (or (when vs/*custom-expansions*
+        (when 1
+          ))
+      (check-apply expr expected)))
+
 
 ;TODO this should be a special :do op
 ;manual instantiation
-(add-invoke-special-method 'clojure.core.typed/inst-poly
+(defmethod -invoke-special 'clojure.core.typed/inst-poly
   [{[pexpr targs-exprs :as args] :args :as expr} & [expected]]
   (when-not (#{2} (count args)) 
     (err/int-error "Wrong arguments to inst"))
@@ -1015,7 +1007,7 @@
 
 ;TODO this should be a special :do op
 ;manual instantiation for calls to polymorphic constructors
-(add-invoke-special-method 'clojure.core.typed/inst-poly-ctor
+(defmethod -invoke-special 'clojure.core.typed/inst-poly-ctor
   [{[ctor-expr targs-exprs] :args :as expr} & [expected]]
   (let [targs (binding [prs/*parse-type-in-ns* (cu/expr-ns expr)]
                 (mapv prs/parse-type (ast-u/quote-expr-val targs-exprs)))
@@ -1025,7 +1017,7 @@
            u/expr-type (u/expr-type cexpr))))
 
 ;debug printing
-(add-invoke-special-method 'clojure.core.typed/print-env
+(defmethod -invoke-special 'clojure.core.typed/print-env
   [{[debug-string :as args] :args :as expr} & [expected]]
   (when-not (#{1} (count args)) 
     (err/int-error (str "Wrong arguments to print-env, Expected 1, found " (count args))))
@@ -1043,7 +1035,7 @@
                        expected)))
 
 ;filter printing
-(add-invoke-special-method 'clojure.core.typed/print-filterset
+(defmethod -invoke-special 'clojure.core.typed/print-filterset
   [{[debug-string form :as args] :args :as expr} & [expected]]
   (when-not (#{2} (count args)) 
     (err/int-error (str "Wrong arguments to print-filterset. Expected 2, found " (count args))))
@@ -1069,7 +1061,7 @@
            u/expr-type t)))
 
 ;unchecked casting
-(add-invoke-special-method 'clojure.core.typed.unsafe/ignore-with-unchecked-cast*
+(defmethod -invoke-special 'clojure.core.typed.unsafe/ignore-with-unchecked-cast*
   [{[frm quote-expr] :args, :keys [env], :as expr} & [expected]]
   (let [tsyn (ast-u/quote-expr-val quote-expr)
         parsed-ty (binding [vs/*current-env* env
@@ -1081,7 +1073,7 @@
                          expected))))
 
 ;pred
-(add-invoke-special-method 'clojure.core.typed/pred*
+(defmethod -invoke-special 'clojure.core.typed/pred*
   [{[tsyn-expr nsym-expr _pred-fn_ :as args] 
     :args, :keys [env], :as expr} & [expected]]
   {:pre [(#{3} (count args))]}
@@ -1100,7 +1092,7 @@
                          expected))))
 
 ;fn literal
-(add-invoke-special-method 'clojure.core.typed/fn>-ann
+(defmethod -invoke-special 'clojure.core.typed/fn>-ann
   [{:keys [args] :as expr} & [expected]]
   (let [[fexpr quote-expr] args
         type-syns (ast-u/quote-expr-val quote-expr)
@@ -1126,7 +1118,7 @@
            u/expr-type (u/expr-type cfexpr))))
 
 ;loop
-(add-invoke-special-method 'clojure.core.typed/loop>-ann
+(defmethod -invoke-special 'clojure.core.typed/loop>-ann
   [{:keys [args] :as expr} & [expected]]
   {:post [(-> % u/expr-type r/TCResult?)
           (vector? (:args %))]}
@@ -1144,7 +1136,7 @@
            u/expr-type (u/expr-type cloop-expr))))
 
 ;seq
-(add-invoke-special-method 'clojure.core/seq
+(defmethod -invoke-special 'clojure.core/seq
   [{fexpr :fn :keys [args] :as expr} & [expected]]
   {:post [(-> % u/expr-type r/TCResult?)
           (vector? (:args %))]}
@@ -1166,7 +1158,7 @@
           (invoke/normal-invoke check-expr expr fexpr args expected :cargs cargs))))))
 
 ;make vector
-(add-invoke-special-method 'clojure.core/vector
+(defmethod -invoke-special 'clojure.core/vector
   [{:keys [args] :as expr} & [expected]]
   {:post [(-> % u/expr-type r/TCResult?)
           (vector? (:args %))]}
@@ -1181,7 +1173,7 @@
                                         :objects (mapv (comp r/ret-o u/expr-type) cargs)))
                         expected)))))
 
-;(add-invoke-special-method 'clojure.core/hash-map
+;(defmethod -invoke-special 'clojure.core/hash-map
 ;  [{fexpr :fn :keys [args] :as expr} & [expected]]
 ;  {:post [(-> % u/expr-type r/TCResult?)
 ;          (vector? (:args %))]}
@@ -1196,7 +1188,7 @@
 ;      :else (invoke/normal-invoke check-expr expr fexpr args expected :cargs cargs))))
 
 ;(apply concat hmap)
-(add-invoke-apply-method 'clojure.core/concat
+(defmethod -invoke-apply 'clojure.core/concat
   [{[_ & args] :args :as expr} & [expected]]
   {:post [(or (and (-> % u/expr-type r/TCResult?)
                    (vector? (:args %)))
@@ -1220,7 +1212,7 @@
         :else cu/not-special))))
 
 ;apply hash-map
-(add-invoke-apply-method 'clojure.core/hash-map
+(defmethod -invoke-apply 'clojure.core/hash-map
   [{[fn-expr & args] :args :as expr} & [expected]]
   {:post [(or 
             (and (-> % u/expr-type r/TCResult?)
@@ -1271,7 +1263,7 @@
       (method/check-invoke-method check-expr expr expected
                                   :cargs cargs))))
 
-(add-invoke-special-method 'clojure.core/nth
+(defmethod -invoke-special 'clojure.core/nth
   [{fexpr :fn :keys [args] :as expr} & [expected]]
   {:post [(-> % u/expr-type r/TCResult?)]}
   (let [cargs (mapv check-expr args)
@@ -1281,7 +1273,7 @@
       (invoke/normal-invoke check-expr expr fexpr args expected :cargs cargs))))
 
 ;nthnext
-(add-invoke-special-method 'clojure.core/nthnext
+(defmethod -invoke-special 'clojure.core/nthnext
   [{fexpr :fn :keys [args] :as expr} & [expected]]
   {:post [(-> % u/expr-type r/TCResult?)]}
   (let [cargs (mapv check-expr args)
@@ -1291,7 +1283,7 @@
       (invoke/normal-invoke check-expr expr fexpr args expected :cargs cargs))))
 
 ;next
-(add-invoke-special-method 'clojure.core/next
+(defmethod -invoke-special 'clojure.core/next
   [{fexpr :fn :keys [args] :as expr} & [expected]]
   {:post [(-> % u/expr-type r/TCResult?)]}
   (let [cargs (mapv check-expr args)
@@ -1301,7 +1293,7 @@
       (invoke/normal-invoke check-expr expr fexpr args expected :cargs cargs))))
 
 ;assoc
-(add-invoke-special-method 'clojure.core/assoc
+(defmethod -invoke-special 'clojure.core/assoc
   [{:keys [args] :as expr} & [expected]]
   {:post [(-> % u/expr-type r/TCResult?)]}
   (let [[target & keyvals] args
@@ -1339,7 +1331,7 @@
                                           :args cargs
                                           u/expr-type (cu/error-ret expected)))))))
 
-(add-invoke-special-method 'clojure.core/dissoc
+(defmethod -invoke-special 'clojure.core/dissoc
   [{fexpr :fn :keys [args] :as expr} & [expected]]
   {:post [(or (= % :default) (-> % u/expr-type r/TCResult?))]}
   (let [_ (when-not (seq args)
@@ -1359,7 +1351,7 @@
                      :cargs cargs))))
 
 ; merge
-(add-invoke-special-method 'clojure.core/merge
+(defmethod -invoke-special 'clojure.core/merge
   [{fexpr :fn :keys [args] :as expr} & [expected]]
   {:post [(-> % u/expr-type r/TCResult?)
           (vector? (:args %))]}
@@ -1379,7 +1371,7 @@
                      :cargs cargs))))
 
 ;conj
-(add-invoke-special-method 'clojure.core/conj
+(defmethod -invoke-special 'clojure.core/conj
   [{fexpr :fn :keys [args] :as expr} & [expected]]
   (let [[ctarget & cconj-args :as cargs] (mapv check-expr args)
         ttarget (-> ctarget u/expr-type r/ret-t)
@@ -1396,7 +1388,7 @@
       (invoke/normal-invoke check-expr expr fexpr args expected
                      :cargs cargs))))
 
-#_(add-invoke-special-method 'clojure.core/update-in
+#_(defmethod -invoke-special 'clojure.core/update-in
   [{:keys [args env] :as expr} & [expected]]
   {:post [(-> % u/expr-type r/TCResult?)]}
   (binding [vs/*current-expr* expr
@@ -1434,7 +1426,7 @@
 
 ; cli
 ;TODO add cargs to result
-(add-invoke-special-method 'clojure.tools.cli/cli
+(defmethod -invoke-special 'clojure.tools.cli/cli
   [{[args-expr & specs-exprs] :args :keys [env] :as expr} & [expected]]
   {:post [(-> % u/expr-type r/TCResult?)
           (vector? (:args %))]}
@@ -1475,7 +1467,7 @@
                              (r/ret actual)
                              expected))))))
 
-(add-invoke-special-method 'clojure.core.typed.check.utils/special-typed-expression
+(defmethod -invoke-special 'clojure.core.typed.check.utils/special-typed-expression
   [{[type-expr] :args :keys [env] :as expr} & [expected]]
   (let [_ (assert (= :quote (:op type-expr)))
         _ (assert (= :const (-> type-expr :expr :op))
@@ -1537,7 +1529,7 @@
                    :instance ctarget
                    :args cargs)))))))
 
-(add-invoke-special-method :default [& args] :default)
+(defmethod -invoke-special :default [& args] :default)
 (add-static-method-special-method :default [& args] :default)
 (add-instance-method-special-method :default [& args] :default)
 
@@ -1550,7 +1542,7 @@
 
 ;;TODO attach new :args etc.
 ;;convert apply to normal function application
-(add-invoke-apply-method :default 
+(defmethod -invoke-apply :default 
   [expr & [expected]]
   cu/not-special)
 
@@ -1569,23 +1561,27 @@
 (def expected-visitor (Exception.))
 
 (defn check-invoke [{fexpr :fn :keys [args env] :as expr} expected]
-  (let [cfexpr (check-expr fexpr)]
+  (let [e (-invoke-special expr expected)]
     (cond
-      (c/keyword-value? (r/ret-t (u/expr-type cfexpr)))
-      (let [[ctarget cdefault :as cargs] (mapv check-expr args)]
-        (assert (<= 1 (count args) 2))
-        (assoc expr
-               :fn cfexpr
-               :args cargs
-               u/expr-type (invoke-kw/invoke-keyword 
-                             expr
-                             (u/expr-type cfexpr)
-                             (u/expr-type ctarget)
-                             (when cdefault
-                               (u/expr-type cdefault)) 
-                             expected)))
+      (not= :default e) e
+      :else
+      (let [cfexpr (check-expr fexpr)]
+        (cond
+          (c/keyword-value? (r/ret-t (u/expr-type cfexpr)))
+          (let [[ctarget cdefault :as cargs] (mapv check-expr args)]
+            (assert (<= 1 (count args) 2))
+            (assoc expr
+                   :fn cfexpr
+                   :args cargs
+                   u/expr-type (invoke-kw/invoke-keyword 
+                                 expr
+                                 (u/expr-type cfexpr)
+                                 (u/expr-type ctarget)
+                                 (when cdefault
+                                   (u/expr-type cdefault)) 
+                                 expected)))
 
-      :else (invoke/normal-invoke check-expr expr fexpr args expected :cfexpr cfexpr))))
+          :else (invoke/normal-invoke check-expr expr fexpr args expected :cfexpr cfexpr))))))
 
 (defmethod -check :invoke
   [{fexpr :fn :keys [args env] :as expr} expected]
@@ -1597,33 +1593,28 @@
   ;(prn "invoke:" ((some-fn :var :keyword :op) fexpr))
   (binding [vs/*current-env* env
             vs/*current-expr* expr]
-    (let [e (invoke-special expr expected)]
-      (cond
-        (not= :default e) e
-        vs/*custom-expansions* (let [replace-atom (atom nil)
-                                     fexpr (visit-tail-pos fexpr
-                                                           (fn [{:keys [op] :as ast}]
-                                                             (cond-> ast
-                                                               (= :fn op)
-                                                               (assoc ::invoke-args args
-                                                                      ::invoke-expected expected
-                                                                      ::replace-invoke-atom replace-atom))))
-                                     cfexpr (check-expr fexpr)]
-                                 (prn "in invoke" (some-> expr ast-u/emit-form-fn))
-                                 (prn "replace-atom"
-                                      (some-> @replace-atom ast-u/emit-form-fn))
-                                 ;; instead of inserting cfexpr directly, we instead erase any
-                                 ;; wrapping forms around the fexpr.
-                                 ;; eg. so
-                                 ;;     ((ann-form inc [Int :-> Int]) 1)
-                                 ;;     ;=> (inc 1)
-                                 ;;     not
-                                 ;;     ;=> (ann-form (inc 1) [Int :-> Int])
-                                 (or @replace-atom
-                                     ;; could not beta reduce
-                                     (check-invoke expr expected)))
-
-        :else (check-invoke expr expected)))))
+    (or (when vs/*custom-expansions*
+          (let [replace-atom (atom nil)
+                fexpr (visit-tail-pos fexpr
+                                      (fn [{:keys [op] :as ast}]
+                                        (cond-> ast
+                                          (#{:var :fn} op)
+                                          (assoc ::invoke-args args
+                                                 ::invoke-expected expected
+                                                 ::replace-invoke-atom replace-atom))))
+                cfexpr (check-expr fexpr)]
+            (prn "in invoke" (some-> expr ast-u/emit-form-fn))
+            (prn "replace-atom"
+                 (some-> @replace-atom ast-u/emit-form-fn))
+            ;; instead of inserting cfexpr directly, we instead erase any
+            ;; wrapping forms around the fexpr.
+            ;; eg. so
+            ;;     ((ann-form inc [Int :-> Int]) 1)
+            ;;     ;=> (inc 1)
+            ;;     not
+            ;;     ;=> (ann-form (inc 1) [Int :-> Int])
+            @replace-atom))
+        (check-invoke expr expected))))
 
 (defn check-rest-fn [remain-dom & {:keys [rest drest kws prest pdot]}]
   {:pre [((some-fn nil? r/Type?) rest)
@@ -1673,9 +1664,12 @@
             true)]}
   ;(prn "check :fn" expected)
   (or (when vs/*custom-expansions*
+        ;; try to beta-expand
         (when-not (:local expr) ;; no recursive functions
           (when-let [args (::invoke-args expr)]
             (if expected
+              ; expand ((ann-form (fn* [params*] body) [P* :-> R]) args*)
+              ; to     (ann-form body[(ann-form args* P*)/params*] R)
               (let [[t :as ts] (fn-methods/function-types (:t expected))]
                 (when (= 1 (count ts))
                   (let [[fin inst-frees bnds poly?] (cu/unwrap-poly (first ts))]
@@ -1688,8 +1682,6 @@
                               (let [{:keys [dom rng]} ft]
                                 (when (not-any? #(% ft) [:drest :kws :prest :pdot])
                                   (assert ((if (:rest ft) <= =) (count dom) (count args)))
-                                  (ensure-within-beta-limit expr)
-                                  (record-beta-reduction expr)
                                   (when-let [red (beta-reduce/maybe-beta-reduce-fn
                                                    expr
                                                    (mapv (fn [t a]
@@ -1698,15 +1690,18 @@
                                                                  (pre/pre-analyze-form env)
                                                                  ana2/run-passes)))
                                                          (concat dom (repeat (:rest ft)))
-                                                         args))]
-                                    (prn "invoke-expected" (::invoke-expected expr))
+                                                         args)
+                                                   {:before-reduce ensure-within-beta-limit})]
                                     (let [cred (check-expr red (below/maybe-check-below
+                                                                 ;; TODO subst arguments in object in result
                                                                  (r/Result->TCResult rng)
                                                                  (::invoke-expected expr)))]
                                       (set-erase-atoms expr cred)
                                       cred))))))))))))
-              (when-let [red (beta-reduce/maybe-beta-reduce-fn expr args)]
-                (prn "invoke-expected" (::invoke-expected expr))
+              ; expand ((fn* [params*] body) args*)
+              ; to     body[args*/params*]
+              (when-let [red (beta-reduce/maybe-beta-reduce-fn expr args
+                                                               {:before-reduce ensure-within-beta-limit})]
                 (let [cred (check-expr red (::invoke-expected expr))]
                   (set-erase-atoms expr cred)
                   cred))))))

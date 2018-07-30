@@ -407,8 +407,10 @@
            (Seqable Num))
   (is-tc-e (apply map [identity])
            (Transducer Num Num))
+  ;; FIXME error msg
   (is-tc-err (apply map [identity])
              (Transducer Num Bool))
+  ;; FIXME error msg
   (is-tc-err (apply map [identity]))
   ;comp
   (is-tc-e ((comp inc dec) 1) Num)
@@ -417,6 +419,12 @@
   (is-tc-e ((comp identity :a) {:a 1}) '1)
   (is-tc-e ((comp inc (constantly nil)) 1))
   (is-tc-e (sequence (comp (map inc) (map dec)) [1]))
+  (is-tc-e ((fn* [& args]
+              (inc (first args)))
+            1))
+  (is-tc-e ((fn [& args]
+              (inc (first args)))
+            1))
   ;;TODO play with the map transducer expander, use fn instead of fn*
   ;; and figure out how to play nicely with its mexpansion
   (is-tc-e (comp (map inc) (map dec))
@@ -468,22 +476,28 @@
                 [Int :-> Int])
               [Int :-> Int])
             1))
-;; FIXME some mixup with the ann-form's and the beta-reduction
   (is-tc-e ((ann-form
               (ann-form
                 (fn* [i] (boolean i))
-                [Int :-> Bool])
+                [Num :-> Bool])
               [Int :-> Bool])
             1))
   (is-tc-e (ann-form
              (ann-form
-               (fn* [i] (inc i))
-               [Int :-> Int])
-             [Int :-> Int]))
+               (fn* [i] (boolean i))
+               [Num :-> Bool])
+             [Int :-> Bool]))
+  (is-tc-err (ann-form
+               (ann-form
+                 (fn* [i] (boolean i))
+                 [Int :-> Bool])
+               [Num :-> Bool]))
+  ;; TODO subst object in return type of beta-reduction
 
   ;fixpoint
+#_
   (is-tc-e (fixpoint
-             (fn [c e] (concat c [(inc e)]))
+             (fn* [c e] (concat c [(inc e)]))
              {:subst-var x
               :init [(Seq Nothing) Int :-> ^::t/infer Any]
               :query (All [x] [[x Int :-> x] :-> x])
