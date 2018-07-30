@@ -270,8 +270,9 @@
               ;; FIXME what if we break up final argument and it has an ann-form around it?
               ;; eg. (apply map [(ann-form identity [Any -> Any]))
               ;; eg. (apply map (ann-form [identity] (Seqable [Any -> Any])))
-              clojure.core/apply (when-let [red (beta-reduce/maybe-beta-reduce-apply expr args
-                                                                                {:before-reduce ensure-within-beta-limit})]
+              clojure.core/apply (when-let [red (beta-reduce/maybe-beta-reduce-apply
+                                                  expr args
+                                                  {:before-reduce ensure-within-beta-limit})]
                                    (let [cred (check-expr red (::invoke-expected expr))]
                                      (set-erase-atoms expr cred)
                                      cred))

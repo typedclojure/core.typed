@@ -173,9 +173,10 @@
   (let [mform (ana/macroexpand-1 sym env)] ;; t.a.j/macroexpand-1 macroexpands Class/Field into (. Class Field)
     (if (= mform sym)
       (merge (if-let [{:keys [mutable children] :as local-binding} (-> env :locals sym)] ;; locals shadow globals
-               (merge (dissoc local-binding :init)                                      ;; avoids useless passes later
+               (merge local-binding
                       {:op          :local
                        :assignable? (boolean mutable)
+                       ;; don't walk :init, but keep in AST
                        :children    (vec (remove #{:init} children))})
                (if-let [var (let [v (u/resolve-sym sym env)]
                               (and (ana/var? v) v))]

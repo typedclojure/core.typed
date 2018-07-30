@@ -418,11 +418,23 @@
   (is-tc-e ((comp identity :a) {:a 1}) Num)
   (is-tc-e ((comp identity :a) {:a 1}) '1)
   (is-tc-e ((comp inc (constantly nil)) 1))
+  ;; FIXME
+  #_
   (is-tc-e (sequence (comp (map inc) (map dec)) [1]))
   (is-tc-e ((fn* [& args]
               (inc (first args)))
             1))
-  (is-tc-e ((fn [& args]
+  (is-tc-e ((core/fn [& args]
+              (inc (first args)))
+            1))
+  (is-tc-err ((core/fn [& args]
+                (inc (first args)))
+              true))
+  (is-tc-err ((core/fn [& args]
+                (inc (first args)))
+              true))
+  ;;TODO t/fn should "infer" its rest arg
+  #_(is-tc-e ((fn [& args]
               (inc (first args)))
             1))
   ;;TODO play with the map transducer expander, use fn instead of fn*
@@ -493,6 +505,11 @@
                  [Int :-> Bool])
                [Num :-> Bool]))
   ;; TODO subst object in return type of beta-reduction
+
+  ;reduce
+  (is-tc-e (reduce (fn* [a e] (conj a e))
+                   []
+                   [1 2 3]))
 
   ;fixpoint
 #_

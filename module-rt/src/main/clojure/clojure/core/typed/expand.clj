@@ -531,10 +531,20 @@
 (defn inline-map-colls [[_ f & colls :as form] {:keys [internal-error]}]
   {:pre [(seq colls)]}
   #_
-  `(reduce (fn* [c# e#]
-             (concat c# [(~f e#)]))
-           ()
-           colls)
+  (let [splices (mapv splice-seqable-form colls)
+        ]
+  (if (some known-sequential? colls)
+    (if (= 1 (count colls))
+      `(lazy-seq
+         (when-let [s# (seq ~(first colls))]
+           (cons (~f (first s#)) (map ~f (rest s#)))))
+      `(let [step# (fn step# [cs#]
+                     (lazy-seq
+                       (let [ss# (map seq cs#)]
+                         (when (every? identity ss#)
+                           (cons (map first ss#) (step# (map rest ss#)))))))]
+         (map #(apply ~f %) (step# ~colls))))
+    :else)
   (let [gsyms (repeatedly (count colls) gensym)
         bindings (mapcat (fn [i gsym coll] 
                            [gsym `(solve

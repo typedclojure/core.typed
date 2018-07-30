@@ -62,14 +62,60 @@
 
 (defn splice-seqable-expr
   "If ast is a seqable with a known size and sequential, returns a vector
-  of the members. Otherwise nil."
+  of the members. Otherwise nil.
+
+  eg. (vector 1 2 3)
+  [{:op :rest :expr (vector 1 2 3) :count 3}]
+
+  eg. (cons 4 (vector 1 2 3))
+  [{:op :fixed :expr 4}
+   {:op :rest :expr (vector 1 2 3) :count 3}]
+  
+  eg. (concat (vector 1 2 3) (range 0))
+  [{:op :rest :expr (vector 1 2 3) :count 3}
+   {:op :rest :expr (range 0) :count ##Inf}]
+
+  eg. (concat (vector 1 2 3) (range 0) (vector 1 2 3))
+  [{:op :rest :expr (vector 1 2 3) :count 3}
+   {:op :rest :expr (range 0) :count ##Inf}
+   {:op :rest :expr (vector 1 2 3) :count 3}]
+
+  eg. (range 0)
+  [{:op :rest :expr (range 0) :count ##Inf}]
+
+  eg. (range 0 39)
+  [{:op :rest :expr (range 0 39) :count 39}]
+
+  eg. nil
+  [{:op :rest :expr nil :count 0}]
+
+  eg. (take-while symbol? (read-string))
+  [{:op :unknown-rest :expr (take-while symbol? (read))}]
+  "
   [{:keys [op env] :as ast}]
-  {:post [((some-fn nil? vector?) %)]}
+  {:post [((some-fn nil? map?) %)]}
   (prn "splice-seqable-expr" op (emit-form ast))
   (case op
-    :vector (:items ast)
-    :const (when (sequential? (:val ast))
-             (mapv #(pre/pre-analyze-const % env) (:val ast)))
+    :local (do
+             (prn "has init" (map? (:init ast)))
+             (prn "env has init" (-> env :locals (get (:form ast)) map?)
+                  (-> env :locals (get (:form ast)) ((juxt :op :children))))
+             (some-> (:init ast) splice-seqable-expr))
+    :vector (mapv (fn [i]
+                    {:op :fixed
+                     :expr i})
+                  (:items ast))
+    :const (cond
+             (sequential? (:val ast))
+             (mapv (fn [i]
+                     {:op :fixed
+                      :expr #(pre/pre-analyze-const % env)})
+                   (:val ast))
+
+             (seqable? (:val ast))
+             [{:op :rest
+               :expr (pre/pre-analyze-const (:val ast) env)
+               :count (count (:val ast))}])
     :do (splice-seqable-expr (:ret ast))
     (:let :let-fn) (splice-seqable-expr (:body ast))
     ;TODO lift `if` statements around invoke nodes so they are
@@ -81,12 +127,14 @@
                 :var (let [vsym (var->vsym (:var ufn))]
                        (case vsym
                          clojure.core/concat
-                         (reduce (fn [c arg]
-                                   (if-let [spliced (splice-seqable-expr arg)]
-                                     (into c spliced)
-                                     (reduced nil)))
-                                 []
-                                 args)
+                         (loop [c []
+                                args args]
+                           (if (empty? args)
+                             c
+                             (let [[arg] args]
+                               (if-let [spliced (splice-seqable-expr arg)]
+                                 (recur (update c :fixed into spliced) (next args))
+                                 (assoc c :rest-form `(concat ~@(map emit-form args)))))))
                          clojure.core/seq
                          (when (= 1 cargs)
                            (splice-seqable-expr (first args)))
@@ -178,10 +226,15 @@
          (vector? args)]}
   (when (<= 1 (count args))
     (let [[single-args collarg] ((juxt pop peek) args)]
-      (when-let [spliced (splice-seqable-expr collarg)]
-        (let [form (doall (map emit-form (concat single-args spliced)))]
-          (when before-reduce (before-reduce))
-          (ana/run-passes (pre/pre-analyze-form form env)))))))
+      (let [{:keys [fixed rest-form] :as spliced} (splice-seqable-expr collarg)]
+        (when (and spliced (seq fixed))
+          (let [;; move as many fixed arguments out of the collection argument as possible
+                form (if (contains? spliced :rest-form)
+                       (cons (emit-form ufn)
+                             (concat (map emit-form (concat single-args fixed)) [rest-form]))
+                       (map emit-form (concat single-args fixed)))]
+            (when before-reduce (before-reduce))
+            (ana/run-passes (pre/pre-analyze-form form env))))))))
 
 (defn push-invoke
   "Push arguments into the function position of an :invoke
