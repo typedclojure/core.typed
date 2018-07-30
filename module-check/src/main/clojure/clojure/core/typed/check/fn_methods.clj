@@ -38,8 +38,7 @@
     :methods methods?
     :cmethods methods?))
 
-(defn expected-for-method
-  "Takes a :method AST node and a single Function arity type,
+(defn expected-for-method "Takes a :method AST node and a single Function arity type,
   and returns the Function if the :method node should be checked
   against the Function, otherwise returns nil."
   [{:keys [fixed-arity variadic?] :as method}

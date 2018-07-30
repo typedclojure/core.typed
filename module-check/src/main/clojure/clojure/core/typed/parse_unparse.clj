@@ -996,11 +996,16 @@
           :cljs (resolve-type-cljs n))
         n)))
 
+(defn parse-Any [sym]
+  (if (-> sym :meta ::t/infer)
+    r/-infer-any
+    r/-any))
+
 (defmethod parse-type-symbol 'Any [_] 
   (err/deprecated-plain-op 'Any)
   r/-any)
-(defmethod parse-type-symbol 'clojure.core.typed/Any [_] r/-any)
-(defmethod parse-type-symbol 'cljs.core.typed/Any [_] r/-any)
+(defmethod parse-type-symbol 'clojure.core.typed/Any [s] (parse-Any s))
+(defmethod parse-type-symbol 'cljs.core.typed/Any [s] (parse-Any s))
 
 (defmethod parse-type-symbol 'clojure.core.typed/TCError [t] (r/TCError-maker))
 

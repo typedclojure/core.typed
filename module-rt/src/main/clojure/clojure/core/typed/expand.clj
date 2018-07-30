@@ -484,68 +484,82 @@
        '~opts
        ~expr))
 
-(defmethod -expand-inline 'clojure.core/map [[_ f & colls :as form] {:keys [internal-error]}]
+(defn inline-map-transducer [[_ f :as form] {:keys [internal-error]}]
+  {:pre [(= 2 (count form))]}
+  `(fn* [rf#]
+     (fn*
+       ([] (rf#))
+       ([result#] (rf# result#))
+       ([result# input#]
+        (rf# result# (~f input#)))))
+  #_
+  `(expected-type-as expected#
+     (let [[in# out#]
+           (solve expected#
+                  {:query (t/All [a# b#] [(t/Transducer a# b#) :-> '[a# b#]])
+                   ;; would be nice to customize this message based on `expected`
+                   :msg-fn (fn [_#]
+                             (str "'map' transducer arity requires an expected type which is a subtype of (t/Transducer t/Nothing t/Any)"))
+                   :blame-form ~form})]
+       (fn* [rf#]
+         (fn*
+           ([] (rf#))
+           ([result#] (rf# result#))
+           ([result# input#]
+            (rf# result#
+                 ;; fake invoke
+                 (check-expected
+                   (~f input#)
+                   {:default-expected {:type (t/TypeOf out#)}
+                    :msg-fn (fn [{parse-type# :parse-type actual# :actual}]
+                              (str "'map' transducer did not return a correct type:"
+                                   "\n\nExpected: \t" (pr-str (parse-type# (list 't/Transducer '(t/TypeOf in#) '(t/TypeOf out#))))
+                                   "\n\nActual: \t" (pr-str (parse-type# (list 't/Transducer '(t/TypeOf in#) actual#)))
+                                   "\n\n"
+                                   "in: \t" '~form))
+                    :blame-form (~f input#)}))))))
+     {:msg-fn (fn [_#]
+                (str "Must provide expected type to 'map' transducer arity.\n"
+                     "Hint: Try (t/ann-form (map ...) (t/Transducer in out))."))
+      :blame-form ~form}))
+
+(defn inline-map-colls [[_ f & colls :as form] {:keys [internal-error]}]
+  {:pre [(seq colls)]}
+  #_
+  `(reduce (fn* [c# e#]
+             (concat c# [(~f e#)]))
+           ()
+           colls)
+  (let [gsyms (repeatedly (count colls) gensym)
+        bindings (mapcat (fn [i gsym coll] 
+                           [gsym `(solve
+                                    ~coll
+                                    {:query (t/All [a#] [(t/U nil (t/Seqable a#)) :-> a#])
+                                     :msg-fn (fn [{actual# :actual}]
+                                               (str "Argument number " ~i " to 'map' must be Seqable, given: "
+                                                    actual#))
+                                     :blame-form ~coll})])
+                         ;; counting argument #'s to this 'map' form
+                         (range 2 ##Inf)
+                         gsyms colls)]
+    `(let ~(vec bindings)
+       ;; FIXME can we push the expected type into `f`?
+       (check-expected
+         (solve
+           (~f ~@gsyms)
+           {:query (t/All [a#] [a# :-> (t/Seq a#)])})
+         {:msg-fn (fn [_#]
+                    "The return type of this 'map' expression does not agree with the expected type.")
+          :blame-form ~form}))))
+
+(defmethod -expand-inline 'clojure.core/map [[_ f & colls :as form] {:keys [internal-error] :as opts}]
   (when-not (<= 2 (count form))
     (internal-error (str "Must provide 1 or more arguments to clojure.core/map, found " (dec (count form))
                          ": " form)))
   (if (empty? colls)
-    `(fn* [rf#]
-       (fn*
-         ([] (rf#))
-         ([result#] (rf# result#))
-         ([result# input#]
-          (rf# result# (~f input#)))))
-    #_
-    `(expected-type-as expected#
-       (let [[in# out#]
-             (solve expected#
-                    {:query (t/All [a# b#] [(t/Transducer a# b#) :-> '[a# b#]])
-                     ;; would be nice to customize this message based on `expected`
-                     :msg-fn (fn [_#]
-                               (str "'map' transducer arity requires an expected type which is a subtype of (t/Transducer t/Nothing t/Any)"))
-                     :blame-form ~form})]
-         (fn* [rf#]
-           (fn*
-             ([] (rf#))
-             ([result#] (rf# result#))
-             ([result# input#]
-              (rf# result#
-                   ;; fake invoke
-                   (check-expected
-                     (~f input#)
-                     {:default-expected {:type (t/TypeOf out#)}
-                      :msg-fn (fn [{parse-type# :parse-type actual# :actual}]
-                                (str "'map' transducer did not return a correct type:"
-                                     "\n\nExpected: \t" (pr-str (parse-type# (list 't/Transducer '(t/TypeOf in#) '(t/TypeOf out#))))
-                                     "\n\nActual: \t" (pr-str (parse-type# (list 't/Transducer '(t/TypeOf in#) actual#)))
-                                     "\n\n"
-                                     "in: \t" '~form))
-                      :blame-form (~f input#)}))))))
-       {:msg-fn (fn [_#]
-                  (str "Must provide expected type to 'map' transducer arity.\n"
-                       "Hint: Try (t/ann-form (map ...) (t/Transducer in out))."))
-        :blame-form ~form})
-    (let [gsyms (repeatedly (count colls) gensym)
-          bindings (mapcat (fn [i gsym coll] 
-                             [gsym `(solve
-                                      ~coll
-                                      {:query (t/All [a#] [(t/U nil (t/Seqable a#)) :-> a#])
-                                       :msg-fn (fn [{actual# :actual}]
-                                                 (str "Argument number " ~i " to 'map' must be Seqable, given: "
-                                                      actual#))
-                                       :blame-form ~coll})])
-                           ;; counting argument #'s to this 'map' form
-                           (range 2 ##Inf)
-                           gsyms colls)]
-      `(let ~(vec bindings)
-         ;; FIXME can we push the expected type into `f`?
-         (check-expected
-           (solve
-             (~f ~@gsyms)
-             {:query (t/All [a#] [a# :-> (t/Seq a#)])})
-           {:msg-fn (fn [_#]
-                      "The return type of this 'map' expression does not agree with the expected type.")
-            :blame-form ~form})))))
+    (inline-map-transducer form opts)
+    (inline-map-colls form opts)))
+
 (comment
  (-> identity
      (map [1 2 3])

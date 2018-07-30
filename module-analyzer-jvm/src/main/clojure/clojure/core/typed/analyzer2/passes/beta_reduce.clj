@@ -32,9 +32,8 @@
     matching-method))
 
 ; Ast [TailAst -> Ast] -> Ast
-(defn push-tail-pos [ast f]
-  (let [id (gensym 'tail)
-        rec #(push-tail-pos % f)]
+(defn visit-tail-pos [ast f]
+  (let [rec #(visit-tail-pos % f)]
     (case (:op ast)
       :do (update ast :ret rec)
       :if (-> ast
@@ -166,6 +165,26 @@
         invoke-expr (make-invoke-expr the-fn args env)]
     invoke-expr))
 
+; ((fn* ([params*] body)) args*)
+; ;=> body[args*/params*]
+(defn maybe-beta-reduce-fn [ufn args & [{:keys [before-reduce] :as opts}]]
+  {:pre [(= :fn (:op ufn))
+         (vector? args)]}
+  (when-not (:local ufn) ;;TODO
+    (when-let [{:keys [params body variadic? fixed-arity env]} (find-matching-method ufn (count args))]
+      ;; update before any recursive calls (ie. run-passes)
+      (when before-reduce (before-reduce))
+      (let [[fixed-params variadic-param] (if variadic?
+                                            [(pop params) (peek params)]
+                                            [params nil])
+            [fixed-args variadic-args] (split-at fixed-arity args)
+            subst (merge (zipmap (map :name fixed-params) fixed-args)
+                         (when variadic-param
+                           {(:name variadic-param) (fake-seq-invoke variadic-args env)}))]
+        (-> body
+            (subst-locals subst)
+            ana/run-passes)))))
+
 (defn push-invoke
   "Push arguments into the function position of an :invoke
   so the function and arguments are both in the
@@ -192,7 +211,7 @@
       ast)
     (case op
       :invoke (let [{the-fn :fn :keys [args]} ast]
-                (push-tail-pos
+                (visit-tail-pos
                   the-fn 
                   (fn [tail-ast]
                     (let [fn-form (emit-form tail-ast)
@@ -207,22 +226,8 @@
                         (let [ufn (unwrap-with-meta tail-ast)
                               special-case
                               (case (:op ufn)
-                                ; ((fn* ([params*] body)) args*)
-                                ; ;=> body[args*/params*]
-                                :fn (when-let [{:keys [params body variadic? fixed-arity env]}
-                                               (find-matching-method ufn (count args))]
-                                      ;; update before any recursive calls (ie. run-passes)
-                                      (swap! state update ::expansions inc)
-                                      (let [[fixed-params variadic-param] (if variadic?
-                                                                            [(pop params) (peek params)]
-                                                                            [params nil])
-                                            [fixed-args variadic-args] (split-at fixed-arity args)
-                                            subst (merge (zipmap (map :name fixed-params) fixed-args)
-                                                         (when variadic-param
-                                                           {(:name variadic-param) (fake-seq-invoke variadic-args env)}))]
-                                        (-> body
-                                            (subst-locals subst)
-                                            ana/run-passes)))
+                                ;manually called by core.typed
+                                ;:fn (maybe-beta-reduce-fn ufn args {:before-reduce #(swap! state update ::expansions inc)})
                                 :var (case (var->vsym (:var ufn))
                                        ; (apply f args* collarg)
                                        ; ;=> (f args* ~@collarg)

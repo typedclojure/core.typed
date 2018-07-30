@@ -32,8 +32,9 @@
 ;;  Mandatory
 ;; - :ast-for-form  function from form to tools.analyzer AST, taking :bindings-atom as keyword
 ;;                  argument.
-;; - :collect-expr  side-effecting function taking AST and collecting type annotations
 ;; - :check-expr    function taking AST and expected type and returns a checked AST.
+;; - :analyze-bindings-fn    a thunk that returns the var/values map that should be bound
+;;                           to perform analysis.
 ;;
 ;;  Optional
 ;; - :eval-out-ast  function taking checked AST which evaluates it and returns the AST
@@ -77,7 +78,6 @@
 (defn check-form-info
   [{:keys [ast-for-form 
            check-expr 
-           collect-expr
            custom-expansions?
            emit-form 
            env
@@ -86,7 +86,8 @@
            runtime-infer-expr 
            should-runtime-infer?
            instrument-infer-config
-           unparse-ns]}
+           unparse-ns
+           analyze-bindings-fn]}
    form & {:keys [expected-ret expected type-provided? profile file-mapping
                   checked-ast no-eval bindings-atom]}]
   {:pre [((some-fn nil? con/atom?) bindings-atom)
@@ -141,16 +142,13 @@
                                                 :env
                                                 ::ana/state
                                                 (get #'clojure.core.typed.analyzer2.passes.beta-reduce/push-invoke))]
-                             (prn "got state")
                              (when (::beta-reduce/reached-beta-limit @state)
                                (err/int-error
                                  (str "Exceeded the limit of symbolic beta reductions in a single form "
                                       "(" (::beta-reduce/expansions @state) ")"))))
-                           (p/p :check-form/collect
-                             (collect-expr ast))
                            (let [c-ast (do 
                                          (reset-caches/reset-caches)
-                                         (p/p :check-form/check-expr
+                                         (with-bindings (analyze-bindings-fn)
                                            (check-expr ast expected)))
                                  eval-cexp (or (when-not no-eval
                                                  eval-out-ast)
@@ -171,6 +169,7 @@
                     (p/p :check-form/ast-for-form
                       (ast-for-form form
                                     {:bindings-atom bindings-atom
+                                     :analyze-bindings-fn analyze-bindings-fn
                                      :eval-fn eval-ast
                                      :expected expected
                                      :stop-analysis stop-analysis

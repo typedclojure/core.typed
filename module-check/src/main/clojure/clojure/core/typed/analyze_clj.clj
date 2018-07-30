@@ -428,6 +428,8 @@
 (defn run-passes [ast]
   (typed-schedule ast))
 
+(declare scheduled-passes-for-custom-expansions)
+
 ;; (All [x ...] [-> '{(Var x) x ...})])
 (defn thread-bindings [& [opts]]
   (t/tc-ignore
@@ -457,6 +459,7 @@
                     (expand/custom-inline? vsym))
                   (when (and macro? vsym)
                     (expand/custom-expansion? vsym))))))))))
+
 (comment
   (clojure.pprint/pprint
     (jana2/schedule (conj jana2/default-passes
@@ -468,7 +471,7 @@
 (def scheduled-passes-for-custom-expansions
   (delay
     (jana2/schedule (conj jana2/default-passes
-                          #'beta-reduce/push-invoke
+                          ;#'beta-reduce/push-invoke
                           ))))
 
 ;; bindings is an atom that records any side effects during macroexpansion. Useful
@@ -476,8 +479,9 @@
 (defn analyze1
   ([form] (analyze1 form (taj/empty-env) {}))
   ([form env] (analyze1 form env {}))
-  ([form env {:keys [bindings-atom] :as opts}]
-   {:pre [((some-fn nil? con/atom?) bindings-atom)]}
+  ([form env {:keys [bindings-atom analyze-bindings-fn] :as opts}]
+   {:pre [((some-fn nil? con/atom?) bindings-atom)
+          (ifn? analyze-bindings-fn)]}
    (u/trace "Analyze1 form" *file* form)
    (let [old-bindings (or (some-> bindings-atom deref) {})
          analyze-fn (fn [form env opts]
@@ -492,7 +496,7 @@
                    form (or env (taj/empty-env))
                    (->
                      (merge-with merge opts 
-                                 {:bindings (thread-bindings)
+                                 {:bindings (analyze-bindings-fn)
                                   :special-form? special-form?})
                      (assoc
                        ;; if this is a typed special form like an ann-form, don't treat like

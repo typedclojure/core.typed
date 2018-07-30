@@ -8,6 +8,7 @@
     [clojure.core.typed.analyze-clj :as ana-clj]
     [clojure.tools.analyzer.passes.jvm.emit-form :refer [emit-form]]
     [clojure.tools.analyzer.jvm :as taj]
+    [clojure.core.typed :as t]
     [clojure.tools.analyzer.jvm.utils :as ju]))
 
 (defmacro tc-e [frm & opts]
@@ -424,6 +425,33 @@
   (is-tc-err (comp (map inc) (map dec))
              (Transducer Num Bool))
   ;TODO constantly
+
+  ; ensure we correctly reduce
+  ; ((ann-form (fn [a] body)
+  ;            [A :-> B])
+  ;  v)
+  ; =>
+  ; (ann-form
+  ;   (expected-as e
+  ;     (ann-form body[(ann-form v (If e (DomOf (OptsOf e) 0 :arity 2) ^:infer Any))/a]
+  ;               (If e (RngOf (TypeOf e) :arity 2) ^:infer Any)))
+  ;   [A :-> B])
+  ; =>
+  ; (ann-form body[(ann-form v A)/a]
+  ;           B)
+  (is-tc-e ((ann-form
+              (fn* [i] (inc i))
+              [Int :-> Int])
+            1))
+
+  ;fixpoint
+  (is-tc-e (fixpoint
+             (fn [c e] (concat c [(inc e)]))
+             {:subst-var x
+              :init [(Seq Nothing) Int :-> ^::t/infer Any]
+              :query (All [x] [[x Int :-> x] :-> x])
+              :iterate [x Int :-> ^::t/infer Any]
+              }))
   )
 
 (comment
