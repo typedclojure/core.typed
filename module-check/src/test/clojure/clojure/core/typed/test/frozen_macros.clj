@@ -443,6 +443,25 @@
               (fn* [i] (inc i))
               [Int :-> Int])
             1))
+  (is-tc-e ((ann-form
+              (clojure.core/fn [i] (inc i))
+              [Int :-> Int])
+            1))
+  (is-tc-e ((ann-form
+              (clojure.core/fn [i] (inc i))
+              [Int :-> Bool])
+            1))
+  (is-tc-e ((ann-form
+              (clojure.core/fn [i] (inc i))
+              [Bool :-> Int])
+            1))
+  ;; FIXME t/fn defaults to Any arguments
+  (is-tc-e ((t/fn [i :- Int] (inc i))
+            1))
+  (is-tc-e ((ann-form
+              (t/fn [i :- Int] (inc i))
+              [Int :-> Int])
+            1))
 
   ;fixpoint
   (is-tc-e (fixpoint

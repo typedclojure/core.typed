@@ -218,13 +218,15 @@
                                          params
                                          gsyms)]
                            ~@(map assert-form pre)
-                           ~(let [body `(check-if-empty-body
-                                          (do ~@body)
-                                          {:msg-fn (fn [_#]
-                                                     (str "This 'fn' body returns nil, "
-                                                          "which does not agree with the expected type."))
-                                           :blame-form ~sig-form
-                                           :original-body ~body})]
+                           ~(let [body (if (seq body)
+                                         `(do ~@body)
+                                         `(check-if-empty-body
+                                            (do ~@body)
+                                            {:msg-fn (fn [_#]
+                                                       (str "This 'fn' body returns nil, "
+                                                            "which does not agree with the expected type."))
+                                             :blame-form ~sig-form
+                                             :original-body ~body}))]
                               (if post
                                 `(let [~'% ~body]
                                    ~@(map assert-form post)
@@ -313,12 +315,14 @@
                (for [{:keys [original-method body pvec ann]} parsed-methods]
                  (list pvec
                        `(ignore-expected-if ~(boolean (-> ann :rng :default))
-                         (check-if-empty-body
-                           (do ~@body)
-                           {:msg-fn (fn [_#]
-                                      "This 't/fn' method returns nil, which does not agree with the expected type.")
-                            :blame-form ~original-method
-                            :original-body ~body}))))))
+                          ~(if (seq body)
+                             `(do ~@body)
+                             `(check-if-empty-body
+                                (do ~@body)
+                                {:msg-fn (fn [_#]
+                                           "This 't/fn' method returns nil, which does not agree with the expected type.")
+                                 :blame-form ~original-method
+                                 :original-body ~body})))))))
       ~reassembled-fn-type)))
 
 (defmethod -expand-macro `t/fn [& args] (apply expand-typed-fn-macro args))
@@ -453,6 +457,7 @@
     `(check-expected
        (do ~spc/special-form
            ::t/ann-form
+           ;FIXME move quote to outside of map
            {:type '~ty}
            (check-expected
              ~frm

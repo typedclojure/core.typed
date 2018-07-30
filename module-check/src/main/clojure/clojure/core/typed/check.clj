@@ -9,6 +9,8 @@
             [clojure.core.typed.check-below :as below]
             [clojure.core.typed.abo :as abo]
             [clojure.core.typed.analyze-clj :as ana-clj]
+            [clojure.tools.analyzer :as ana1]
+            [clojure.tools.analyzer.utils :as tau]
             [clojure.tools.analyzer.passes.jvm.validate :as validate]
             [clojure.tools.analyzer.passes.jvm.analyze-host-expr :as ana-host]
             [clojure.core.typed.analyzer2.passes.beta-reduce :as beta-reduce]
@@ -178,10 +180,8 @@
       :experimental
       (contains? :infer-vars)))
 
-(defmethod -check :var
-  [{:keys [var] :as expr} expected]
+(defn check-var [{:keys [var] :as expr} expected]
   {:pre [(var? var)]}
-  ;(prn " checking var" var)
   (binding [vs/*current-expr* expr]
     (let [id (coerce/var->symbol var)
           _ (when-not (var-env/used-var? id)
@@ -244,6 +244,37 @@
                " via check-ns or cf")
           :return (assoc expr
                          u/expr-type (cu/error-ret expected)))))))
+
+(defn set-erase-atoms [expr cred]
+  {:pre [(u/expr-type cred)]}
+  (let [_ (some-> expr ::with-meta/erase-atom (reset! true))
+        _ (some-> expr ::replace-invoke-atom (reset! cred))]
+    nil))
+
+(defmethod -check :var
+  [{:keys [var env] :as expr} expected]
+  {:pre [(var? var)]}
+  ;(prn " checking var" var)
+  (or (when vs/*current-expr* 
+        (when-let [args (::invoke-args expr)]
+          (when-not expected
+            (let [vsym (ast-u/emit-form-fn expr)
+                  _ (assert (= (ns-resolve (:ns env) vsym)
+                               (ns-resolve (:ns env) (coerce/var->symbol vsym))))
+                  form (with-meta (list* vsym (map ast-u/emit-form-fn args))
+                                  (meta vsym))
+                  mform (ana1/macroexpand-1 form env)]
+              (prn "mform" mform)
+              (when (not= form mform)
+                (let [cred (-> mform
+                               (pre/pre-analyze-form env)
+                               (update-in [:raw-forms] (fnil conj ())
+                                          (vary-meta form assoc ::pre/resolved-op (tau/resolve-sym (first form) env)))
+                               ana2/run-passes
+                               (check-expr (::invoke-expected expr)))]
+                  (set-erase-atoms expr cred)
+                  cred))))))
+      (check-var expr expected)))
 
 (defmethod -check :the-var
   [{:keys [^Var var env] :as expr} expected]
@@ -1500,7 +1531,8 @@
   (let [rec #(visit-tail-pos % f)]
     (case (:op ast)
       :do (update ast :ret rec)
-      :if (-> ast
+      ;; how do we ensure both branches reduce?
+      :if ast #_(-> ast
               (update :then rec)
               (update :else rec))
       (:let :letfn) (update ast :body rec)
@@ -1541,18 +1573,24 @@
     (let [e (invoke-special expr expected)]
       (cond
         (not= :default e) e
-        vs/*custom-expansions* (let [erase-atom (atom nil)
+        vs/*custom-expansions* (let [replace-atom (atom nil)
                                      fexpr (visit-tail-pos fexpr
                                                            (fn [{:keys [op] :as ast}]
                                                              (cond-> ast
                                                                (= :fn op)
                                                                (assoc ::invoke-args args
-                                                                      ::erase-invoke-atom erase-atom))))
+                                                                      ::invoke-expected expected
+                                                                      ::replace-invoke-atom replace-atom))))
                                      cfexpr (check-expr fexpr)]
-                                 (if @erase-atom
-                                   cfexpr
-                                   ;; could not beta reduce
-                                   (check-invoke expr expected)))
+                                 ;; instead of inserting cfexpr directly, we instead erase any
+                                 ;; wrapping forms around the fexpr.
+                                 ;; eg. ((ann-form inc [Int :-> Int]) 1)
+                                 ;;     ;=> 2
+                                 ;;     not
+                                 ;;     ;=> (ann-form 2 [Int :-> Int])
+                                 (or @replace-atom
+                                     ;; could not beta reduce
+                                     (check-invoke expr expected)))
 
         :else (check-invoke expr expected)))))
 
@@ -1595,11 +1633,6 @@
                fn-method-u/*check-fn-method1-rest-type* check-rest-fn]
        ~@body)))
 
-(defn set-erase-atoms [expr]
-  (let [_ (some-> expr ::with-meta/erase-atom (reset! true))
-        _ (some-> expr ::erase-invoke-atom (reset! true))]
-    nil))
-
 (defmethod -check :fn
   [{:keys [env] :as expr} expected]
   {:pre [((some-fn nil? r/TCResult?) expected)]
@@ -1629,17 +1662,20 @@
                                                    expr
                                                    (mapv (fn [t a]
                                                            (binding [vs/*verbose-types* true]
-                                                             (-> `(t/ann-form ~(ast-u/emit-form-fn a)
-                                                                              ~(prs/unparse-type t))
-                                                                 (pre/pre-parse env)
+                                                             (-> `(t/ann-form ~(ast-u/emit-form-fn a) ~(prs/unparse-type t))
+                                                                 (pre/pre-analyze-form env)
                                                                  ana2/run-passes)))
                                                          (concat dom (repeat (:rest ft)))
                                                          args))]
-                                    (let [_ (set-erase-atoms expr)]
-                                      (check-expr red (r/Result->TCResult rng))))))))))))))
+                                    (let [cred (check-expr red (below/maybe-check-below
+                                                                 (r/Result->TCResult rng)
+                                                                 (::invoke-expected expr)))]
+                                      (set-erase-atoms expr cred)
+                                      cred))))))))))))
               (when-let [red (beta-reduce/maybe-beta-reduce-fn expr args)]
-                (let [_ (set-erase-atoms expr)]
-                  (check-expr red)))))))
+                (let [cred (check-expr red (::invoke-expected expr))]
+                  (set-erase-atoms expr cred)
+                  cred))))))
       (prepare-check-fn env expr
                         (if expected
                           (fn/check-fn expr expected)
