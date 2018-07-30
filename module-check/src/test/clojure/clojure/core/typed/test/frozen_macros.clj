@@ -459,9 +459,27 @@
   (is-tc-e ((t/fn [i :- Int] (inc i))
             1))
   (is-tc-e ((ann-form
-              (t/fn [i :- Int] (inc i))
+              (t/fn [i :- Int] :- Int (inc i))
               [Int :-> Int])
             1))
+  (is-tc-e ((ann-form
+              (ann-form
+                inc
+                [Int :-> Int])
+              [Int :-> Int])
+            1))
+;; FIXME some mixup with the ann-form's and the beta-reduction
+  (is-tc-e ((ann-form
+              (ann-form
+                (fn* [i] (boolean i))
+                [Int :-> Bool])
+              [Int :-> Bool])
+            1))
+  (is-tc-e (ann-form
+             (ann-form
+               (fn* [i] (inc i))
+               [Int :-> Int])
+             [Int :-> Int]))
 
   ;fixpoint
   (is-tc-e (fixpoint

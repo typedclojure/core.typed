@@ -251,6 +251,31 @@
         _ (some-> expr ::replace-invoke-atom (reset! cred))]
     nil))
 
+(defn ensure-within-beta-limit [ast]
+  ;; TODO state doesn't exist since we removed the pass
+  #_
+  (let [state (-> ast
+                  :env
+                  ::ana2/state
+                  (get #'beta-reduce/push-invoke))]
+    (assert state)
+    (beta-reduce/ensure-within-beta-limit
+      state
+      (fn [nexpansions]
+        (err/int-error
+          (str "Exceeded the limit of symbolic beta reductions in a single form "
+               "(" nexpansions ")"))))))
+
+(defn record-beta-reduction [ast]
+  ;; TODO state doesn't exist since we removed the pass
+  #_
+  (let [state (-> ast
+                  :env
+                  ::ana2/state
+                  (get #'beta-reduce/push-invoke))]
+    (assert state)
+    (beta-reduce/record-beta-reduction state)))
+
 (defmethod -check :var
   [{:keys [var env] :as expr} expected]
   {:pre [(var? var)]}
@@ -266,6 +291,8 @@
                   mform (ana1/macroexpand-1 form env)]
               (prn "mform" mform)
               (when (not= form mform)
+                (ensure-within-beta-limit expr)
+                (record-beta-reduction expr)
                 (let [cred (-> mform
                                (pre/pre-analyze-form env)
                                (update-in [:raw-forms] (fnil conj ())
@@ -1582,12 +1609,16 @@
                                                                       ::invoke-expected expected
                                                                       ::replace-invoke-atom replace-atom))))
                                      cfexpr (check-expr fexpr)]
+                                 (prn "in invoke" (some-> expr ast-u/emit-form-fn))
+                                 (prn "replace-atom"
+                                      (some-> @replace-atom ast-u/emit-form-fn))
                                  ;; instead of inserting cfexpr directly, we instead erase any
                                  ;; wrapping forms around the fexpr.
-                                 ;; eg. ((ann-form inc [Int :-> Int]) 1)
-                                 ;;     ;=> 2
+                                 ;; eg. so
+                                 ;;     ((ann-form inc [Int :-> Int]) 1)
+                                 ;;     ;=> (inc 1)
                                  ;;     not
-                                 ;;     ;=> (ann-form 2 [Int :-> Int])
+                                 ;;     ;=> (ann-form (inc 1) [Int :-> Int])
                                  (or @replace-atom
                                      ;; could not beta reduce
                                      (check-invoke expr expected)))
@@ -1644,7 +1675,6 @@
   (or (when vs/*custom-expansions*
         (when-not (:local expr) ;; no recursive functions
           (when-let [args (::invoke-args expr)]
-            ;; TODO how to increment beta-count from here?
             (if expected
               (let [[t :as ts] (fn-methods/function-types (:t expected))]
                 (when (= 1 (count ts))
@@ -1658,6 +1688,8 @@
                               (let [{:keys [dom rng]} ft]
                                 (when (not-any? #(% ft) [:drest :kws :prest :pdot])
                                   (assert ((if (:rest ft) <= =) (count dom) (count args)))
+                                  (ensure-within-beta-limit expr)
+                                  (record-beta-reduction expr)
                                   (when-let [red (beta-reduce/maybe-beta-reduce-fn
                                                    expr
                                                    (mapv (fn [t a]
@@ -1667,12 +1699,14 @@
                                                                  ana2/run-passes)))
                                                          (concat dom (repeat (:rest ft)))
                                                          args))]
+                                    (prn "invoke-expected" (::invoke-expected expr))
                                     (let [cred (check-expr red (below/maybe-check-below
                                                                  (r/Result->TCResult rng)
                                                                  (::invoke-expected expr)))]
                                       (set-erase-atoms expr cred)
                                       cred))))))))))))
               (when-let [red (beta-reduce/maybe-beta-reduce-fn expr args)]
+                (prn "invoke-expected" (::invoke-expected expr))
                 (let [cred (check-expr red (::invoke-expected expr))]
                   (set-erase-atoms expr cred)
                   cred))))))

@@ -134,6 +134,10 @@
                            nil
                            file-mapping)
             eval-ast (fn [ast {:keys [expected] :as opt}]
+                       (binding [*print-length* nil
+                                 *print-level* nil]
+                         (prn "before check-expr")
+                         (clojure.pprint/pprint (emit-form ast)))
                        (do (when-let [state (-> ast
                                                 :env
                                                 ::ana/state
@@ -148,7 +152,7 @@
                                            (check-expr ast expected)))
                                  _ (binding [*print-length* nil
                                              *print-level* nil]
-                                     (prn "eval-ast")
+                                     (prn "after check-expr")
                                      (clojure.pprint/pprint (emit-form c-ast)))
                                  eval-cexp (or (when-not no-eval
                                                  eval-out-ast)

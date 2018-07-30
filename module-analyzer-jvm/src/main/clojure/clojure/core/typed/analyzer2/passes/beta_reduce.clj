@@ -185,6 +185,19 @@
             (subst-locals subst)
             ana/run-passes)))))
 
+(defn record-beta-reduction [state]
+  (swap! state update ::expansions inc))
+
+(defn reached-beta-limit? [state]
+  (or (::reached-beta-limit @state)
+      (< beta-limit (::expansions @state))))
+
+(defn ensure-within-beta-limit [state & [err-f]]
+  (when (reached-beta-limit? state)
+    (do (swap! state assoc ::reached-beta-limit true)
+        (when err-f
+          (err-f (::expansions @state))))))
+
 (defn push-invoke
   "Push arguments into the function position of an :invoke
   so the function and arguments are both in the
@@ -203,7 +216,7 @@
   [state {:keys [op] :as ast}]
   {:post [(:op %)]}
   ;(prn "expansions" (::expansions @state))
-  (if (< beta-limit (::expansions @state))
+  (if (reached-beta-limit? state)
     (do
       (when-not (::reached-beta-limit @state)
         (prn "beta limit reached")
