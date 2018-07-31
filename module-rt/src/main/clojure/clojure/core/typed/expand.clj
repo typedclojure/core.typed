@@ -565,24 +565,19 @@
             largest-min-count (apply max (map (fn [e]
                                                  (apply + (map :min-count e)))
                                               splices))
-            ordered? (every? (comp :ordered first) splices)
+            ordered? (:ordered (first splices))
             max-realized-count (max smallest-max-count largest-min-count)
             _ (prn "max-realized-count" max-realized-count)
             csyms (repeatedly (count colls) gensym)]
         (if (and (not-any? nil? splices)
                  ordered?
-                 (< max-realized-count 15)
-                 (< (count colls) 4))
-          `(sequence
-             ~(when (pos? max-realized-count)
-                `(let* [~@(mapcat (fn [csym coll]
-                                    [csym `(seq ~coll)])
-                                  csyms
-                                  colls)]
-                   (if (and ~@csyms)
-                     (cons (~f ~@(map (fn [csym] `(first ~csym)) csyms))
-                           (map ~f ~@(map (fn [csym] `(rest ~csym)) csyms)))
-                     nil))))
+                 (< max-realized-count 10)
+                 (< (count colls) 3))
+          (if (pos? max-realized-count)
+            `(let* [~@(mapcat vector csyms colls)]
+               (cons (~f ~@(map (fn [csym] `(first ~csym)) csyms))
+                     (map ~f ~@(map (fn [csym] `(rest ~csym)) csyms))))
+            `(sequence nil))
           (map-colls-fallthrough form opts))))))
 
 (defmethod -expand-inline 'clojure.core/map [[_ f & colls :as form] {:keys [internal-error] :as opts}]
@@ -592,6 +587,25 @@
   (if (empty? colls)
     (inline-map-transducer form opts)
     (inline-map-colls form opts)))
+
+(defmethod -expand-inline 'clojure.core/every? [[_ f coll :as form] {:keys [internal-error splice-seqable-form] :as opts}]
+  (when-not (= 3 (count form))
+    (internal-error (str "Must provide 2 arguments to clojure.core/every?, found " (dec (count form))
+                         ": " form)))
+  (if-let [splice (splice-seqable-form coll)]
+    (let [min-count (apply + (map :min-count splice))
+          max-count (apply + (map :max-count splice))
+          ordered? (:ordered (first splice))
+          max-realized (max min-count max-count)]
+      (if (and ordered?
+               (< max-realized 15))
+        (if (pos? max-realized)
+          `(let* [c# ~coll]
+             (and (~f (first c#))
+                  (every? ~f (rest c#))))
+          true)
+        form))
+    form))
 
 (comment
  (-> identity

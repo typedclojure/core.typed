@@ -1256,6 +1256,9 @@
 (add-static-method-special-method 'clojure.lang.RT/nth
   [{:keys [args] :as expr} & [expected]]
   {:post [(-> % u/expr-type r/TCResult?)]}
+  (when-not (#{2 3} (count args))
+    (err/int-error (str "'nth' accepts 2 or 3 arguments, found "
+                        (count args))))
   (let [cargs (mapv check-expr args)
         r (nth/invoke-nth check-expr expr expected :cargs cargs)]
     (if-not (#{cu/not-special} r)
@@ -1266,6 +1269,9 @@
 (defmethod -invoke-special 'clojure.core/nth
   [{fexpr :fn :keys [args] :as expr} & [expected]]
   {:post [(-> % u/expr-type r/TCResult?)]}
+  (when-not (#{2 3} (count args))
+    (err/int-error (str "'nth' accepts 2 or 3 arguments, found "
+                        (count args))))
   (let [cargs (mapv check-expr args)
         r (nth/invoke-nth check-expr expr expected :cargs cargs)]
     (if-not (#{cu/not-special} r)
@@ -1276,6 +1282,9 @@
 (defmethod -invoke-special 'clojure.core/nthnext
   [{fexpr :fn :keys [args] :as expr} & [expected]]
   {:post [(-> % u/expr-type r/TCResult?)]}
+  (when-not (= 2 (count args))
+    (err/int-error (str "'nthnext' accepts 2 arguments, found "
+                        (count args))))
   (let [cargs (mapv check-expr args)
         r (nthnext/check-nthnext check-expr expr expected :cargs cargs)]
     (if-not (#{cu/not-special} r)
@@ -1286,11 +1295,28 @@
 (defmethod -invoke-special 'clojure.core/next
   [{fexpr :fn :keys [args] :as expr} & [expected]]
   {:post [(-> % u/expr-type r/TCResult?)]}
+  (when-not (= 1 (count args))
+    (err/int-error (str "'next' accepts 1 argument, found "
+                        (count args))))
   (let [cargs (mapv check-expr args)
         r (nthnext/check-next check-expr expr expected :cargs cargs)]
     (if-not (#{cu/not-special} r)
       r
       (invoke/normal-invoke check-expr expr fexpr args expected :cargs cargs))))
+
+;cons
+(defmethod -invoke-special 'clojure.core/cons
+  [{fexpr :fn :keys [args] :as expr} & [expected]]
+  {:post [(-> % u/expr-type r/TCResult?)]}
+  (when-not (= 2 (count args))
+    (err/int-error (str "'cons' accepts 2 arguments, found "
+                        (count args))))
+  (let [cargs (mapv check-expr args)
+        ]
+    ;;TODO
+    #_(assert nil "Implement heterogeneous Cons for every? inlining")
+    :default
+    ))
 
 ;assoc
 (defmethod -invoke-special 'clojure.core/assoc

@@ -11,11 +11,7 @@
             [clojure.core.typed.tvar-bnds :as bnds]
             [clojure.set :as set]
             [clojure.core.typed.current-impl :as impl])
-  (:import (clojure.core.typed.type_rep HeterogeneousMap Poly TypeFn PolyDots TApp App Value
-                                        Union Intersection F Function Mu B KwArgs KwArgsSeq RClass
-                                        Bounds Name Scope CountRange DataType Extends
-                                        JSNominal Protocol HeterogeneousVector GetType HSequential
-                                        HeterogeneousList HeterogeneousSeq HSet)
+  (:import (clojure.core.typed.type_rep HeterogeneousMap Value Intersection F RClass DataType HeterogeneousVector)
            (clojure.lang IPersistentMap IPersistentVector)))
 
 ;supporting assoc functionality
@@ -43,9 +39,10 @@
     (let [bnd (free-ops/free-with-name-bnds name)
           _ (when-not bnd
               (err/int-error (str "No bounds for type variable: " name bnds/*current-tvar-bnds*)))]
-      (when (ind/subtype? (:upper-bound bnd) (impl/impl-case
-                                           :clojure (c/RClass-of IPersistentMap [r/-any r/-any])
-                                           :cljs (c/Protocol-of 'cljs.core/IMap [r/-any r/-any])))
+      (when (ind/subtype? (:upper-bound bnd)
+                          (impl/impl-case
+                            :clojure (c/RClass-of IPersistentMap [r/-any r/-any])
+                            :cljs (c/Protocol-of 'cljs.core/IMap [r/-any r/-any])))
         (r/AssocType-maker f [(mapv r/ret-t assoc-entry)] nil))))
 
   Value
@@ -65,20 +62,19 @@
    (let [_ (impl/assert-clojure)
          rkt (-> kt :t c/fully-resolve-type)]
      (cond
-      (= (:the-class rc) 'clojure.lang.IPersistentMap)
-      (c/RClass-of IPersistentMap [(c/Un (:t kt) (nth (:poly? rc) 0))
-                                 (c/Un (:t vt) (nth (:poly? rc) 1))])
-      
-      (and (= (:the-class rc) 'clojure.lang.IPersistentVector)
-           (r/Value? rkt))
-      (let [kt ^Value rkt]
-        (when (integer? (.val kt))
-          (c/RClass-of IPersistentVector [(c/Un (:t vt) (nth (:poly? rc) 0))])))
+       (= (:the-class rc) 'clojure.lang.IPersistentMap)
+       (c/RClass-of IPersistentMap [(c/Un (:t kt) (nth (:poly? rc) 0))
+                                    (c/Un (:t vt) (nth (:poly? rc) 1))])
 
-      (and (= (:the-class rc) 'clojure.lang.IPersistentVector)
-           (ind/subtype? rkt (r/Name-maker 'clojure.core.typed/Int)))
-      (c/RClass-of IPersistentVector [(c/Un (:t vt) (nth (:poly? rc) 0))])
-      )))
+       (and (= (:the-class rc) 'clojure.lang.IPersistentVector)
+            (r/Value? rkt))
+       (let [kt ^Value rkt]
+         (when (integer? (.val kt))
+           (c/RClass-of IPersistentVector [(c/Un (:t vt) (nth (:poly? rc) 0))])))
+
+       (and (= (:the-class rc) 'clojure.lang.IPersistentVector)
+            (ind/subtype? rkt (r/Name-maker 'clojure.core.typed/Int)))
+       (c/RClass-of IPersistentVector [(c/Un (:t vt) (nth (:poly? rc) 0))]))))
   
   HeterogeneousMap
   (-assoc-pair
@@ -131,7 +127,7 @@
                  pairs)]
    :post [((some-fn nil? r/Type?) %)]}
   (c/reduce-type-transform -assoc-pair t pairs
-                         :when #(satisfies? AssocableType %)))
+                           :when #(satisfies? AssocableType %)))
 
 (defn assoc-pairs-noret [t & pairs]
   {:pre [(r/Type? t)
@@ -151,26 +147,25 @@
          (r/TCResult? k)]
    :post [((some-fn nil? r/Type?) %)]}
   (c/union-or-nil
-   (for [rtype (c/resolved-type-vector k)]
-     (cond
-      (ind/subtype? t r/-nil)
-      t
-      
-      (and (r/HeterogeneousMap? t) (c/keyword-value? rtype))
-       (c/make-HMap
-         :mandatory
-           (dissoc (:types t) rtype)
-         :optional
-           (dissoc (:optional t) rtype)
-         :absent-keys
-           (conj (:absent-keys t) rtype)
-         :complete? (c/complete-hmap? t))
-      
-      (ind/subtype? t (impl/impl-case
-                    :clojure (c/RClass-of IPersistentMap [r/-any r/-any])
-                    :cljs (c/Protocol-of 'cljs.core/IMap [r/-any r/-any])))
-      t
-      ))))
+    (for [rtype (c/resolved-type-vector k)]
+      (cond
+        (ind/subtype? t r/-nil)
+        t
+
+        (and (r/HeterogeneousMap? t) (c/keyword-value? rtype))
+        (c/make-HMap
+          :mandatory
+          (dissoc (:types t) rtype)
+          :optional
+          (dissoc (:optional t) rtype)
+          :absent-keys
+          (conj (:absent-keys t) rtype)
+          :complete? (c/complete-hmap? t))
+
+        (ind/subtype? t (impl/impl-case
+                          :clojure (c/RClass-of IPersistentMap [r/-any r/-any])
+                          :cljs (c/Protocol-of 'cljs.core/IMap [r/-any r/-any])))
+        t))))
 
 (defn dissoc-keys [t ks]
   {:post [((some-fn nil? r/Type?) %)]}
@@ -369,14 +364,12 @@
                                     :cljs (c/Protocol-of 'cljs.core/IVector [r/-any]))))
               (satisfies? AssocableType left)
               (r/HeterogeneousMap? rtype))
-          (do
-            ;TODO
-            (assert (empty? (:optional rtype)))
-             (apply assoc-type-pairs left (map (fn [[k t]]
-                                                 [(r/ret k) (r/ret t)])
-                                               (:types rtype)))
-            )
-         ))))))
+         (do
+           ;TODO
+           (assert (empty? (:optional rtype)))
+           (apply assoc-type-pairs left (map (fn [[k t]]
+                                               [(r/ret k) (r/ret t)])
+                                             (:types rtype))))))))))
 
 (defn merge-types [left & r-tcresults]
   {:pre [(r/Type? left)
@@ -391,30 +384,29 @@
          (r/TCResult? right)]
    :post [((some-fn nil? r/TCResult?) right)]}
   (cond
-   (r/HeterogeneousVector? left)
-   (assoc-type-pairs left [(r/ret (r/-val (count (:types left))))
-                           right])
-   
-   (ind/subtype? left r/-nil)
-   (r/-hvec [(:t right)]
-            :filters [(:fl right)]
-            :objects [(:o right)])
-   
-   ; other rules need to unwrap the rhs
-   :else
-   (c/union-or-nil
-    (for [rtype (c/resolved-type-vector right)]
-      (cond
-       (and (r/HeterogeneousMap? left)
-            (r/HeterogeneousVector? rtype))
-       (if (= (count (:types rtype)) 2)
-         (assoc-type-pairs left (map r/ret (:types rtype)))
-         (err/int-error "Need vector of length 2 to conj to map"))
-       
-       (and (r/HeterogeneousMap? left)
-            (ind/subtype? rtype r/-nil))
-       left
-       )))))
+    (r/HeterogeneousVector? left)
+    (assoc-type-pairs left [(r/ret (r/-val (count (:types left))))
+                            right])
+
+    (ind/subtype? left r/-nil)
+    (r/-hvec [(:t right)]
+             :filters [(:fl right)]
+             :objects [(:o right)])
+
+    ; other rules need to unwrap the rhs
+    :else
+    (c/union-or-nil
+      (for [rtype (c/resolved-type-vector right)]
+        (cond
+          (and (r/HeterogeneousMap? left)
+               (r/HeterogeneousVector? rtype))
+          (if (= (count (:types rtype)) 2)
+            (assoc-type-pairs left (map r/ret (:types rtype)))
+            (err/int-error "Need vector of length 2 to conj to map"))
+
+          (and (r/HeterogeneousMap? left)
+               (ind/subtype? rtype r/-nil))
+          left)))))
 
 (defn conj-types [left & rtypes]
   {:pre [(r/Type? left)

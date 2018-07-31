@@ -253,13 +253,21 @@
 
 (deftest map-test
   (is-tc-e (map identity [1 2 3]))
+  (is-tc-e (every? identity [1 2 3]))
+  (is-tc-e (every? identity [1 2 3]))
+  (is-tc-e (fn [a b]
+             {:pre [(every? number? [a b])]}
+             (+ a b)))
+  (is-tc-e (map identity (map identity [1 2 3])))
   (is-tc-e (map + [1 2 3] [2 3 4]))
   (is-tc-e (map identity [1 2 3])
            (t/Seq t/Num))
   (is-tc-e (map identity [1 2 3])
-           (HSeq [Num Num Num]))
+           (t/HSeq [Num Num Num]))
+  (is-tc-e (map identity [])
+           (t/Seq Nothing))
   (is-tc-e (map identity [1 2 3])
-             (t/Seq t/Bool))
+           (t/Seq t/Bool))
   ;; FIXME better column number
   (is-tc-err (map identity 'a))
   (is-tc-err (map identity identity))
