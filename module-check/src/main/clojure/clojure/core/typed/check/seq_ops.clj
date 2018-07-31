@@ -15,7 +15,7 @@
     (r/HSequential? t) (if (seq (:types t))
                          t
                          (c/Un r/-nil t))
-    (sub/subtype? t (prs/parse-type `(t/U nil t/Seqable t/Any)))
+    ;TODO (sub/subtype? t (prs/parse-type `(t/U nil t/Seqable t/Any))) 
     :else (err/int-error (str "Cannot create seq from " t))))
 
 (defn cons-types [a d]
