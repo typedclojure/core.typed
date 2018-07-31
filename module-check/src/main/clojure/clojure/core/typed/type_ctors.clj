@@ -33,7 +33,7 @@
                                         Union Intersection F Function Mu B KwArgs KwArgsSeq RClass
                                         Bounds Name Scope CountRange Intersection DataType Extends
                                         JSNominal Protocol HeterogeneousVector GetType HSequential
-                                        HeterogeneousList HeterogeneousSeq HSet AssocType TypeOf)
+                                        HeterogeneousSeq HSet AssocType TypeOf)
            (clojure.lang IPersistentMap IPersistentVector Var)))
 
 (t/ann ^:no-check with-original-names [r/Type (t/U t/Sym (t/Seqable t/Sym)) -> r/Type])
@@ -80,11 +80,11 @@
                   :drest (:drest v)
                   :repeat (:repeat v)))
 
-(t/ann ^:no-check HList->HSequential [HeterogeneousList -> HSequential])
+(t/ann ^:no-check HList->HSequential [HSequential -> HSequential])
 (defn HList->HSequential [l]
   {:pre [(r/HeterogeneousList? l)]
    :post [(r/HSequential? %)]}
-  (r/-hsequential (:types l)))
+  (assoc l :kind :sequential))
 
 (t/ann ^:no-check HSeq->HSequential [HeterogeneousSeq -> HSequential])
 (defn HSeq->HSequential [s]
@@ -100,7 +100,6 @@
 (t/tc-ignore
 (def AnyHSequential?
   "Predicate for any type that fully supports the HSequential interface."
-  ;; HeterogeneousList does not currently support :rest and others
   r/-AnyHSequential?)
 )
 

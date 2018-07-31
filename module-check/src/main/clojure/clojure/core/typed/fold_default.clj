@@ -11,7 +11,7 @@
   (:import (clojure.core.typed.type_rep NotType DifferenceType Intersection Union FnIntersection Bounds
                                         DottedPretype Function RClass JSNominal App TApp
                                         PrimitiveArray DataType Protocol TypeFn Poly PolyDots
-                                        Mu HeterogeneousVector HeterogeneousList HeterogeneousMap
+                                        Mu HeterogeneousVector HeterogeneousMap
                                         CountRange Name Value Top Unchecked TopFunction B F Result
                                         HeterogeneousSeq TCResult TCError FlowSet Extends
                                         JSNumber CLJSInteger JSObject JSString ArrayCLJS
@@ -185,14 +185,15 @@
                            (c/Mu* name (type-rec body)))))
 
 (defn- fold-Heterogeneous* [constructor type-rec filter-rec object-rec]
-  (fn [{:keys [types rest drest repeat] :as ty} _]
+  (fn [{:keys [types rest drest repeat kind] :as ty} _]
     (constructor
       (mapv type-rec (:types ty))
       :filters (mapv filter-rec (:fs ty))
       :objects (mapv object-rec (:objects ty))
       :rest (when rest (type-rec rest))
       :drest (when drest (update-in drest [:pre-type] type-rec))
-      :repeat repeat)))
+      :repeat repeat
+      :kind kind)))
 
 (add-default-fold-case HeterogeneousVector
                        (fold-Heterogeneous* r/-hvec type-rec filter-rec object-rec))
@@ -206,10 +207,6 @@
 (add-default-fold-case HSet
                        (fn [{:keys [fixed] :as ty} _]
                          (r/-hset (set (map type-rec fixed)))))
-
-(add-default-fold-case HeterogeneousList
-                       (fn [ty _]
-                         (-> ty (update-in [:types] #(mapv type-rec %)))))
 
 (defn visit-type-map [m f]
   (into {} (for [[k v] m]

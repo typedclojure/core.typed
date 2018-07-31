@@ -26,7 +26,7 @@
   (:import (clojure.core.typed.type_rep Poly TApp Union Intersection Value Function
                                         Result Protocol TypeFn Name F Bounds
                                         PrimitiveArray DataType RClass HeterogeneousMap
-                                        HeterogeneousList HeterogeneousSeq CountRange KwArgs
+                                        HeterogeneousSeq CountRange KwArgs
                                         Extends)
            (clojure.core.typed.filter_rep FilterSet)
            (clojure.lang APersistentVector PersistentList ASeq)))
@@ -487,7 +487,8 @@
             (fail! s t)))
 
         (and (r/HSequential? s)
-             (r/HSequential? t))
+             (r/HSequential? t)
+             (= :sequential (:kind s) (:kind t)))
         (if (and (cond
                    ; simple case, no rest, drest, repeat types
                    (and (not-any? :rest [s t])
@@ -761,11 +762,16 @@
                           (when (:drest s)
                             [r/-any])))]
           (subtype (c/In (impl/impl-case
-                           :clojure (c/In (c/RClass-of clojure.lang.IPersistentCollection [ss])
-                                          (c/RClass-of clojure.lang.Sequential))
-                           :cljs (c/In (c/Protocol-of 'cljs.core/ICollection [ss])
-                                       (c/Protocol-of 'cljs.core/ISequential))
-                           #_(throw (Exception. "TODO cljs HSequential")))
+                           :clojure (case (:kind s)
+                                      :vector (c/RClass-of clojure.lang.IPersistentVector [ss])
+                                      :seq (c/RClass-of clojure.lang.ISeq [ss])
+                                      :list (c/RClass-of clojure.lang.IPersistentList [ss])
+                                      :sequential (c/In (c/RClass-of clojure.lang.IPersistentCollection [ss])
+                                                        (c/RClass-of clojure.lang.Sequential)))
+                           :cljs (case (:kind s)
+                                   :sequential (c/In (c/Protocol-of 'cljs.core/ICollection [ss])
+                                                     (c/Protocol-of 'cljs.core/ISequential))
+                                   (throw (Exception. "TODO CLJS HSequential subtype"))))
                          ((if (or (:rest s)
                                   (:drest s))
                             r/make-CountRange

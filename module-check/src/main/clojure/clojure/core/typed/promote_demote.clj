@@ -11,7 +11,7 @@
   (:import (clojure.core.typed.type_rep NotType Intersection Union FnIntersection Bounds
                                         DottedPretype Function RClass App TApp
                                         PrimitiveArray DataType Protocol TypeFn Poly PolyDots
-                                        Mu HeterogeneousVector HeterogeneousList HeterogeneousMap
+                                        Mu HeterogeneousVector HeterogeneousMap
                                         CountRange Name Value Top Unchecked TopFunction B F Result AnyValue
                                         HeterogeneousSeq TCError Extends JSNominal
                                         JSString JSBoolean JSNumber CLJSInteger JSObject
@@ -146,26 +146,33 @@
                                            (set (mapcat frees/fi (:fs T))))]
     (cond
       ;if filter contains V, give up
-      (seq (set/intersection V latent-filter-vs)) (c/In (c/RClass-of clojure.lang.Sequential)
-                                                        (c/RClass-of clojure.lang.IPersistentCollection [r/-any]))
+      (seq (set/intersection V latent-filter-vs)) (case (:kind T)
+                                                    :vector (c/RClass-of clojure.lang.IPersistentVector [r/-any])
+                                                    :seq (c/RClass-of clojure.lang.ISeq [r/-any])
+                                                    :list (c/RClass-of clojure.lang.IPersistentList [r/-any])
+                                                    :sequential
+                                                    (c/In (c/RClass-of clojure.lang.Sequential)
+                                                          (c/RClass-of clojure.lang.IPersistentCollection [r/-any])))
 
       ;if dotted bound is in V, transfer to rest args
       (and (:drest T) (V (-> T :drest :name)))
       (r/-hsequential (mapv pmt (:types T))
-               :filters (:fs T)
-               :objects (:objects T)
-               :rest (pmt (-> T :drest :pre-type)))
+                      :filters (:fs T)
+                      :objects (:objects T)
+                      :rest (pmt (-> T :drest :pre-type))
+                      :kind (:kind T))
 
       :else
       (r/-hsequential (mapv pmt (:types T))
-               ; we know no filters contain V
-               :filters (:fs T)
-               :objects (:objects T)
-               :rest (when-let [rest (:rest T)]
-                       (pmt rest))
-               :drest (when-let [drest (:drest T)]
-                        (update-in drest [:pre-type] pmt))
-               :repeat (:repeat T)))))
+                      ; we know no filters contain V
+                      :filters (:fs T)
+                      :objects (:objects T)
+                      :rest (when-let [rest (:rest T)]
+                              (pmt rest))
+                      :drest (when-let [drest (:drest T)]
+                               (update-in drest [:pre-type] pmt))
+                      :repeat (:repeat T)
+                      :kind (:kind T)))))
 
 (promote-demote HeterogeneousSeq
   [T V]
@@ -230,12 +237,6 @@
                 fixed)
       h
       (c/upcast-hset h))))
-
-(promote-demote HeterogeneousList
-  [T V]
-  (-> T
-    (update-in [:types] #(apply list (mapv promote % (repeat V))))))
-
 
 (promote-demote Value [T V] T)
 

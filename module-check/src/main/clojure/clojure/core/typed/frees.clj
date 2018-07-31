@@ -16,7 +16,7 @@
   (:import (clojure.core.typed.type_rep NotType DifferenceType Intersection Union FnIntersection Bounds
                                         DottedPretype Function RClass App TApp
                                         PrimitiveArray DataType Protocol TypeFn Poly PolyDots
-                                        Mu HeterogeneousVector HeterogeneousList HeterogeneousMap
+                                        Mu HeterogeneousVector HeterogeneousMap
                                         CountRange Name Value Top Unchecked TopFunction B F Result AnyValue
                                         HeterogeneousSeq Scope TCError Extends AssocType HSequential HSet
                                         JSObj TypeOf)
@@ -24,9 +24,6 @@
                                           AndFilter OrFilter TopFilter BotFilter)
            (clojure.core.typed.object_rep Path EmptyObject NoObject)
            (clojure.core.typed.path_rep NthPE NextPE ClassPE CountPE KeyPE KeysPE ValsPE KeywordPE)))
-
-(alter-meta! *ns* assoc :skip-wiki true
-             :core.typed {:collect-only true})
 
 ;(t/typed-deps clojure.core.typed.type-rep)
 
@@ -211,10 +208,6 @@
                            :contravariant (flip-variances (frees arg))
                            :invariant (let [fvs (frees arg)]
                                         (zipmap (keys fvs) (repeat :invariant)))))))
-
-(add-frees-method [::any-var HeterogeneousList]
-  [{:keys [types]}] 
-  (apply combine-frees (mapv frees types)))
 
 (add-frees-method [::any-var App]
   [{:keys [rator rands]}]

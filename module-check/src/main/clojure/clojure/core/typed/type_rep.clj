@@ -575,14 +575,6 @@
                                drest
                                (if repeat? true false))))
 
-(u/ann-record HeterogeneousList [types :- (Seqable Type)])
-(u/def-type HeterogeneousList [types]
-  "A constant list, clojure.lang.IPersistentList"
-  [(sequential? types)
-   (every? Type? types)]
-  :methods
-  [p/TCType])
-
 (u/ann-record HeterogeneousSeq [types :- (t/Seqable Type)
                                 fs :- (t/Vec p/IFilterSet)
                                 objects :- (t/Vec p/IRObject)
@@ -632,8 +624,9 @@
                            ;variable members to the right of fixed
                            rest :- (U nil Type)
                            drest :- (U nil DottedPretype)
-                           repeat :- Boolean])
-(u/def-type HSequential [types fs objects rest drest repeat]
+                           repeat :- Boolean
+                           kind :- t/Kw])
+(u/def-type HSequential [types fs objects rest drest repeat kind]
   "A constant Sequential, clojure.lang.Sequential"
   [(sequential? types)
    (every? (some-fn Type? Result?) types)
@@ -646,9 +639,37 @@
    (if repeat (not-empty types) true)
    ((some-fn nil? Type?) rest)
    ((some-fn nil? DottedPretype?) drest)
-   ((some-fn true? false?) repeat)]
+   ((some-fn true? false?) repeat)
+   (#{:list :seq :vector :sequential} kind)]
   :methods
   [p/TCType])
+
+(t/ann ^:no-check -hsequential
+       [(Seqable Type) & :optional {:filters (Seqable p/IFilterSet) :objects (Seqable p/IRObject)
+                                  :rest (U nil Type) :drest (U nil DottedPretype) :repeat Boolean} -> Type])
+(defn -hsequential
+  [types & {:keys [filters objects rest drest kind] repeat? :repeat}]
+  (if (some Bottom? types)
+    (Bottom)
+    (HSequential-maker types
+                       (if filters
+                         (vec filters)
+                         (vec (repeat (count types) (ind/-FS (ind/-top-fn)
+                                                             (ind/-top-fn)))))
+                       (if objects
+                         (vec objects)
+                         (vec (repeat (count types) (ind/-empty-fn))))
+                       rest
+                       drest
+                       (if repeat? true false)
+                       (or kind :sequential))))
+
+(defn HeterogeneousList? [t]
+  (and (HSequential? t)
+       (= :list (:kind t))))
+
+(defn HeterogeneousList-maker [types]
+  (-hsequential types :kind :list))
 
 (u/ann-record HSet [fixed :- (t/Set Type)
                     complete? :- Boolean])
@@ -663,25 +684,6 @@
 (t/ann -hset [(t/Set Type) & :optional {:complete? Boolean} -> HSet])
 (defn -hset [fixed & {:keys [complete?] :or {complete? true}}]
   (HSet-maker fixed complete?))
-
-(t/ann ^:no-check -hsequential
-       [(Seqable Type) & :optional {:filters (Seqable p/IFilterSet) :objects (Seqable p/IRObject)
-                                  :rest (U nil Type) :drest (U nil DottedPretype) :repeat Boolean} -> Type])
-(defn -hsequential
-  [types & {:keys [filters objects rest drest] repeat? :repeat}]
-  (if (some Bottom? types)
-    (Bottom)
-    (HSequential-maker types
-                       (if filters
-                         (vec filters)
-                         (vec (repeat (count types) (ind/-FS (ind/-top-fn)
-                                                             (ind/-top-fn)))))
-                       (if objects
-                         (vec objects)
-                         (vec (repeat (count types) (ind/-empty-fn))))
-                       rest
-                       drest
-                       (if repeat? true false))))
 
 (u/ann-record PrimitiveArray [jtype :- Class,
                               input-type :- Type
@@ -1231,6 +1233,5 @@
 (t/tc-ignore
 (def -AnyHSequential?
   "Predicate for any type that fully supports the HSequential interface."
-  ;; HeterogeneousList does not currently support :rest and others
-  (some-fn HSequential? HeterogeneousSeq? HeterogeneousVector?))
+  (some-fn HeterogeneousList? HSequential? HeterogeneousSeq? HeterogeneousVector?))
 )

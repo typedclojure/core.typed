@@ -26,7 +26,7 @@
             [clojure.core.typed :as t :refer [letfn>]]
             [clojure.set :as set])
   (:import (clojure.core.typed.type_rep F Value Poly TApp Union FnIntersection
-                                        Result AnyValue Top HeterogeneousSeq RClass HeterogeneousList
+                                        Result AnyValue Top HeterogeneousSeq RClass
                                         HeterogeneousVector DataType HeterogeneousMap PrimitiveArray
                                         Function Protocol Bounds FlowSet TCResult HSequential)
            (clojure.core.typed.cs_rep c cset dcon dmap cset-entry)
@@ -875,7 +875,6 @@
              (r/AnyValue? T))
         (cr/empty-cset X Y)
 
-; must remember to update these if HeterogeneousList gets rest/drest
         (and (r/HeterogeneousSeq? S)
              (r/RClass? T))
         (cs-gen V X Y
@@ -891,35 +890,6 @@
                           :cljs (c/Protocol-of 'cljs.core/ISeq [ss]))
                         ((if (or (:rest S) (:drest S)) r/make-CountRange r/make-ExactCountRange)
                            (count (:types S)))))
-                T)
-
-; must remember to update these if HeterogeneousList gets rest/drest
-        (and (r/HeterogeneousList? S)
-             (r/RClass? T))
-        (cs-gen V X Y 
-                (c/In (impl/impl-case
-                        :clojure (c/RClass-of IPersistentList [(apply c/Un (:types S))])
-                        :cljs (c/Protocol-of 'cljs.core/IList [(apply c/Un (:types S))]))
-                      (r/make-ExactCountRange (count (:types S))))
-                T)
-
-        ; TODO add :repeat support
-        (and (r/HSequential? S)
-             (r/RClass? T))
-        (cs-gen V X Y
-                (let [ss (apply c/Un
-                                (concat
-                                  (:types S)
-                                  (when-let [rest (:rest S)]
-                                    [rest])
-                                  (when (:drest S)
-                                    [r/-any])))]
-                  (c/In (impl/impl-case
-                          :clojure (c/In (c/RClass-of clojure.lang.IPersistentCollection [ss])
-                                         (c/RClass-of clojure.lang.Sequential))
-                          :cljs (throw (Exception. "TODO CLJS HSequential cs-gen")))
-                        ((if (or (:rest S) (:drest S)) r/make-CountRange r/make-ExactCountRange)
-                         (count (:types S)))))
                 T)
 
         ; TODO add :repeat support
@@ -939,6 +909,30 @@
                         ((if (or (:rest S) (:drest S)) r/make-CountRange r/make-ExactCountRange)
                          (count (:types S)))))
                 T)
+
+        ; TODO add :repeat support
+        (and (r/HSequential? S)
+             (r/RClass? T))
+        (cs-gen V X Y
+                (let [ss (apply c/Un
+                                (concat
+                                  (:types S)
+                                  (when-let [rest (:rest S)]
+                                    [rest])
+                                  (when (:drest S)
+                                    [r/-any])))]
+                  (c/In (impl/impl-case
+                          :clojure (case (:kind S)
+                                     :vector (c/RClass-of clojure.lang.IPersistentVector [ss])
+                                     :seq (c/RClass-of clojure.lang.ISeq [ss])
+                                     :list (c/RClass-of clojure.lang.IPersistentList [ss])
+                                     :sequential (c/In (c/RClass-of clojure.lang.IPersistentCollection [ss])
+                                                       (c/RClass-of clojure.lang.Sequential)))
+                          :cljs (throw (Exception. "TODO CLJS HSequential cs-gen")))
+                        ((if (or (:rest S) (:drest S)) r/make-CountRange r/make-ExactCountRange)
+                         (count (:types S)))))
+                T)
+
 
         (and (r/RClass? S)
              (r/RClass? T))

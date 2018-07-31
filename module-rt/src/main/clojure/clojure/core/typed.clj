@@ -1538,6 +1538,13 @@ for checking namespaces, cf for checking individual forms."}
        ::special-type true}
   HSeq)
 
+(def ^{:doc "HList is a type for heterogeneous lists. Prefer HSeq, unless implementing IPersistentList is crucial"
+       :forms '[(HList [fixed*] :filter-sets [FS*] :objects [obj*])
+                (HList [fixed* rest *] :filter-sets [FS*] :objects [obj*])
+                (HList [fixed* drest ... bound] :filter-sets [FS*] :objects [obj*])]
+       ::special-type true}
+  HList)
+
 (def ^{:doc "HSet is a type for heterogeneous sets.
             Takes a set of simple values. By default
             :complete? is true.
