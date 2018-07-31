@@ -528,23 +528,7 @@
                      "Hint: Try (t/ann-form (map ...) (t/Transducer in out))."))
       :blame-form ~form}))
 
-(defn inline-map-colls [[_ f & colls :as form] {:keys [internal-error]}]
-  {:pre [(seq colls)]}
-  #_
-  (let [splices (mapv splice-seqable-form colls)
-        ]
-  (if (some known-sequential? colls)
-    (if (= 1 (count colls))
-      `(lazy-seq
-         (when-let [s# (seq ~(first colls))]
-           (cons (~f (first s#)) (map ~f (rest s#)))))
-      `(let [step# (fn step# [cs#]
-                     (lazy-seq
-                       (let [ss# (map seq cs#)]
-                         (when (every? identity ss#)
-                           (cons (map first ss#) (step# (map rest ss#)))))))]
-         (map #(apply ~f %) (step# ~colls))))
-    :else)
+(defn map-colls-fallthrough [[_ f & colls :as form] {:keys [internal-error splice-seqable-form]}]
   (let [gsyms (repeatedly (count colls) gensym)
         bindings (mapcat (fn [i gsym coll] 
                            [gsym `(solve
@@ -566,6 +550,40 @@
          {:msg-fn (fn [_#]
                     "The return type of this 'map' expression does not agree with the expected type.")
           :blame-form ~form}))))
+
+(defn inline-map-colls [[_ f & colls :as form] {:keys [internal-error splice-seqable-form] :as opts}]
+  {:pre [(seq colls)]}
+  (prn "inline-map-colls")
+  (let [splices (mapv splice-seqable-form colls)]
+    (if (some nil? splices)
+      (do
+        (prn "fall through splices" splices)
+        (map-colls-fallthrough form opts))
+      (let [smallest-max-count (apply min (map (fn [e]
+                                                 (apply + (map :max-count e)))
+                                               splices))
+            largest-min-count (apply max (map (fn [e]
+                                                 (apply + (map :min-count e)))
+                                              splices))
+            ordered? (every? (comp :ordered first) splices)
+            max-realized-count (max smallest-max-count largest-min-count)
+            _ (prn "max-realized-count" max-realized-count)
+            csyms (repeatedly (count colls) gensym)]
+        (if (and (not-any? nil? splices)
+                 ordered?
+                 (< max-realized-count 15)
+                 (< (count colls) 4))
+          `(sequence
+             ~(when (pos? max-realized-count)
+                `(let* [~@(mapcat (fn [csym coll]
+                                    [csym `(seq ~coll)])
+                                  csyms
+                                  colls)]
+                   (if (and ~@csyms)
+                     (cons (~f ~@(map (fn [csym] `(first ~csym)) csyms))
+                           (map ~f ~@(map (fn [csym] `(rest ~csym)) csyms)))
+                     nil))))
+          (map-colls-fallthrough form opts))))))
 
 (defmethod -expand-inline 'clojure.core/map [[_ f & colls :as form] {:keys [internal-error] :as opts}]
   (when-not (<= 2 (count form))

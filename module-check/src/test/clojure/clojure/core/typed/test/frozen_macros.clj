@@ -253,9 +253,12 @@
 
 (deftest map-test
   (is-tc-e (map identity [1 2 3]))
+  (is-tc-e (map + [1 2 3] [2 3 4]))
   (is-tc-e (map identity [1 2 3])
            (t/Seq t/Num))
-  (is-tc-err (map identity [1 2 3])
+  (is-tc-e (map identity [1 2 3])
+           (HSeq [Num Num Num]))
+  (is-tc-e (map identity [1 2 3])
              (t/Seq t/Bool))
   ;; FIXME better column number
   (is-tc-err (map identity 'a))

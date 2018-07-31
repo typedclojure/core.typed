@@ -133,11 +133,26 @@
    (fn [&form &env seq-exprs body-expr]
      (@#'T/for &form &env seq-exprs body-expr))}))
 
-(def custom-expansion-opts {:internal-error (fn [s & [opts]]
-                                              ;; TODO opts (line numbers, blame form etc.)
-                                              (let [;; can't access check.utils ns from here (circular deps)
-                                                    #_#_opts (update opts :expected cu/maybe-map->TCResult)]
-                                                (apply err/int-error s (apply concat opts))))})
+(def ^:dynamic *analyze-env* nil)
+
+(defn custom-expansion-opts []
+  (let [analyze (fn [form & [env]]
+                  (#'ana2/run-passes (pre/pre-analyze-form form (or env *analyze-env*))))]
+    {:internal-error (fn [s & [opts]]
+                       ;; TODO opts (line numbers, blame form etc.)
+                       (let [;; can't access check.utils ns from here (circular deps)
+                             #_#_opts (update opts :expected cu/maybe-map->TCResult)]
+                         (apply err/int-error s (apply concat opts))))
+     :splice-seqable-form (fn [form & [env]]
+                            (some->> (beta-reduce/splice-seqable-expr (analyze form (or env *analyze-env*)))
+                                     (mapv (fn [e]
+                                             (let [form (emit-form/emit-form (:expr e))]
+                                               (-> e
+                                                   (dissoc :expr)
+                                                   (assoc :form form)))))))
+     :analyze-env *analyze-env*
+     :analyze analyze
+     :emit-form emit-form/emit-form}))
 
 (T/ann ^:no-check typed-macro-lookup [T/Any :-> T/Any])
 (defn typed-macro-lookup [var]
@@ -147,7 +162,7 @@
           (when (expand/custom-expansion? vsym)
             (fn [form locals & _args_]
               (expand/expand-macro form 
-                                   (merge custom-expansion-opts
+                                   (merge (custom-expansion-opts)
                                           {:vsym vsym
                                            :locals locals}))))))
       (get *typed-macros* var)
@@ -163,6 +178,7 @@
   ([form] (macroexpand-1 form (taj/empty-env)))
   ([form env]
    ;(prn "macroexpand-1" form)
+   (binding [*analyze-env* env]
     (ta-env/ensure (taj/global-env)
       (cond
         (seq? form)
@@ -182,7 +198,7 @@
                                 (when (expand/custom-inline? vsym)
                                   (fn [& _args_]
                                     (expand/expand-inline form
-                                                          (merge custom-expansion-opts
+                                                          (merge (custom-expansion-opts)
                                                                  {:vsym vsym}))))))
                             (and (not local?)
                                  (or (not inline-arities-f)
@@ -214,7 +230,7 @@
         (taj/desugar-symbol form env)
 
         :else
-        form))))
+        form)))))
 
 ;; Syntax Expected -> ChkAST
 

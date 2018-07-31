@@ -8,6 +8,7 @@
             [clojure.tools.analyzer.passes.source-info :as source-info]
             [clojure.tools.analyzer.ast :as ast]
             [clojure.core.typed.analyzer2.pre-analyze :as pre]
+            [clojure.core.typed.analyzer2.jvm.pre-analyze :as jpre]
             [clojure.core.typed.analyzer2.jvm :as jana2]
             [clojure.pprint :as pprint]
             [clojure.core.typed.analyzer2 :as ana]
@@ -43,8 +44,10 @@
       (f ast))))
 
 (defn unwrap-with-meta [ast]
-  (if (= :with-meta (:op ast))
-    (recur (:expr ast))
+  (prn "unwrap-with-meta" (:op ast))
+  (case (:op ast)
+    :with-meta (recur (:expr ast))
+    :unanalyzed (recur (jpre/pre-analyze ast))
     ast))
 
 ;; assumption: none of (keys subst) occur in (vals subst)
@@ -61,63 +64,72 @@
   (symbol (some-> (.ns v) ns-name str) (str (.sym v))))
 
 (defn splice-seqable-expr
-  "If ast is a seqable with a known size and sequential, returns a vector
-  of the members. Otherwise nil.
+  "If ast is a seqable, returns a vector describing its members. Otherwise nil.
+
+  :ordered entry is true if calling `first` on this expr is ordered
 
   eg. (vector 1 2 3)
-  [{:op :rest :expr (vector 1 2 3) :count 3}]
+  [{:op :sequential :expr (vector 1 2 3) :min-count 3 :max-count 3}]
 
   eg. (cons 4 (vector 1 2 3))
-  [{:op :fixed :expr 4}
-   {:op :rest :expr (vector 1 2 3) :count 3}]
+  [{:op :single :expr 4}
+   {:op :sequential :expr (vector 1 2 3) :min-count 3 :max-count}]
   
   eg. (concat (vector 1 2 3) (range 0))
-  [{:op :rest :expr (vector 1 2 3) :count 3}
-   {:op :rest :expr (range 0) :count ##Inf}]
+  [{:op :sequential :expr (vector 1 2 3) :min-count 3 :max-count 3}
+   {:op :sequential :expr (range 0) :min-count ##Inf :max-count ##Inf}]
 
   eg. (concat (vector 1 2 3) (range 0) (vector 1 2 3))
-  [{:op :rest :expr (vector 1 2 3) :count 3}
-   {:op :rest :expr (range 0) :count ##Inf}
-   {:op :rest :expr (vector 1 2 3) :count 3}]
+  [{:op :sequential :expr (vector 1 2 3) :min-count 3 :max-count 3}
+   {:op :sequential :expr (range 0) :min-count ##Inf :max-count ##Inf}
+   {:op :sequential :expr (vector 1 2 3) :min-count 3 :max-count 3}]
 
   eg. (range 0)
-  [{:op :rest :expr (range 0) :count ##Inf}]
+  [{:op :sequential :expr (range 0) :min-count ##Inf :max-count ##Inf}]
 
   eg. (range 0 39)
-  [{:op :rest :expr (range 0 39) :count 39}]
+  [{:op :sequential :expr (range 0 39) :min-count 39 :max-count 39}]
 
   eg. nil
-  [{:op :rest :expr nil :count 0}]
+  [{:op :sequential :expr nil :min-count 0 :max-count 0}]
 
   eg. (take-while symbol? (read-string))
-  [{:op :unknown-rest :expr (take-while symbol? (read))}]
+  [{:op :sequential :expr (take-while symbol? (read)) :min-count 0 :max-count ##Inf}]
+
+  eg. {:a 1 :b 2}
+  [{:op :unordered :expr {:a 1 :b 2} :min-count 2 :max-count 2}]
+
+  eg. #{:a :b}
+  [{:op :unordered :expr #{:a :b} :min-count 2 :max-count 2}]
   "
   [{:keys [op env] :as ast}]
-  {:post [((some-fn nil? map?) %)]}
+  {:post [((some-fn nil? vector?) %)]}
   (prn "splice-seqable-expr" op (emit-form ast))
   (case op
-    :local (do
-             (prn "has init" (map? (:init ast)))
-             (prn "env has init" (-> env :locals (get (:form ast)) map?)
-                  (-> env :locals (get (:form ast)) ((juxt :op :children))))
+    :unanalyzed (splice-seqable-expr (jpre/pre-analyze ast))
+    :local (when (#{:let} (:local ast))
              (some-> (:init ast) splice-seqable-expr))
-    :vector (mapv (fn [i]
-                    {:op :fixed
-                     :expr i})
-                  (:items ast))
-    :const (cond
-             (sequential? (:val ast))
-             (mapv (fn [i]
-                     {:op :fixed
-                      :expr #(pre/pre-analyze-const % env)})
-                   (:val ast))
-
-             (seqable? (:val ast))
-             [{:op :rest
+    :vector [{:op :sequential
+              :ordered true
+              :expr ast
+              :min-count (count (:items ast))
+              :max-count (count (:items ast))}]
+    :const (when (seqable? (:val ast))
+             [{:op (if (sequential? (:val ast)) :sequential :unordered)
+               :ordered (sequential? (:val ast))
                :expr (pre/pre-analyze-const (:val ast) env)
-               :count (count (:val ast))}])
+               :min-count (count (:val ast))
+               :max-count (count (:val ast))}])
     :do (splice-seqable-expr (:ret ast))
     (:let :let-fn) (splice-seqable-expr (:body ast))
+    :new (let [cls ^Class (:class ast)
+               csym (symbol (.getName cls))]
+           (case csym
+             ;; TODO needs testing
+             ;clojure.lang.LazySeq (let [body (-> ast :args first :methods first :body)]
+             ;                       (assert (map? body))
+             ;                       (splice-seqable-expr body))
+             nil))
     ;TODO lift `if` statements around invoke nodes so they are
     ; automatically handled (if performant)
     :invoke (let [{:keys [args]} ast
@@ -132,18 +144,55 @@
                            (if (empty? args)
                              c
                              (let [[arg] args]
-                               (if-let [spliced (splice-seqable-expr arg)]
-                                 (recur (update c :fixed into spliced) (next args))
-                                 (assoc c :rest-form `(concat ~@(map emit-form args)))))))
+                               (when-let [spliced (splice-seqable-expr arg)]
+                                 (recur (into c spliced) (next args))))))
                          clojure.core/seq
                          (when (= 1 cargs)
+                           (prn "in seq case")
                            (splice-seqable-expr (first args)))
+                         clojure.core/sequence
+                         (when (= 1 cargs)
+                           (splice-seqable-expr (first args)))
+                         clojure.core/cons
+                         (when (= 1 cargs)
+                           (let [other (splice-seqable-expr (second args))]
+                             (some->> other
+                                      (into [{:op :single :expr (first args)
+                                              :ordered true
+                                              :min-count 1 :max-count 1}]))))
+                         clojure.core/rest
+                         (when (= 1 cargs)
+                           (when-let [spliced (splice-seqable-expr (first args))]
+                             (let [dec-nat #(max 0 (dec %))
+                                   consumed-from (atom nil)
+                                   consumed-one (reduce (fn [spliced e]
+                                                          ;; TODO deal with this case
+                                                          (if-not (= (:min-count e)
+                                                                     (:max-count e))
+                                                            (reduced nil)
+                                                            (conj spliced
+                                                                  (if (or @consumed-from
+                                                                          (zero? (:max-count e))
+                                                                          )
+                                                                    e
+                                                                    (reset! consumed-from
+                                                                            (-> e
+                                                                                (update :consumed (fnil inc 0))
+                                                                                (update :min-count dec-nat)
+                                                                                (update :max-count dec-nat)))))))
+                                                        []
+                                                        spliced)]
+                               (when consumed-one
+                                 [{:op :rest
+                                   :expr ast
+                                   :ordered (if @consumed-from
+                                              (:ordered @consumed-from)
+                                              ;; must be empty
+                                              true)
+                                   :min-count (apply + (map :min-count consumed-one))
+                                   :max-count (apply + (map :max-count consumed-one))}]))))
                          ;FIXME something fishy about all these. I don't think they
                          ; should return vectors, don't we need to resplice the results?
-                         ;clojure.core/first
-                         ;(when (= 1 cargs)
-                         ;  (when-let [spliced (splice-seqable-expr (first args))]
-                         ;    [(nth spliced 0 (pre/pre-analyze-const nil env))]))
                          ;clojure.core/second
                          ;(when (= 1 cargs)
                          ;  (when-let [spliced (splice-seqable-expr (first args))]
