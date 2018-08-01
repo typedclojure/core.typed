@@ -1753,7 +1753,6 @@
   (let [var-hash (apply frees/combine-frees
                         (frees/fv-variances R)
                         (mapv frees/fv-variances T))
-        ;_ (prn "var-hash" var-hash)
         idx-hash (frees/idx-variances R)]
     (letfn> 
            [
@@ -1771,7 +1770,8 @@
                     inferred (case var
                                (:constant :covariant) S
                                :contravariant T
-                               :invariant (c/Un S T))]
+                               ;; FIXME unsure if In is correct here
+                               :invariant (c/In S T))]
                 inferred))
             ;TODO implement generalize
             ;                  (let [gS (generalize S)]
