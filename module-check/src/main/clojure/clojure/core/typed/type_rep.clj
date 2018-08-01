@@ -582,7 +582,8 @@
   [s t]
   (or (= s t)
       (= :sequential t)
-      (and (= s :list) (= s :seq))))
+      (and (= s :list)
+           (= t :seq))))
 
 (defn HeterogeneousList? [t]
   (and (HSequential? t)

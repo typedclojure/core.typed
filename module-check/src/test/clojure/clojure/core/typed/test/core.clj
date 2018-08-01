@@ -1364,16 +1364,16 @@
   (is-tc-e
     '(1 2 3)
     (HSeq [Num Num Num]))
-  ;; FIXME
-  #_(is-tc-e
+  (is-tc-e
+    '(1 2 3)
+    (HList [Num Num Num]))
+  (is-tc-e
     (seq '(1 2 3))
     (HSeq [Num Num Num]))
   ;; FIXME
-  #_(is-tc-e
+  (is-tc-e
     (let [[a b c & d :as e] '(1 2 3 4 5 6 7)]
-      #_(ann-form a (t/Seqable Number))
-      (ann-form d (t/Seqable Number))
-      #_(ann-form e (t/Seqable Number))))
+      (ann-form d (t/Seqable Number))))
 
   (is (check-ns 'clojure.core.typed.test.destructure)))
 
@@ -3507,7 +3507,12 @@
 
 (deftest atom-test
   (is-tc-e @(atom 1) Any)
-  (is-tc-e @(atom :- Number 1) Number))
+  (is-tc-e @(atom :- Number 1) Number)
+  (is-tc-e (atom :- Number 1) (Atom1 Number))
+  (is-tc-e (atom :- Number 1))
+  (is-tc-e (atom (ann-form 1 Number)) (Atom1 Number))
+  (is-tc-err (atom :- Number 1) (Atom1 Boolean))
+)
 
 (deftest ref-test
   (is-tc-e @(ref 1) Any)
