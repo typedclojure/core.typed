@@ -38,7 +38,8 @@
     :methods methods?
     :cmethods methods?))
 
-(defn expected-for-method "Takes a :method AST node and a single Function arity type,
+(defn expected-for-method
+  "Takes a :fn-method or :method AST node and a single Function arity type,
   and returns the Function if the :method node should be checked
   against the Function, otherwise returns nil."
   [{:keys [fixed-arity variadic?] :as method}
@@ -49,7 +50,10 @@
    :post [((some-fn nil? r/Function?) %)]}
   ;; fn-method-u/*check-fn-method1-rest-type*, and check-fn-method1
   ;; actually distribute the types amongst the fixed and rest parameters
-  (let [ndom (count dom)]
+  (let [ndom (count dom)
+        fixed-arity (if (= :method (:op method))
+                      (inc fixed-arity)
+                      fixed-arity)]
     (cond
       (or rest drest pdot prest)
       (cond
