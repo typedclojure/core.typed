@@ -1352,14 +1352,16 @@
   {:pre [(r/Type? t)]
    :post [((some-fn nil? r/Result?) %)]}
   (let [ftype (fn ftype [t]
+                {:pre [(r/Type? t)]
+                 :post [((some-fn nil? r/Result?) %)]}
                 (let [t (c/fully-resolve-type t)]
                   (cond
-                    (r/Union? t) (let [ts (map ftype (:types t))]
+                    (r/Union? t) (let [ts (mapv ftype (:types t))]
                                    (when (every? identity ts)
                                      (apply c/union-Results ts)))
                     (r/Intersection? t) (when-let [ts (seq (keep ftype (:types t)))]
                                           (apply c/intersect-Results ts))
-                    (r/Nil? t) (r/ret r/-nil (fo/-false-filter))
+                    (r/Nil? t) (r/make-Result r/-nil (fo/-false-filter))
                     (r/HSequential? t) (cond
                                          (seq (:types t))
                                          (r/make-Result (first (:types t))
@@ -1380,14 +1382,16 @@
   (when-not (= 1 (count args))
     (err/int-error (str "'first' accepts 1 argument, found "
                         (count args))))
-  (let [[coll :as cargs] (mapv check-expr args)
-        ct (r/ret-t (u/expr-type coll))
-        fres (first-result ct)]
-    (if fres
-      (assoc expr
-             :args cargs
-             u/expr-type (r/Result->TCResult fres))
-      cu/not-special)))
+  (if vs/*custom-expansions*
+    (let [[coll :as cargs] (mapv check-expr args)
+          ct (r/ret-t (u/expr-type coll))
+          fres (first-result ct)]
+      (if fres
+        (assoc expr
+               :args cargs
+               u/expr-type (r/Result->TCResult fres))
+        cu/not-special))
+    cu/not-special))
 
 ;assoc
 (defmethod -invoke-special 'clojure.core/assoc

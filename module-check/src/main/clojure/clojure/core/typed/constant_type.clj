@@ -61,7 +61,12 @@
 
   ;default for ISeqs
   ISeq
-  (constant-ret [iseq] (ret (r/-hseq (mapv constant-type iseq))))
+  (constant-ret [iseq] (ret (r/-hsequential
+                              (mapv constant-type iseq)
+                              :kind (cond
+                                      (list? iseq) :list
+                                      (seq? iseq) :seq
+                                      :else :sequential))))
 
   IPersistentVector
   (constant-ret [cvec] (ret (r/-hvec (mapv constant-type cvec))))
