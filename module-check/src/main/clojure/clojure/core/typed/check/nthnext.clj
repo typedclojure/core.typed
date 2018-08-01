@@ -114,6 +114,7 @@
   {:pre [(nat-int? nnexts)
          (vector? cargs)
          (r/TCResult? (u/expr-type target))]}
+  (prn "check-specific-next" nnexts)
   (let [target-ret (-> target u/expr-type)]
     (if-let [t (nthnext-type (r/ret-t target-ret) nnexts)]
       (-> expr
@@ -124,7 +125,9 @@
                                (if (ind/subtype? t (c/Un r/-nil (c/-name `t/Coll r/-any)))
                                  (cond
                                    ; persistent clojure.core/seq arities
-                                   (= nnexts 0) (cond
+                                   (= nnexts 0) (do
+                                                  (prn "in seq special case")
+                                                  (cond
                                                   ; first arity of `seq
                                                   ;[(NonEmptyColl x) -> (NonEmptyASeq x) :filters {:then tt :else ff}]
                                                   (ind/subtype? t (c/-name `t/NonEmptyColl r/-any)) (fo/-true-filter)
@@ -142,7 +145,7 @@
                                                                 (fo/-or (fo/-filter-at r/-nil
                                                                                        (:o target-ret))
                                                                         (fo/-filter-at (c/-name `t/EmptyCount)
-                                                                                       (:o target-ret)))))
+                                                                                       (:o target-ret))))))
                                    ;; TODO generalize above special cases to all nnexts
                                    (ind/subtype? t r/-nil) (fo/-false-filter)
                                    (not (ind/subtype? r/-nil t)) (fo/-true-filter)
