@@ -105,7 +105,7 @@
                       [(c/PolyDots-body* new-nmes t) new-frees (c/PolyDots-bbnds* new-nmes t) :PolyDots])
     :else [t nil nil nil]))
 
-(def not-special ::not-special)
+(def not-special :default)
 
 ;(t/ann hvec->rets [HSequential -> (Seqable TCResult)])
 (defn hvec->rets [v]
