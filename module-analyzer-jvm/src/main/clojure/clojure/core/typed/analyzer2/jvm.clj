@@ -100,19 +100,24 @@
                              (fn [ast] ast)
                              passes))
         pre-passes  (pfns-fn pre-passes)
-        post-passes (pfns-fn post-passes)]
-    (fn [ast]
-      (let [state (or (-> ast :env ::ana/state)
-                      (u/update-vals state #(%)))]
-        (ast/walk (assoc-in ast [:env ::ana/state] state)
-                  pre-passes
-                  post-passes)))))
+        post-passes (pfns-fn post-passes)
+        #_#_
+        walk (fn [ast]
+               (let [state (or (-> ast :env ::ana/state)
+                               (u/update-vals state #(%)))]
+                 (ast/walk (assoc-in ast [:env ::ana/state] state)
+                           pre-passes
+                           post-passes)))]
+    {:pre (fn [ast]
+            (let [state (or (-> ast :env ::ana/state)
+                            (u/update-vals state #(%)))]
+              (pre-passes (assoc-in ast [:env ::ana/state] state))))
+     :post post-passes}))
 
 (defn schedule
-  "Takes a set of Vars that represent tools.analyzer passes and returns a function
-   that takes an AST and applies all the passes and their dependencies to the AST,
-   trying to compose together as many passes as possible to reduce the number of
-   full tree traversals.
+  "Takes a set of Vars that represent tools.analyzer passes and returns a map
+   m of two functions, such that (ast/walk ast (:pre m) (:post m)) runs all
+   passes on ast.
 
    Each pass must have a :pass-info element in its Var's metadata and it must point
    to a map with the following parameters (:before, :after, :affects and :state are
@@ -129,11 +134,6 @@
                          passes
                  - :any  if the pass can be composed with other passes in both a prewalk
                          or a postwalk
-   * :affects  a set of Vars, this pass must be the last in the same tree traversal that all
-               the specified passes must participate in
-               This pass must take a function as argument and return the actual pass, the
-               argument represents the reified tree traversal which the pass can use to
-               control a recursive traversal, implies :depends
    * :state    a no-arg function that should return an atom holding an init value that will be
                passed as the first argument to the pass (the pass will thus take the ast
                as the second parameter), the atom will be the same for the whole tree traversal
@@ -214,7 +214,9 @@
    Use #'clojure.tools.analyzer.passes/schedule to get a function from a set of passes that
    run-passes can be bound to."
   [ast]
-  (@scheduled-default-passes ast))
+  (ast/walk ast
+            (:pre @scheduled-default-passes)
+            (:post @scheduled-default-passes)))
 
 (def default-passes-opts
   "Default :passes-opts for `analyze`"

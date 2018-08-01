@@ -25,6 +25,7 @@
             [clojure.core.typed.util-vars :as vs]
             [clojure.core.typed.coerce-utils :as coerce]
             [clojure.core.typed.contract-utils :as con]
+            [clojure.tools.analyzer.ast :as ast]
             [clojure.core.typed :as T]
             [clojure.core.typed :as t]
             [clojure.core.cache :as cache]
@@ -417,6 +418,8 @@
     ast))
 ;========================
 
+;; old tools.analyzer.jvm config
+(comment
 (def typed-passes
   (-> jana2/default-passes
       ; this pass is manually inserted as we check
@@ -443,6 +446,7 @@
 
 (defn run-passes [ast]
   (typed-schedule ast))
+)
 
 (declare scheduled-passes-for-custom-expansions)
 
@@ -452,7 +456,10 @@
     {Compiler/LOADER     (clojure.lang.RT/makeClassLoader)
      #'ana2/macroexpand-1 macroexpand-1
      #'ana2/run-passes    (if vs/*custom-expansions*
-                            #(@scheduled-passes-for-custom-expansions %)
+                            (fn [ast]
+                              (ast/walk ast
+                                        (:pre @scheduled-passes-for-custom-expansions)
+                                        (:post @scheduled-passes-for-custom-expansions)))
                             jana2/run-passes)
      #'pre/pre-parse      jpre/pre-parse
      #'ana2/var?          var?
