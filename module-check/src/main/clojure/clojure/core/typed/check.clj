@@ -1337,16 +1337,19 @@
 ;cons
 (defmethod -invoke-special 'clojure.core/cons
   [{fexpr :fn :keys [args] :as expr} & [expected]]
-  {:post [(-> % u/expr-type r/TCResult?)]}
+  {:post [(or (#{cu/not-special} %)
+              (-> % u/expr-type r/TCResult?))]}
   (when-not (= 2 (count args))
     (err/int-error (str "'cons' accepts 2 arguments, found "
                         (count args))))
-  (let [cargs (mapv check-expr args)
-        ]
-    ;;TODO
-    #_(assert nil "Implement heterogeneous Cons for every? inlining")
-    cu/not-special
-    ))
+  (if vs/*custom-expansions*
+    (let [cargs (mapv check-expr args)
+          ]
+      ;;TODO
+      #_(assert nil "Implement heterogeneous Cons for every? inlining")
+      cu/not-special
+      )
+    cu/not-special))
 
 (defn first-result [t]
   {:pre [(r/Type? t)]
