@@ -1961,10 +1961,16 @@
   ;;FIXME probably related to how we handle :invariant variables in subst-gen
   #_(is-cf ((fnil + 0) 2))
   (is-cf ((fnil + 0) nil))
-  ; can Typed Racket do better here?
+  ;;FIXME probably related to how we handle :invariant variables in subst-gen
+  #_
   (is-cf ((fnil (clojure.core.typed/ann-form + [Number * -> Number])
                 0)
-          2.2)))
+          2.2))
+  ; can Typed Racket do better here?
+  (is-cf ((fnil (clojure.core.typed/ann-form + [Number * -> Number])
+                (ann-form 0 Number))
+          2.2))
+)
 
 ;(cf (every? (fn [a] a) [1]))
 

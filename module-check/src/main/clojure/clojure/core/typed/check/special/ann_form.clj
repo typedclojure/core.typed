@@ -39,7 +39,8 @@
   (let [tsyn (ann-form-annotation expr)
         parsed-t (parse-annotation tsyn expr)
         ;; TODO let users add expected filters etc
-        this-expected (r/ret parsed-t)
+        this-expected (or (some-> expected (assoc :t parsed-t))
+                          (r/ret parsed-t))
         _ (binding [vs/*current-expr* expr
                     vs/*current-env* env]
             (below/maybe-check-below
