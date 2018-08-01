@@ -4941,7 +4941,7 @@
 (deftest seq-branch-test
   (is-tc-e (if (seq [1 2 3]) 1 nil)
            Num)
-  (is-tc-e (if (seq []) (do (print-env "env") 1) nil)
+  (is-tc-e (if (seq []) 1 nil)
            nil)
   (is-tc-err (if (seq (ann-form [] (Seqable Num))) 1 nil)
              nil)
