@@ -41,8 +41,7 @@
           target-types (if (r/Union? target-t)
                          (:types target-t)
                          [target-t])]
-      ;(prn "HSequentials" (group-by c/AnyHSequential? target-types))
-      (if (every? c/AnyHSequential? target-types)
+      (if (every? r/HSequential? target-types)
         (let [ts (map (partial nthnext-type nnexts) target-types)]
           (-> expr
               (update-in [:fn] check-fn)
@@ -51,7 +50,7 @@
                 u/expr-type (r/ret (apply c/Un ts)
                                    (cond
                                      (every? #(ind/subtype? % r/-nil) ts) (fo/-false-filter)
-                                     (every? c/AnyHSequential? ts) (fo/-true-filter)
+                                     (every? r/HSequential? ts) (fo/-true-filter)
                                      :else (fo/-simple-filter))))))
         cu/not-special))))
 

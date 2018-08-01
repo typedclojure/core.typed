@@ -531,50 +531,6 @@
 (defn DottedPretype2-maker [pre-type name]
   (DottedPretype-maker pre-type name 2))
 
-(u/ann-record HeterogeneousVector [;fixed members
-                                   types :- (t/Vec Type)
-                                   fs :- (t/Vec p/IFilterSet)
-                                   objects :- (t/Vec p/IRObject)
-                                   ;variable members to the right of fixed
-                                   rest :- (U nil Type)
-                                   drest :- (U nil DottedPretype)
-                                   repeat :- Boolean])
-(u/def-type HeterogeneousVector [types fs objects rest drest repeat]
-  "A constant vector, clojure.lang.IPersistentVector"
-  [(vector? types)
-   (every? (some-fn Type? Result?) types)
-   (vector? fs)
-   (every? p/IFilterSet? fs)
-   (vector? objects)
-   (every? p/IRObject? objects)
-   (apply = (map count [types fs objects]))
-   (#{0 1} (count (filter identity [rest drest repeat])))
-   (if repeat (not-empty types) true)
-   ((some-fn nil? Type?) rest)
-   ((some-fn nil? DottedPretype?) drest)
-   ((some-fn true? false?) repeat)]
-  :methods
-  [p/TCType])
-
-(t/ann ^:no-check -hvec
-       [(t/Vec Type) & :optional {:filters (Seqable p/IFilterSet) :objects (Seqable p/IRObject)
-                                  :rest (U nil Type) :drest (U nil DottedPretype) :repeat Boolean} -> Type])
-(defn -hvec
-  [types & {:keys [filters objects rest drest] repeat? :repeat}]
-  (if (some Bottom? types)
-    (Bottom)
-    (HeterogeneousVector-maker types
-                               (if filters
-                                 (vec filters)
-                                 (vec (repeat (count types) (ind/-FS (ind/-top-fn) 
-                                                                     (ind/-top-fn)))))
-                               (if objects
-                                 (vec objects)
-                                 (vec (repeat (count types) (ind/-empty-fn))))
-                               rest
-                               drest
-                               (if repeat? true false))))
-
 (u/ann-record HSequential [types :- (Seqable Type)
                            fs :- (t/Vec p/IFilterSet)
                            objects :- (t/Vec p/IRObject)
@@ -621,6 +577,13 @@
                        (if repeat? true false)
                        (or kind :sequential))))
 
+(defn compatible-HSequential-kind?
+  "True if kind s is a subtype of kind t."
+  [s t]
+  (or (= s t)
+      (= :sequential t)
+      (and (= s :list) (= s :seq))))
+
 (defn HeterogeneousList? [t]
   (and (HSequential? t)
        (= :list (:kind t))))
@@ -639,6 +602,17 @@
 (defn -hseq
   [types & opts]
   (apply -hsequential (concat opts [:kind :seq])))
+
+(defn HeterogeneousVector? [t]
+  (and (HSequential? t)
+       (= :vector (:kind t))))
+
+(t/ann ^:no-check -hvec
+       [(t/Vec Type) & :optional {:filters (Seqable p/IFilterSet) :objects (Seqable p/IRObject)
+                                  :rest (U nil Type) :drest (U nil DottedPretype) :repeat Boolean} -> Type])
+(defn -hvec
+  [types & opts]
+  (apply -hsequential (concat opts [:kind :vector])))
 
 (u/ann-record HSet [fixed :- (t/Set Type)
                     complete? :- Boolean])
@@ -774,7 +748,7 @@
                       o :- p/IRObject
                       flow :- FlowSet])
 
-(declare -AnyHSequential? DottedPretype?)
+(declare HSequential? DottedPretype?)
 
 (u/ann-record Function [dom :- (t/U nil (t/Seqable Type)),
                         rng :- Result,
@@ -793,7 +767,7 @@
    (#{0 1} (count (filter identity [rest drest kws prest pdot])))
    ; we could have prest without repeat, but why would you do that
    (or (nil? prest)
-       (-AnyHSequential? prest))
+       (HSequential? prest))
    (or (nil? pdot)
        (DottedPretype? pdot))
    (if prest (and (:repeat prest) (:types prest)) true)
@@ -1198,9 +1172,3 @@
   []
   :methods
   [p/TCType])
-
-(t/tc-ignore
-(def -AnyHSequential?
-  "Predicate for any type that fully supports the HSequential interface."
-  (some-fn HeterogeneousList? HSequential? HeterogeneousSeq? HeterogeneousVector?))
-)

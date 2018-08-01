@@ -26,7 +26,7 @@
   (:import (clojure.core.typed.type_rep NotType DifferenceType Intersection Union FnIntersection Bounds
                                         DottedPretype Function RClass App TApp
                                         PrimitiveArray DataType Protocol TypeFn Poly PolyDots
-                                        Mu HeterogeneousVector HeterogeneousMap
+                                        Mu HeterogeneousMap
                                         CountRange Name Value Top TypeOf Unchecked TopFunction B F Result AnyValue
                                         KwArgsSeq TCError Extends JSNumber JSBoolean
                                         CLJSInteger ArrayCLJS JSNominal JSString TCResult AssocType
@@ -1796,9 +1796,6 @@
                [:filter-sets (mapv unparse-filter-set fs)])
              (when-not (every? #{orep/-empty} objects)
                [:objects (mapv unparse-object objects)])))))
-
-(defmethod unparse-type* HeterogeneousVector [v]
-  (unparse-heterogeneous* (unparse-Name-symbol-in-ns `t/HVec) v))
 
 (defmethod unparse-type* HSequential [v]
   (unparse-heterogeneous*

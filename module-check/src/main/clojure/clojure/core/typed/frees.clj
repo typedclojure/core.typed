@@ -16,7 +16,7 @@
   (:import (clojure.core.typed.type_rep NotType DifferenceType Intersection Union FnIntersection Bounds
                                         DottedPretype Function RClass App TApp
                                         PrimitiveArray DataType Protocol TypeFn Poly PolyDots
-                                        Mu HeterogeneousVector HeterogeneousMap
+                                        Mu HeterogeneousMap
                                         CountRange Name Value Top Unchecked TopFunction B F Result AnyValue
                                         Scope TCError Extends AssocType HSequential HSet
                                         JSObj TypeOf)
@@ -267,21 +267,13 @@
   [{:keys [types]}]
   (apply combine-frees (mapv frees (vals types))))
 
-(defn heterogeneous*-frees-any-var
+(add-frees-method [::any-var HSequential]
   [{:keys [types fs objects rest drest]}]
   (apply combine-frees (concat (mapv frees (concat types fs objects))
                                (when rest [(frees rest)])
                                (when drest
                                  [(dissoc (-> (:pre-type drest) frees)
                                           (:name drest))]))))
-
-(add-frees-method [::any-var HeterogeneousVector]
-  [t]
-  (heterogeneous*-frees-any-var t))
-
-(add-frees-method [::any-var HSequential]
-  [t]
-  (heterogeneous*-frees-any-var t))
 
 (add-frees-method [::any-var HSet]
   [{:keys [fixed]}]

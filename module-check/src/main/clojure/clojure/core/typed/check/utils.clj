@@ -107,7 +107,7 @@
 
 (def not-special ::not-special)
 
-;(t/ann hvec->rets [HeterogeneousVector -> (Seqable TCResult)])
+;(t/ann hvec->rets [HSequential -> (Seqable TCResult)])
 (defn hvec->rets [v]
   {:pre [(r/HeterogeneousVector? v)]
    :post [(every? r/TCResult? %)]}

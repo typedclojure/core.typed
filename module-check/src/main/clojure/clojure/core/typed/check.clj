@@ -1232,8 +1232,7 @@
                                expected)))
 
       (and (seq cargs)
-           ((some-fn r/HeterogeneousVector? r/HeterogeneousList? r/HeterogeneousSeq?) 
-            (r/ret-t (u/expr-type (last cargs))))
+           (r/HSequential?  (r/ret-t (u/expr-type (last cargs))))
            ;; every key must be a Value
            (let [kvs (vec
                        (concat (map (comp r/ret-t u/expr-type) (butlast cargs))

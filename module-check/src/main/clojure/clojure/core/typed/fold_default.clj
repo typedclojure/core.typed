@@ -11,7 +11,7 @@
   (:import (clojure.core.typed.type_rep NotType DifferenceType Intersection Union FnIntersection Bounds
                                         DottedPretype Function RClass JSNominal App TApp
                                         PrimitiveArray DataType Protocol TypeFn Poly PolyDots
-                                        Mu HeterogeneousVector HeterogeneousMap
+                                        Mu HeterogeneousMap
                                         CountRange Name Value Top Unchecked TopFunction B F Result
                                         TCResult TCError FlowSet Extends
                                         JSNumber CLJSInteger JSObject JSString ArrayCLJS
@@ -138,13 +138,13 @@
                                                            [k (type-rec v)])))))))
 
 (add-default-fold-case TypeFn
-                       (fn [^TypeFn ty _]
+                       (fn [ty _]
                          (let [names (c/TypeFn-fresh-symbols* ty)
                                body (c/TypeFn-body* names ty)
                                bbnds (c/TypeFn-bbnds* names ty)
                                bmap (zipmap (map r/make-F names) bbnds)]
                            (c/TypeFn* names 
-                                      (.variances ty)
+                                      (:variances ty)
                                       (free-ops/with-bounded-frees bmap
                                         (mapv #(r/visit-bounds % type-rec) bbnds))
                                       (free-ops/with-bounded-frees bmap
@@ -152,7 +152,7 @@
 
 
 (add-default-fold-case Poly
-                       (fn [^Poly ty _]
+                       (fn [ty _]
                          (let [names (c/Poly-fresh-symbols* ty)
                                body (c/Poly-body* names ty)
                                bbnds (c/Poly-bbnds* names ty)
@@ -165,7 +165,7 @@
                                     :named (:named ty)))))
 
 (add-default-fold-case PolyDots
-                       (fn [^PolyDots ty _]
+                       (fn [ty _]
                          (let [names (c/PolyDots-fresh-symbols* ty)
                                body (c/PolyDots-body* names ty)
                                bbnds (c/PolyDots-bbnds* names ty)
@@ -184,22 +184,16 @@
                                body (c/Mu-body* name ty)]
                            (c/Mu* name (type-rec body)))))
 
-(defn- fold-Heterogeneous* [constructor type-rec filter-rec object-rec]
-  (fn [{:keys [types rest drest repeat kind] :as ty} _]
-    (constructor
-      (mapv type-rec (:types ty))
-      :filters (mapv filter-rec (:fs ty))
-      :objects (mapv object-rec (:objects ty))
-      :rest (when rest (type-rec rest))
-      :drest (when drest (update-in drest [:pre-type] type-rec))
-      :repeat repeat
-      :kind kind)))
-
-(add-default-fold-case HeterogeneousVector
-                       (fold-Heterogeneous* r/-hvec type-rec filter-rec object-rec))
-
-(add-default-fold-case HSequential
-                       (fold-Heterogeneous* r/-hsequential type-rec filter-rec object-rec))
+(add-default-fold-case HSequential 
+                       (fn [{:keys [types rest drest repeat kind] :as ty} _]
+                         (r/-hsequential
+                           (mapv type-rec (:types ty))
+                           :filters (mapv filter-rec (:fs ty))
+                           :objects (mapv object-rec (:objects ty))
+                           :rest (when rest (type-rec rest))
+                           :drest (when drest (update-in drest [:pre-type] type-rec))
+                           :repeat repeat
+                           :kind kind)))
 
 (add-default-fold-case HSet
                        (fn [{:keys [fixed] :as ty} _]

@@ -28,6 +28,7 @@
 
 
 ; Expr Expr^n TCResult TCResult^n (U nil TCResult) -> TCResult
+;TODO HeterogeneousMap case
 (defn check-funapp [fexpr args fexpr-ret-type arg-ret-types expected]
   {:pre [(r/TCResult? fexpr-ret-type)
          (every? r/TCResult? arg-ret-types)

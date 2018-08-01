@@ -27,7 +27,7 @@
             [clojure.set :as set])
   (:import (clojure.core.typed.type_rep F Value Poly TApp Union FnIntersection
                                         Result AnyValue Top RClass
-                                        HeterogeneousVector DataType HeterogeneousMap PrimitiveArray
+                                        DataType HeterogeneousMap PrimitiveArray
                                         Function Protocol Bounds FlowSet TCResult HSequential)
            (clojure.core.typed.cs_rep c cset dcon dmap cset-entry)
            (clojure.core.typed.filter_rep TypeFilter)
@@ -568,36 +568,6 @@
         ; handle Record as HMap
         (r/Record? S) (cs-gen V X Y (c/Record->HMap S) T)
 
-        (and (r/HeterogeneousVector? S)
-             (r/HeterogeneousVector? T))
-        (cs-gen-HSequential V X Y (c/HVec->HSequential S) (c/HVec->HSequential T))
-
-        (and (r/HeterogeneousSeq? S)
-             (r/HeterogeneousSeq? T))
-        (cs-gen-HSequential V X Y (c/HSeq->HSequential S) (c/HSeq->HSequential T))
-
-        (and (r/HeterogeneousList? S)
-             (r/HeterogeneousList? T))
-        (cs-gen-HSequential V X Y (c/HList->HSequential S) (c/HList->HSequential T))
-
-        ; HList/HSeq/HVector are HSequential
-        (and ((some-fn r/HeterogeneousList?
-                       r/HeterogeneousSeq?
-                       r/HeterogeneousVector?)
-              S)
-             (r/HSequential? T))
-        (cs-gen-HSequential V X Y 
-                (cond
-                  (r/HeterogeneousList? S) (c/HList->HSequential S) 
-                  (r/HeterogeneousVector? S) (c/HVec->HSequential S) 
-                  :else (c/HSeq->HSequential S))
-                T)
-
-        ; HList is a HSeq
-        (and (r/HeterogeneousList? S)
-             (r/HeterogeneousSeq? T))
-        (cs-gen-HSequential V X Y (c/HList->HSequential S) (c/HSeq->HSequential T))
-
         (and (r/HSequential? S)
              (r/HSequential? T))
         (cs-gen-HSequential V X Y S T)
@@ -846,10 +816,9 @@
         ; It's useful to also trigger this case with HSequential, as that's more likely
         ; to be on the right.
         (and (r/RClass? S)
-             ((some-fn r/HeterogeneousVector? r/HSequential?) T))
+             (r/HSequential? T))
         (if-let [[Sv] (seq
-                        (filter (some-fn r/HeterogeneousVector? r/HSequential?)
-                                (map c/fully-resolve-type (c/RClass-supers* S))))]
+                        (filter r/HSequential? (map c/fully-resolve-type (c/RClass-supers* S))))]
           (cs-gen V X Y Sv T)
           (fail! S T))
         
@@ -875,41 +844,6 @@
              (r/AnyValue? T))
         (cr/empty-cset X Y)
 
-        (and (r/HeterogeneousSeq? S)
-             (r/RClass? T))
-        (cs-gen V X Y
-                (let [ss (apply c/Un
-                                (concat
-                                  (:types S)
-                                  (when-let [rest (:rest S)]
-                                    [rest])
-                                  (when (:drest S)
-                                    [r/-any])))]
-                  (c/In (impl/impl-case
-                          :clojure (c/RClass-of ISeq [ss])
-                          :cljs (c/Protocol-of 'cljs.core/ISeq [ss]))
-                        ((if (or (:rest S) (:drest S)) r/make-CountRange r/make-ExactCountRange)
-                           (count (:types S)))))
-                T)
-
-        ; TODO add :repeat support
-        (and (r/HeterogeneousVector? S)
-             (r/RClass? T))
-        (cs-gen V X Y
-                (let [ss (apply c/Un 
-                                (concat
-                                  (:types S)
-                                  (when-let [rest (:rest S)]
-                                    [rest])
-                                  (when (:drest S)
-                                    [r/-any])))]
-                  (c/In (impl/impl-case
-                          :clojure (c/RClass-of APersistentVector [ss])
-                          :cljs (c/Protocol-of 'cljs.core/IVector [ss]))
-                        ((if (or (:rest S) (:drest S)) r/make-CountRange r/make-ExactCountRange)
-                         (count (:types S)))))
-                T)
-
         ; TODO add :repeat support
         (and (r/HSequential? S)
              (r/RClass? T))
@@ -923,7 +857,7 @@
                                     [r/-any])))]
                   (c/In (impl/impl-case
                           :clojure (case (:kind S)
-                                     :vector (c/RClass-of clojure.lang.IPersistentVector [ss])
+                                     :vector (c/RClass-of clojure.lang.APersistentVector [ss])
                                      :seq (c/RClass-of clojure.lang.ISeq [ss])
                                      :list (c/RClass-of clojure.lang.IPersistentList [ss])
                                      :sequential (c/In (c/RClass-of clojure.lang.IPersistentCollection [ss])
@@ -950,8 +884,8 @@
         (let [new-S (c/upcast-hset S)]
           (cs-gen V X Y new-S T))
 
-        (r/HeterogeneousVector? S)
-        (cs-gen V X Y (c/upcast-hvec S) T)
+        (r/HSequential? S)
+        (cs-gen V X Y (c/upcast-HSequential S) T)
 
         (and (r/AssocType? S)
              (r/Protocol? T))
@@ -971,6 +905,8 @@
   {:pre [(r/HSequential? S)
          (r/HSequential? T)]
    :post [(cr/cset? %)]}
+  (when-not (r/compatible-HSequential-kind? (:kind S) (:kind T))
+    (fail! S T))
   (cset-meet* (concat
                 (cond
                   ;simple case

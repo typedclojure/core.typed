@@ -11,7 +11,7 @@
             [clojure.core.typed.tvar-bnds :as bnds]
             [clojure.set :as set]
             [clojure.core.typed.current-impl :as impl])
-  (:import (clojure.core.typed.type_rep HeterogeneousMap Value Intersection F RClass DataType HeterogeneousVector)
+  (:import (clojure.core.typed.type_rep HeterogeneousMap Value Intersection F RClass DataType HSequential)
            (clojure.lang IPersistentMap IPersistentVector)))
 
 ;supporting assoc functionality
@@ -95,17 +95,18 @@
            :clojure (c/RClass-of IPersistentMap [ks vs])
            :cljs (c/Protocol-of 'cljs.core/IMap [ks vs]))))))
   
-  HeterogeneousVector
+  HSequential
   (-assoc-pair
    [v [kt vt]]
-   (let [rkt (-> kt :t c/fully-resolve-type)]
-     (when (r/Value? rkt)
-       (let [kt rkt
-             k (:val kt)] 
-         (when (and (integer? k) (<= k (count (:types v))))
-           (r/-hvec (assoc (:types v) k (:t vt))
-                    :filters (assoc (:fs v) k (:fl vt))
-                    :objects (assoc (:objects v) k (:o vt))))))))
+   (when (r/HeterogeneousVector? v)
+     (let [rkt (-> kt :t c/fully-resolve-type)]
+       (when (r/Value? rkt)
+         (let [kt rkt
+               k (:val kt)] 
+           (when (and (integer? k) (<= k (count (:types v))))
+             (r/-hvec (assoc (:types v) k (:t vt))
+                      :filters (assoc (:fs v) k (:fl vt))
+                      :objects (assoc (:objects v) k (:o vt)))))))))
   
   DataType
   (-assoc-pair

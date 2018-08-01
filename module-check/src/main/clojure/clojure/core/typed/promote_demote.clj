@@ -11,7 +11,7 @@
   (:import (clojure.core.typed.type_rep NotType Intersection Union FnIntersection Bounds
                                         DottedPretype Function RClass App TApp
                                         PrimitiveArray DataType Protocol TypeFn Poly PolyDots
-                                        Mu HeterogeneousVector HeterogeneousMap
+                                        Mu HeterogeneousMap
                                         CountRange Name Value Top Unchecked TopFunction B F Result AnyValue
                                         TCError Extends JSNominal
                                         JSString JSBoolean JSNumber CLJSInteger JSObject
@@ -173,32 +173,6 @@
                                (update-in drest [:pre-type] pmt))
                       :repeat (:repeat T)
                       :kind (:kind T)))))
-
-(promote-demote HeterogeneousVector
-  [T V]
-  (let [pmt #(promote % V)
-        latent-filter-vs (set/intersection (set (mapcat frees/fv (:fs T)))
-                                           (set (mapcat frees/fi (:fs T))))]
-    (cond
-      ;if filter contains V, give up
-      (seq (set/intersection V latent-filter-vs)) (c/RClass-of clojure.lang.IPersistentVector [r/-any])
-
-      ;if dotted bound is in V, transfer to rest args
-      (and (:drest T) (V (-> T :drest :name)))
-      (r/-hvec (mapv pmt (:types T))
-               :filters (:fs T)
-               :objects (:objects T)
-               :rest (pmt (-> T :drest :pre-type)))
-
-      :else
-      (r/-hvec (mapv pmt (:types T))
-               ; we know no filters contain V
-               :filters (:fs T)
-               :objects (:objects T)
-               :rest (when-let [rest (:rest T)]
-                       (pmt rest))
-               :drest (when-let [drest (:drest T)]
-                        (update-in drest [:pre-type] pmt))))))
 
 (promote-demote HSet
   [T V]

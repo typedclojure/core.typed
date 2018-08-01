@@ -32,7 +32,7 @@
   (:import (clojure.core.typed.type_rep HeterogeneousMap Poly TypeFn PolyDots TApp App Value
                                         Union Intersection F Function Mu B KwArgs KwArgsSeq RClass
                                         Bounds Name Scope CountRange Intersection DataType Extends
-                                        JSNominal Protocol HeterogeneousVector GetType HSequential
+                                        JSNominal Protocol GetType HSequential
                                         HSet AssocType TypeOf)
            (clojure.lang IPersistentMap IPersistentVector Var)))
 
@@ -66,37 +66,6 @@
 
 (t/ann bottom r/Type)
 (def ^:private bottom (make-Union []))
-
-;; {HVec,HList,HSeq}->HSequential
-
-(t/ann ^:no-check HVec->HSequential [HeterogeneousVector -> HSequential])
-(defn HVec->HSequential [v]
-  {:pre [(r/HeterogeneousVector? v)]
-   :post [(r/HSequential? %)]}
-  (r/-hsequential (:types v)
-                  :filters (:fs v)
-                  :objects (:objects v)
-                  :rest (:rest v)
-                  :drest (:drest v)
-                  :repeat (:repeat v)))
-
-(t/ann ^:no-check HList->HSequential [HSequential -> HSequential])
-(defn HList->HSequential [l]
-  {:pre [(r/HeterogeneousList? l)]
-   :post [(r/HSequential? %)]}
-  (assoc l :kind :sequential))
-
-(t/ann ^:no-check HSeq->HSequential [HSequential -> HSequential])
-(defn HSeq->HSequential [s]
-  {:pre [(r/HeterogeneousSeq? s)]
-   :post [(r/HSequential? %)]}
-  (assoc s :kind :seq))
-
-(t/tc-ignore
-(def AnyHSequential?
-  "Predicate for any type that fully supports the HSequential interface."
-  r/-AnyHSequential?)
-)
 
 ;; Heterogeneous maps
 
@@ -258,9 +227,9 @@
                    (Protocol-of 'cljs.core/ISeqable [tp])))))
 
 ; Should update this with prest
-(t/ann ^:no-check upcast-hvec [HeterogeneousVector -> r/Type])
-(defn upcast-hvec [{:keys [types rest drest] :as hvec}]
-  {:pre [(r/HeterogeneousVector? hvec)]
+(t/ann ^:no-check upcast-HSequential [HSequential -> r/Type])
+(defn upcast-HSequential [{:keys [types rest drest kind] :as hsequential}]
+  {:pre [(r/HSequential? hsequential)]
    :post [(r/Type? %)]}
   (let [tp (if-not drest
              (apply Un 
@@ -271,13 +240,23 @@
     (apply
       In 
       (impl/impl-case
-        :clojure (RClass-of clojure.lang.APersistentVector [tp])
-        :cljs    (In (Protocol-of 'cljs.core/IVector [tp])
-                     (Protocol-of 'cljs.core/ICollection [tp])
-                     (Protocol-of 'cljs.core/ISeqable [tp])
-                     (Protocol-of 'cljs.core/IStack [tp])
-                     (Protocol-of 'cljs.core/IAssociative [r/-integer-cljs tp])
-                     (Protocol-of 'cljs.core/IReversible [tp])))
+        :clojure (case kind
+                   :vector (RClass-of clojure.lang.APersistentVector [tp])
+                   :seq (RClass-of clojure.lang.ASeq [tp])
+                   :list (RClass-of clojure.lang.PersistentList [tp])
+                   :sequential (In (RClass-of clojure.lang.IPersistentCollection [tp])
+                                   (RClass-of clojure.lang.Sequential)))
+        :cljs    (case kind
+                   :vector (In (Protocol-of 'cljs.core/IVector [tp])
+                               (Protocol-of 'cljs.core/ICollection [tp])
+                               (Protocol-of 'cljs.core/ISeqable [tp])
+                               (Protocol-of 'cljs.core/IStack [tp])
+                               (Protocol-of 'cljs.core/IAssociative [r/-integer-cljs tp])
+                               (Protocol-of 'cljs.core/IReversible [tp]))
+                   :seq (Protocol-of 'cljs.core/ISeq [tp])
+                   :list (Protocol-of 'cljs.core/IList [tp])
+                   :sequential (In (Protocol-of 'cljs.core/ICollection [tp])
+                                   (Protocol-of 'cljs.core/ISequential))))
       (when-not drest
         [(r/make-CountRange
            (count types)
@@ -1714,8 +1693,9 @@
             (record-and-iseq? t2 t1))
         false
 
-        (and (AnyHSequential? t1)
-             (AnyHSequential? t2))
+;;FIXME check compatibility between HSequentials
+        (and (HSequential? t1)
+             (HSequential? t2))
         (let [rest-sub? (fn [t1 t2]
                           ; punt on drest
                           (and (not-any? :drest [t1 t2])
@@ -1843,36 +1823,22 @@
                                                              %)))))))
 
 (f/add-fold-case ::abstract-many
-                 HeterogeneousVector
-                 (fn [ty {{:keys [name count outer sb]} :locals}]
-                   (r/-hvec (vec (map sb (:types ty)))
-                            :filters (mapv sb (:fs ty))
-                            :objects (mapv sb (:objects ty))
-                            :rest (when-let [rest (:rest ty)]
-                                    (sb rest))
-                            :drest (when-let [drest (:drest ty)]
-                                     (-> drest
-                                         (update-in [:pre-type] sb)
-                                         (update-in [:name] #(if (= % name)
-                                                               (+ count outer)
-                                                               %)))))))
-
-(f/add-fold-case ::abstract-many
                  HSequential
                  (fn [ty {{:keys [name count outer sb]} :locals}]
                    (r/-hsequential 
-                            (vec (map sb (:types ty)))
-                            :filters (mapv sb (:fs ty))
-                            :objects (mapv sb (:objects ty))
-                            :rest (when-let [rest (:rest ty)]
-                                    (sb rest))
-                            :drest (when-let [drest (:drest ty)]
-                                     (-> drest
-                                         (update-in [:pre-type] sb)
-                                         (update-in [:name] #(if (= % name)
-                                                               (+ count outer)
-                                                               %))))
-                            :repeat (:repeat ty))))
+                     (mapv sb (:types ty))
+                     :filters (mapv sb (:fs ty))
+                     :objects (mapv sb (:objects ty))
+                     :rest (when-let [rest (:rest ty)]
+                             (sb rest))
+                     :drest (when-let [drest (:drest ty)]
+                              (-> drest
+                                  (update-in [:pre-type] sb)
+                                  (update-in [:name] #(if (= % name)
+                                                        (+ count outer)
+                                                        %))))
+                     :repeat (:repeat ty)
+                     :kind (:kind ty))))
 
 (f/add-fold-case ::abstract-many
                  AssocType
@@ -2007,36 +1973,22 @@
                                                        %)))))))
 
 (f/add-fold-case ::instantiate-many
-                 HeterogeneousVector
-                 (fn [ty {{:keys [count outer image sb]} :locals}]
-                   (r/-hvec (mapv sb (:types ty))
-                            :filters (mapv sb (:fs ty))
-                            :objects (mapv sb (:objects ty))
-                            :rest (when-let [rest (:rest ty)]
-                                    (sb rest))
-                            :drest (when-let [drest (:drest ty)]
-                                     (-> drest
-                                         (update-in [:pre-type] sb)
-                                         (update-in [:name] #(if (= (+ count outer) %)
-                                                               image
-                                                               %)))))))
-
-(f/add-fold-case ::instantiate-many
                  HSequential
                  (fn [ty {{:keys [count outer image sb]} :locals}]
                    (r/-hsequential 
-                            (mapv sb (:types ty))
-                            :filters (mapv sb (:fs ty))
-                            :objects (mapv sb (:objects ty))
-                            :rest (when-let [rest (:rest ty)]
-                                    (sb rest))
-                            :drest (when-let [drest (:drest ty)]
-                                     (-> drest
-                                         (update-in [:pre-type] sb)
-                                         (update-in [:name] #(if (= (+ count outer) %)
-                                                               image
-                                                               %))))
-                            :repeat (:repeat ty))))
+                     (mapv sb (:types ty))
+                     :filters (mapv sb (:fs ty))
+                     :objects (mapv sb (:objects ty))
+                     :rest (when-let [rest (:rest ty)]
+                             (sb rest))
+                     :drest (when-let [drest (:drest ty)]
+                              (-> drest
+                                  (update-in [:pre-type] sb)
+                                  (update-in [:name] #(if (= (+ count outer) %)
+                                                        image
+                                                        %))))
+                     :repeat (:repeat ty)
+                     :kind (:kind ty))))
 
 (f/add-fold-case ::instantiate-many
                  AssocType
@@ -2226,7 +2178,7 @@
                   :complete? (complete-hmap? kws)))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;; Heterogenous type ops
+;; Heterogeneous type ops
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 ; utility functions

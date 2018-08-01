@@ -139,9 +139,7 @@
     (cond
       (and (nat-value? num-t)
            (every? (some-fn #(ind/subtype? % r/-nil)
-                            r/HeterogeneousVector?
-                            r/HeterogeneousList?
-                            r/HeterogeneousSeq?)
+                            r/HSequential?)
                    types))
       (let [idx (:val num-t)]
         (assoc expr
