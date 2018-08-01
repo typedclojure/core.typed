@@ -139,7 +139,7 @@
                            nil
                            file-mapping)
             eval-ast (fn [ast {:keys [expected] :as opt}]
-                       (binding [*print-length* nil
+                       #_(binding [*print-length* nil
                                  *print-level* nil]
                          (prn "before check-expr")
                          (clojure.pprint/pprint (emit-form ast)))
@@ -155,7 +155,7 @@
                                          (reset-caches/reset-caches)
                                          (with-bindings (analyze-bindings-fn)
                                            (check-expr ast expected)))
-                                 _ (binding [*print-length* nil
+                                 #_#__ (binding [*print-length* nil
                                              *print-level* nil]
                                      (prn "after check-expr")
                                      (clojure.pprint/pprint (emit-form c-ast)))
