@@ -70,7 +70,7 @@
                                 :out x}
                                t
                                (c/Un r/-nil (c/-name `t/Seqable x)))]
-                (c/-name `t/Seq res))))))
+                (c/-name `t/ASeq res))))))
 
 (defn nthnext-type [t n]
   {:pre [(r/Type? t)
@@ -90,7 +90,7 @@
                               :out x}
                              t
                              (c/Un r/-nil (c/-name `t/Seqable x)))]
-              (c/-name `t/NilableNonEmptySeq res)))))
+              (c/-name `t/NilableNonEmptyASeq res)))))
 
 (defn seq-type [t]
   {:pre [(r/Type? t)]
@@ -98,83 +98,96 @@
   (nthnext-type t 0))
 
 (defn check-specific-rest [check-fn {:keys [args] :as expr} expected
-                           & {:keys [cargs nrests nargs
-                                     target-t]}]
-  {:pre [(integer? nrests)
+                           & {:keys [cargs nrests target]}]
+  {:pre [(nat-int? nrests)
          (vector? cargs)
-         (integer? nargs)
-         ((some-fn r/Type? nil?) target-t)]}
-  (if-not (#{nargs} (count cargs))
-    cu/not-special
-    (if-let [t (nthrest-type target-t nrests)]
-      (-> expr
-          (update-in [:fn] check-fn)
-          (assoc
-            :args cargs
-            u/expr-type (r/ret t (fo/-true-filter))))
-      cu/not-special)))
+         (r/TCResult? (u/expr-type target))]}
+  (if-let [t (nthrest-type (-> target u/expr-type r/ret-t) nrests)]
+    (-> expr
+        (update-in [:fn] check-fn)
+        (assoc :args cargs
+               u/expr-type (r/ret t (fo/-true-filter))))
+    cu/not-special))
 
 (defn check-specific-next [check-fn {:keys [args] :as expr} expected
-                           & {:keys [cargs nnexts nargs
-                                     target-t]}]
-  {:pre [(integer? nnexts)
+                           & {:keys [cargs nnexts target]}]
+  {:pre [(nat-int? nnexts)
          (vector? cargs)
-         (integer? nargs)
-         ((some-fn r/Type? nil?) target-t)]}
-  (if-not (#{nargs} (count cargs))
-    cu/not-special
-    (if-let [t (nthnext-type target-t nnexts)]
+         (r/TCResult? (u/expr-type target))]}
+  (let [target-ret (-> target u/expr-type)]
+    (if-let [t (nthnext-type (r/ret-t target-ret) nnexts)]
       (-> expr
           (update-in [:fn] check-fn)
           (assoc
             :args cargs
             u/expr-type (r/ret t
-                               (cond
-                                 (ind/subtype? t r/-nil) (fo/-false-filter)
-                                 (not (ind/subtype? r/-nil t)) (fo/-true-filter)
-                                 :else (fo/-simple-filter)))))
+                               (if (ind/subtype? t (c/Un r/-nil (c/-name `t/Coll r/-any)))
+                                 (cond
+                                   ; persistent clojure.core/seq arities
+                                   (= nnexts 0) (cond
+                                                  ; first arity of `seq
+                                                  ;[(NonEmptyColl x) -> (NonEmptyASeq x) :filters {:then tt :else ff}]
+                                                  (ind/subtype? t (c/-name `t/NonEmptyColl r/-any)) (fo/-true-filter)
+
+                                                  ; second arity of `seq
+                                                  ;[(Option (Coll x)) -> (Option (NonEmptyASeq x))
+                                                  ; :filters {:then (& (is NonEmptyCount 0)
+                                                  ;                    (! nil 0))
+                                                  ;           :else (| (is nil 0)
+                                                  ;                    (is EmptyCount 0))}]
+                                                  :else (fo/-FS (fo/-and (fo/-filter-at (c/-name `t/NonEmptyCount)
+                                                                                        (:o target-ret))
+                                                                         (fo/-not-filter-at r/-nil
+                                                                                            (:o target-ret)))
+                                                                (fo/-or (fo/-filter-at r/-nil
+                                                                                       (:o target-ret))
+                                                                        (fo/-filter-at (c/-name `t/EmptyCount)
+                                                                                       (:o target-ret)))))
+                                   ;; TODO generalize above special cases to all nnexts
+                                   (ind/subtype? t r/-nil) (fo/-false-filter)
+                                   (not (ind/subtype? r/-nil t)) (fo/-true-filter)
+                                   :else (fo/-simple-filter))
+                                 (fo/-simple-filter)))))
       cu/not-special)))
 
 (defn check-nthnext [check-fn {:keys [args] :as expr} expected & {:keys [cargs]}]
-  (assert (vector? cargs))
+  {:pre [(vector? cargs)]}
   (if-not (#{2} (count cargs))
     cu/not-special
     (let [[ctarget cn :as cargs] cargs
-          target-t (c/fully-resolve-type (-> ctarget u/expr-type r/ret-t))
           num-t (-> cn u/expr-type r/ret-t)]
       (if (and (r/Value? num-t)
                (integer? (:val num-t)))
         (check-specific-next
           check-fn expr expected
           :nnexts (:val num-t) 
-          :nargs 2
-          :target-t (r/ret-t (u/expr-type ctarget))
+          :target-ret (u/expr-type ctarget)
           :cargs cargs)
         cu/not-special))))
 
 (defn check-next [check-fn {:keys [args] :as expr} expected & {:keys [cargs]}]
-  (assert (vector? cargs))
-  (check-specific-next check-fn expr expected 
-                       :nnexts 1 
-                       :nargs 1 
-                       :target-t (when (seq cargs)
-                                   (r/ret-t (u/expr-type (first cargs))))
-                       :cargs cargs))
+  {:pre [(vector? cargs)]}
+  (if-not (#{1} (count args))
+    cu/not-special
+    (check-specific-next check-fn expr expected 
+                         :nnexts 1 
+                         :target (first cargs)
+                         :cargs cargs)))
 
 (defn check-seq [check-fn {:keys [args] :as expr} expected & {:keys [cargs]}]
-  (assert (vector? cargs))
-  (check-specific-next check-fn expr expected 
-                       :nnexts 0
-                       :nargs 1
-                       :target-t (when (seq cargs)
-                                   (r/ret-t (u/expr-type (first cargs))))
-                       :cargs cargs))
+  {:pre [(vector? cargs)]}
+  (if-not (#{1} (count args))
+    cu/not-special
+    (check-specific-next check-fn expr expected 
+                         :nnexts 0
+                         :target (first cargs)
+                         :cargs cargs)))
 
 (defn check-rest [check-fn {:keys [args] :as expr} expected & {:keys [cargs]}]
-  (assert (vector? cargs))
-  (check-specific-rest check-fn expr expected 
-                       :nrests 1 
-                       :nargs 1 
-                       :target-t (when (seq cargs)
-                                   (r/ret-t (u/expr-type (first cargs))))
-                       :cargs cargs))
+  {:pre [(vector? cargs)]}
+  (if-not (#{1} (count args))
+    cu/not-special
+    (check-specific-rest check-fn expr expected 
+                         :nrests 1 
+                         :target (first cargs)
+                         :cargs cargs)))

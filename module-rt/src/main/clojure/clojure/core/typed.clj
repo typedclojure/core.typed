@@ -1524,7 +1524,8 @@ for checking namespaces, cf for checking individual forms."}
        ::special-type true}
   HMap)
 
-(def ^{:doc "HSequential is a type for heterogeneous sequential collections"
+(def ^{:doc "HSequential is a type for heterogeneous sequential persistent collections.
+            It extends IPersistentCollection and Sequential"
        :forms '[(HSequential [fixed*] :filter-sets [FS*] :objects [obj*])
                 (HSequential [fixed* rest *] :filter-sets [FS*] :objects [obj*])
                 (HSequential [fixed* drest ... bound] :filter-sets [FS*] :objects [obj*])]
@@ -1538,7 +1539,7 @@ for checking namespaces, cf for checking individual forms."}
        ::special-type true}
   HSeq)
 
-(def ^{:doc "HList is a type for heterogeneous lists. Prefer HSeq, unless implementing IPersistentList is crucial"
+(def ^{:doc "HList is a type for heterogeneous lists. Is a supertype of HSeq that implements IPersistentList."
        :forms '[(HList [fixed*] :filter-sets [FS*] :objects [obj*])
                 (HList [fixed* rest *] :filter-sets [FS*] :objects [obj*])
                 (HList [fixed* drest ... bound] :filter-sets [FS*] :objects [obj*])]
