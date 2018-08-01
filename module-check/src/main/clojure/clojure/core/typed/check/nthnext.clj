@@ -106,20 +106,13 @@
          ((some-fn r/Type? nil?) target-t)]}
   (if-not (#{nargs} (count cargs))
     cu/not-special
-    (let [_ (assert (r/Type? target-t))
-          target-t (c/fully-resolve-type target-t)
-          target-types (if (r/Union? target-t)
-                         (:types target-t)
-                         [target-t])]
-      (if (every? r/HSequential? target-types)
-        (let [ts (map #(nthrest-hsequential % nrests) target-types)]
-          (-> expr
-              (update-in [:fn] check-fn)
-              (assoc
-                :args cargs
-                u/expr-type (r/ret (apply c/Un ts)
-                                   (fo/-true-filter)))))
-        cu/not-special))))
+    (if-let [t (nthrest-type target-t nrests)]
+      (-> expr
+          (update-in [:fn] check-fn)
+          (assoc
+            :args cargs
+            u/expr-type (r/ret t (fo/-true-filter))))
+      cu/not-special)))
 
 (defn check-specific-next [check-fn {:keys [args] :as expr} expected
                            & {:keys [cargs nnexts nargs
@@ -130,23 +123,18 @@
          ((some-fn r/Type? nil?) target-t)]}
   (if-not (#{nargs} (count cargs))
     cu/not-special
-    (let [_ (assert (r/Type? target-t))
-          target-t (c/fully-resolve-type target-t)
-          target-types (if (r/Union? target-t)
-                         (:types target-t)
-                         [target-t])]
-      (if (every? r/HSequential? target-types)
-        (let [ts (map #(nthnext-hsequential % nnexts) target-types)]
-          (-> expr
-              (update-in [:fn] check-fn)
-              (assoc
-                :args cargs
-                u/expr-type (r/ret (apply c/Un ts)
-                                   (cond
-                                     (every? #(ind/subtype? % r/-nil) ts) (fo/-false-filter)
-                                     (every? r/HSequential? ts) (fo/-true-filter)
-                                     :else (fo/-simple-filter))))))
-        cu/not-special))))
+    (if-let [t (nthnext-type target-t nnexts)]
+      (-> expr
+          (update-in [:fn] check-fn)
+          (assoc
+            :args cargs
+            u/expr-type (r/ret t
+                               (cond
+                                 (ind/subtype? t r/-nil) (fo/-false-filter)
+                                 ;TODO
+                                 ;(ind/subtype t `(r/HSequential [Any *])) (fo/-true-filter)
+                                 :else (fo/-simple-filter)))))
+      cu/not-special)))
 
 (defn check-nthnext [check-fn {:keys [args] :as expr} expected & {:keys [cargs]}]
   (assert (vector? cargs))
