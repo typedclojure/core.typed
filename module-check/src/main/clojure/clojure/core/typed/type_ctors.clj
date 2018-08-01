@@ -1694,8 +1694,8 @@
         false
 
 ;;FIXME check compatibility between HSequentials
-        (and (HSequential? t1)
-             (HSequential? t2))
+        (and (r/HSequential? t1)
+             (r/HSequential? t2))
         (let [rest-sub? (fn [t1 t2]
                           ; punt on drest
                           (and (not-any? :drest [t1 t2])

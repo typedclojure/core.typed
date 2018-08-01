@@ -601,7 +601,7 @@
                                     :rest (U nil Type) :drest (U nil DottedPretype) :repeat Boolean} -> Type])
 (defn -hseq
   [types & opts]
-  (apply -hsequential (concat opts [:kind :seq])))
+  (apply -hsequential types (concat opts [:kind :seq])))
 
 (defn HeterogeneousVector? [t]
   (and (HSequential? t)
@@ -612,7 +612,7 @@
                                   :rest (U nil Type) :drest (U nil DottedPretype) :repeat Boolean} -> Type])
 (defn -hvec
   [types & opts]
-  (apply -hsequential (concat opts [:kind :vector])))
+  (apply -hsequential types (concat opts [:kind :vector])))
 
 (u/ann-record HSet [fixed :- (t/Set Type)
                     complete? :- Boolean])
