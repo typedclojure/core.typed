@@ -13,7 +13,7 @@
                                         PrimitiveArray DataType Protocol TypeFn Poly PolyDots
                                         Mu HeterogeneousVector HeterogeneousMap
                                         CountRange Name Value Top Unchecked TopFunction B F Result
-                                        HeterogeneousSeq TCResult TCError FlowSet Extends
+                                        TCResult TCError FlowSet Extends
                                         JSNumber CLJSInteger JSObject JSString ArrayCLJS
                                         JSBoolean AssocType GetType KwArgsSeq HSequential HSet
                                         JSUndefined JSNull JSSymbol JSObj TypeOf)
@@ -197,9 +197,6 @@
 
 (add-default-fold-case HeterogeneousVector
                        (fold-Heterogeneous* r/-hvec type-rec filter-rec object-rec))
-
-(add-default-fold-case HeterogeneousSeq
-                       (fold-Heterogeneous* r/-hseq type-rec filter-rec object-rec))
 
 (add-default-fold-case HSequential
                        (fold-Heterogeneous* r/-hsequential type-rec filter-rec object-rec))

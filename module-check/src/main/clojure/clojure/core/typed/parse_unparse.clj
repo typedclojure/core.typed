@@ -28,7 +28,7 @@
                                         PrimitiveArray DataType Protocol TypeFn Poly PolyDots
                                         Mu HeterogeneousVector HeterogeneousMap
                                         CountRange Name Value Top TypeOf Unchecked TopFunction B F Result AnyValue
-                                        HeterogeneousSeq KwArgsSeq TCError Extends JSNumber JSBoolean
+                                        KwArgsSeq TCError Extends JSNumber JSBoolean
                                         CLJSInteger ArrayCLJS JSNominal JSString TCResult AssocType
                                         GetType HSequential HSet JSUndefined JSNull JSSymbol JSObject
                                         JSObj)
@@ -1799,9 +1799,6 @@
 
 (defmethod unparse-type* HeterogeneousVector [v]
   (unparse-heterogeneous* (unparse-Name-symbol-in-ns `t/HVec) v))
-
-(defmethod unparse-type* HeterogeneousSeq [v]
-  (unparse-heterogeneous* (unparse-Name-symbol-in-ns `t/HSeq) v))
 
 (defmethod unparse-type* HSequential [v]
   (unparse-heterogeneous*

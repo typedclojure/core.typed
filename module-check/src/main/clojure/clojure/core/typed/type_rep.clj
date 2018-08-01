@@ -575,49 +575,6 @@
                                drest
                                (if repeat? true false))))
 
-(u/ann-record HeterogeneousSeq [types :- (t/Seqable Type)
-                                fs :- (t/Vec p/IFilterSet)
-                                objects :- (t/Vec p/IRObject)
-                                ;variable members to the right of fixed
-                                rest :- (U nil Type)
-                                drest :- (U nil DottedPretype)
-                                repeat :- Boolean])
-(u/def-type HeterogeneousSeq [types fs objects rest drest repeat]
-  "A constant seq, clojure.lang.ISeq"
-  [(sequential? types)
-   (every? Type? types)
-   (vector? fs)
-   (every? p/IFilterSet? fs)
-   (vector? objects)
-   (every? p/IRObject? objects)
-   (apply = (map count [types fs objects]))
-   (#{0 1} (count (filter identity [rest drest repeat])))
-   (or (not repeat) (not-empty types))
-   ((some-fn nil? Type?) rest)
-   ((some-fn nil? DottedPretype?) drest)
-   (con/boolean? repeat)]
-  :methods
-  [p/TCType])
-
-(t/ann ^:no-check -hseq
-       [(Seqable Type) & :optional {:filters (Seqable p/IFilterSet) :objects (Seqable p/IRObject)
-                                  :rest (U nil Type) :drest (U nil DottedPretype) :repeat Boolean} -> Type])
-(defn -hseq
-  [types & {:keys [filters objects rest drest] repeat? :repeat}]
-  (if (some Bottom? types)
-    (Bottom)
-    (HeterogeneousSeq-maker types
-                            (if filters
-                              (vec filters)
-                              (vec (repeat (count types) (ind/-FS (ind/-top-fn) 
-                                                                  (ind/-top-fn)))))
-                            (if objects
-                              (vec objects)
-                              (vec (repeat (count types) (ind/-empty-fn))))
-                            rest
-                            drest
-                            (if repeat? true false))))
-
 (u/ann-record HSequential [types :- (Seqable Type)
                            fs :- (t/Vec p/IFilterSet)
                            objects :- (t/Vec p/IRObject)
@@ -668,8 +625,20 @@
   (and (HSequential? t)
        (= :list (:kind t))))
 
+;; TODO delete
 (defn HeterogeneousList-maker [types]
   (-hsequential types :kind :list))
+
+(defn HeterogeneousSeq? [t]
+  (and (HSequential? t)
+       (= :seq (:kind t))))
+
+(t/ann ^:no-check -hseq
+       [(Seqable Type) & :optional {:filters (Seqable p/IFilterSet) :objects (Seqable p/IRObject)
+                                    :rest (U nil Type) :drest (U nil DottedPretype) :repeat Boolean} -> Type])
+(defn -hseq
+  [types & opts]
+  (apply -hsequential (concat opts [:kind :seq])))
 
 (u/ann-record HSet [fixed :- (t/Set Type)
                     complete? :- Boolean])

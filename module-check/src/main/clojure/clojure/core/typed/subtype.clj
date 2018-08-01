@@ -26,7 +26,7 @@
   (:import (clojure.core.typed.type_rep Poly TApp Union Intersection Value Function
                                         Result Protocol TypeFn Name F Bounds
                                         PrimitiveArray DataType RClass HeterogeneousMap
-                                        HeterogeneousSeq CountRange KwArgs
+                                        CountRange KwArgs
                                         Extends)
            (clojure.core.typed.filter_rep FilterSet)
            (clojure.lang APersistentVector PersistentList ASeq)))

@@ -26,7 +26,7 @@
             [clojure.core.typed :as t :refer [letfn>]]
             [clojure.set :as set])
   (:import (clojure.core.typed.type_rep F Value Poly TApp Union FnIntersection
-                                        Result AnyValue Top HeterogeneousSeq RClass
+                                        Result AnyValue Top RClass
                                         HeterogeneousVector DataType HeterogeneousMap PrimitiveArray
                                         Function Protocol Bounds FlowSet TCResult HSequential)
            (clojure.core.typed.cs_rep c cset dcon dmap cset-entry)

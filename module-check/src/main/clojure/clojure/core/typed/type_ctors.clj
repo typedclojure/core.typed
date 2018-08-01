@@ -33,7 +33,7 @@
                                         Union Intersection F Function Mu B KwArgs KwArgsSeq RClass
                                         Bounds Name Scope CountRange Intersection DataType Extends
                                         JSNominal Protocol HeterogeneousVector GetType HSequential
-                                        HeterogeneousSeq HSet AssocType TypeOf)
+                                        HSet AssocType TypeOf)
            (clojure.lang IPersistentMap IPersistentVector Var)))
 
 (t/ann ^:no-check with-original-names [r/Type (t/U t/Sym (t/Seqable t/Sym)) -> r/Type])
@@ -86,16 +86,11 @@
    :post [(r/HSequential? %)]}
   (assoc l :kind :sequential))
 
-(t/ann ^:no-check HSeq->HSequential [HeterogeneousSeq -> HSequential])
+(t/ann ^:no-check HSeq->HSequential [HSequential -> HSequential])
 (defn HSeq->HSequential [s]
   {:pre [(r/HeterogeneousSeq? s)]
    :post [(r/HSequential? %)]}
-  (r/-hsequential (:types s)
-                  :filters (:fs s)
-                  :objects (:objects s)
-                  :rest (:rest s)
-                  :drest (:drest s)
-                  :repeat (:repeat s)))
+  (assoc s :kind :seq))
 
 (t/tc-ignore
 (def AnyHSequential?
