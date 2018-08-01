@@ -161,7 +161,7 @@
         (check-specific-next
           check-fn expr expected
           :nnexts (:val num-t) 
-          :target-ret (u/expr-type ctarget)
+          :target ctarget
           :cargs cargs)
         cu/not-special))))
 
