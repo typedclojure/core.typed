@@ -1957,7 +1957,7 @@
   (is-cf {:a #(+ % 1)} (HMap :optional {:a [Number -> Number]})))
 
 (deftest fnil-test
-  (is-cf ((fnil + (ann-form 0 Number)) 2))
+  (is-tc-e ((fnil + (ann-form 0 Number)) 2))
   ;;FIXME probably related to how we handle :invariant variables in subst-gen
   #_(is-cf ((fnil + 0) 2))
   (is-cf ((fnil + 0) nil))
@@ -1967,9 +1967,9 @@
                 0)
           2.2))
   ; can Typed Racket do better here?
-  (is-cf ((fnil (clojure.core.typed/ann-form + [Number * -> Number])
-                (ann-form 0 Number))
-          2.2))
+  (is-tc-e ((fnil (clojure.core.typed/ann-form + [Number * -> Number])
+                  (ann-form 0 Number))
+            2.2))
 )
 
 ;(cf (every? (fn [a] a) [1]))
@@ -4941,7 +4941,7 @@
 (deftest seq-branch-test
   (is-tc-e (if (seq [1 2 3]) 1 nil)
            Num)
-  (is-tc-e (if (seq []) 1 nil)
+  (is-tc-e (if (seq []) (do (print-env "env") 1) nil)
            nil)
   (is-tc-err (if (seq (ann-form [] (Seqable Num))) 1 nil)
              nil)
