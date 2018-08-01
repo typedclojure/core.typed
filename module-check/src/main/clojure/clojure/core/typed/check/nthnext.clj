@@ -131,8 +131,7 @@
             u/expr-type (r/ret t
                                (cond
                                  (ind/subtype? t r/-nil) (fo/-false-filter)
-                                 ;TODO
-                                 ;(ind/subtype t `(r/HSequential [Any *])) (fo/-true-filter)
+                                 (not (ind/subtype? r/-nil t)) (fo/-true-filter)
                                  :else (fo/-simple-filter)))))
       cu/not-special)))
 
