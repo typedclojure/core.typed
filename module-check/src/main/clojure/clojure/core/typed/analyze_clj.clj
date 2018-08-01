@@ -497,7 +497,7 @@
   ([form env] (analyze1 form env {}))
   ([form env {:keys [bindings-atom analyze-bindings-fn] :as opts}]
    {:pre [((some-fn nil? con/atom?) bindings-atom)
-          (ifn? analyze-bindings-fn)]}
+          ((some-fn nil? ifn?) analyze-bindings-fn)]}
    (u/trace "Analyze1 form" *file* form)
    (let [old-bindings (or (some-> bindings-atom deref) {})
          analyze-fn (fn [form env opts]
@@ -512,7 +512,9 @@
                    form (or env (taj/empty-env))
                    (->
                      (merge-with merge opts 
-                                 {:bindings (analyze-bindings-fn)
+                                 {:bindings (if analyze-bindings-fn
+                                              (analyze-bindings-fn)
+                                              (thread-bindings))
                                   :special-form? special-form?})
                      (assoc
                        ;; if this is a typed special form like an ann-form, don't treat like
