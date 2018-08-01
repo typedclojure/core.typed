@@ -947,9 +947,29 @@
 ;FIXME need to review if any repeated "check"s happen between -invoke-apply and specials
 ;apply
 (defmethod -invoke-special 'clojure.core/apply
-  [expr & [expected]]
+  [{:keys [args env] :as expr} & [expected]]
   ;(prn "special apply:")
-  (check-apply expr expected))
+  (or (when vs/*custom-expansions*
+        (when (<= 2 (count args))
+          (let [[f & args] args
+                [fixed rst] ((juxt pop peek) (vec args))]
+            (when-let [splice (beta-reduce/splice-seqable-expr rst)]
+              (let [min-count (apply + (map :min-count splice))
+                    max-count (apply + (map :max-count splice))
+                    ordered? (:ordered (first splice))
+                    max-realized (max min-count max-count)]
+                (when (and ordered?
+                           (< max-realized 15))
+                  (let [gsym (gensym 'args)
+                        form `(let* [~gsym ~(ast-u/emit-form-fn rst)]
+                                (~(ast-u/emit-form-fn f) ~@fixed ~@(map (fn [i]
+                                                                          `(first (nthnext ~gsym ~i)))
+                                                                        (range max-realized))))]
+                    (-> form
+                        (pre/pre-analyze-form env)
+                        ana2/run-passes
+                        (check-expr expected)))))))))
+      (check-apply expr expected)))
 
 
 ;TODO this should be a special :do op
