@@ -302,6 +302,18 @@
   (is-tc-err (map (fn [a :- t/Any] a)))
 )
 
+(comment
+  ; andmap : (All (x) ((x -> y) (List x) -> y))
+  (lambda (a b)
+    (when (andmap number? (list a b))
+      (+ a b)))
+  =>
+  (lambda (a b)
+    (when (and (number? a)
+               (number? b))
+      (+ a b)))
+  )
+
 (deftest every?-test
   (is-tc-e (every? identity [1 2 3]))
   (is-tc-e (core/fn [a]
@@ -352,7 +364,28 @@
   (is-tc-e (fn [a b]
              {:pre [(not-any? (complement number?) [a b])]}
              (+ a b)))
+  (is-tc-e (fn [a]
+             {:pre [(some number? [a])]}
+             (inc a)))
 )
+
+(deftest juxt-test
+  (is-tc-e (fn [a]
+             {:pre [(every? identity ((juxt number? integer?) a))]}
+             (inc a)))
+  (is-tc-e (fn [a]
+             {:pre [(first (nthrest [(number? a) (integer? a)] 0))]}
+             (inc a)))
+  (is-tc-e (fn [a]
+             {:pre [(first [(number? a) (integer? a)])]}
+             (inc a)))
+  (is-tc-e (fn [a]
+             {:pre [(first ((juxt number?) a))]}
+             (inc a)))
+  (is-tc-e (fn [a]
+             {:pre [(first ((juxt number? identity #(str %)) a))]}
+             (inc a)))
+  )
 
 (comment
   (((fn []

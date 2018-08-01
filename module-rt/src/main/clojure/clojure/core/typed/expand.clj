@@ -615,6 +615,25 @@
         form))
     form))
 
+(defmethod -expand-inline 'clojure.core/some [[_ f coll :as form] {:keys [internal-error splice-seqable-form] :as opts}]
+  (when-not (= 3 (count form))
+    (internal-error (str "Must provide 2 arguments to clojure.core/every?, found " (dec (count form))
+                         ": " form)))
+  (if-let [splice (splice-seqable-form coll)]
+    (let [min-count (apply + (map :min-count splice))
+          max-count (apply + (map :max-count splice))
+          ordered? (:ordered (first splice))
+          max-realized (max min-count max-count)]
+      (if (and ordered?
+               (< max-realized 15))
+        (if (pos? max-realized)
+          `(let* [c# ~coll]
+             (or (~f (first c#))
+                 (some ~f (rest c#))))
+          nil)
+        form))
+    form))
+
 (defmethod -expand-inline 'clojure.core/not-any? [[_ f coll :as form] {:keys [internal-error splice-seqable-form] :as opts}]
   (when-not (= 3 (count form))
     (internal-error (str "Must provide 2 arguments to clojure.core/not-any?, found " (dec (count form))
@@ -663,6 +682,16 @@
                          ": " form)))
   `(fn* [& args#]
      (not (apply ~f args#))))
+
+(defmethod -expand-inline 'clojure.core/juxt [[_ & fs :as form] {:keys [internal-error splice-seqable-form] :as opts}]
+  (when-not (<= 2 (count form))
+    (internal-error (str "Must provide at least 1 argument to clojure.core/juxt, found " (dec (count form))
+                         ": " form)))
+  (let [gsym (gensym 'args)]
+    `(fn* [& ~gsym]
+       ~(mapv (fn [f]
+                `(apply ~f ~gsym))
+              fs))))
 
 (defmethod -expand-inline 'clojure.core/not [[_ x :as form] {:keys [internal-error splice-seqable-form] :as opts}]
   (when-not (= 2 (count form))

@@ -269,12 +269,13 @@
               ;; FIXME what if we break up final argument and it has an ann-form around it?
               ;; eg. (apply map [(ann-form identity [Any -> Any]))
               ;; eg. (apply map (ann-form [identity] (Seqable [Any -> Any])))
-              clojure.core/apply (when-let [red (beta-reduce/maybe-beta-reduce-apply
-                                                  expr args
-                                                  {:before-reduce ensure-within-beta-limit})]
-                                   (let [cred (check-expr red (::invoke-expected expr))]
-                                     (set-erase-atoms expr cred)
-                                     cred))
+              ; moved to c.c.t.expand
+              ;clojure.core/apply (when-let [red (beta-reduce/maybe-beta-reduce-apply
+              ;                                    expr args
+              ;                                    {:before-reduce ensure-within-beta-limit})]
+              ;                     (let [cred (check-expr red (::invoke-expected expr))]
+              ;                       (set-erase-atoms expr cred)
+              ;                       cred))
               (let [vsym (ast-u/emit-form-fn expr)
                     form (with-meta (list* vsym (map ast-u/emit-form-fn args))
                                     (meta vsym))
@@ -1374,7 +1375,8 @@
 ;first
 (defmethod -invoke-special 'clojure.core/first
   [{fexpr :fn :keys [args] :as expr} & [expected]]
-  {:post [(-> % u/expr-type r/TCResult?)]}
+  {:post [(or (#{cu/not-special} %)
+              (-> % u/expr-type r/TCResult?))]}
   (when-not (= 1 (count args))
     (err/int-error (str "'first' accepts 1 argument, found "
                         (count args))))
