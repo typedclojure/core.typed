@@ -203,7 +203,7 @@
   [[_ & sigs :as form] _]
   (let [{:keys [sigs name]} (parse-fn-sigs form)
         expand-sig (fn [{:keys [conds-from-params-meta? pre post params body sig-form]}]
-                     (assert (vector? params))
+                     {:pre [(vector? params)]}
                      (let [gsyms (mapv (fn [a]
                                          (if (= '& a)
                                            a
@@ -313,16 +313,24 @@
                (when name
                  [name])
                (for [{:keys [original-method body pvec ann]} parsed-methods]
-                 (list pvec
-                       `(ignore-expected-if ~(boolean (-> ann :rng :default))
-                          ~(if (seq body)
-                             `(do ~@body)
-                             `(check-if-empty-body
-                                (do ~@body)
-                                {:msg-fn (fn [_#]
-                                           "This 't/fn' method returns nil, which does not agree with the expected type.")
-                                 :blame-form ~original-method
-                                 :original-body ~body})))))))
+                 (let [conds (when (and (next body) (map? (first body)))
+                               (first body))
+                       body (if conds
+                              (next body)
+                              body)]
+                   (list* pvec
+                          (concat
+                            (when conds
+                              [conds])
+                            [`(ignore-expected-if ~(boolean (-> ann :rng :default))
+                                ~(if (seq body)
+                                   `(do ~@body)
+                                   `(check-if-empty-body
+                                      (do ~@body)
+                                      {:msg-fn (fn [_#]
+                                                 "This 't/fn' method returns nil, which does not agree with the expected type.")
+                                       :blame-form ~original-method
+                                       :original-body ~body})))]))))))
       ~reassembled-fn-type)))
 
 (defmethod -expand-macro `t/fn [& args] (apply expand-typed-fn-macro args))
@@ -606,6 +614,61 @@
           true)
         form))
     form))
+
+(defmethod -expand-inline 'clojure.core/not-any? [[_ f coll :as form] {:keys [internal-error splice-seqable-form] :as opts}]
+  (when-not (= 3 (count form))
+    (internal-error (str "Must provide 2 arguments to clojure.core/not-any?, found " (dec (count form))
+                         ": " form)))
+  (if-let [splice (splice-seqable-form coll)]
+    (let [min-count (apply + (map :min-count splice))
+          max-count (apply + (map :max-count splice))
+          ordered? (:ordered (first splice))
+          max-realized (max min-count max-count)]
+      (if (and ordered?
+               (< max-realized 15))
+        (if (pos? max-realized)
+          `(let* [c# ~coll]
+             (and (not (~f (first c#)))
+                  (not-any? ~f (rest c#))))
+          true)
+        form))
+    form))
+
+(defmethod -expand-inline 'clojure.core/apply [[_ f & args :as form] {:keys [internal-error splice-seqable-form] :as opts}]
+  (when-not (<= 3 (count form))
+    (internal-error (str "Must provide at least 2 arguments to clojure.core/apply, found " (dec (count form))
+                         ": " form)))
+  (let [[fixed rst] ((juxt pop peek) (vec args))]
+    (if-let [splice (splice-seqable-form rst)]
+      (let [min-count (apply + (map :min-count splice))
+            max-count (apply + (map :max-count splice))
+            ordered? (:ordered (first splice))
+            max-realized (max min-count max-count)]
+        (prn "apply: found splice" ordered? max-realized)
+        (if (and ordered?
+                 (< max-realized 15))
+          (let [gsym (gensym 'args)]
+            `(let* [~gsym ~rst]
+               (~f ~@fixed ~@(map (fn [i]
+                                    `(first (nthnext ~gsym ~i)))
+                                  (range max-realized)))))
+          form))
+      (do
+        (prn "apply: no splice")
+        form))))
+
+(defmethod -expand-inline 'clojure.core/complement [[_ f :as form] {:keys [internal-error splice-seqable-form] :as opts}]
+  (when-not (= 2 (count form))
+    (internal-error (str "Must provide 1 argument to clojure.core/complement, found " (dec (count form))
+                         ": " form)))
+  `(fn* [& args#]
+     (not (apply ~f args#))))
+
+(defmethod -expand-inline 'clojure.core/not [[_ x :as form] {:keys [internal-error splice-seqable-form] :as opts}]
+  (when-not (= 2 (count form))
+    (internal-error (str "Must provide 1 argument to clojure.core/not, found " (dec (count form))
+                         ": " form)))
+  `(if ~x false true))
 
 (comment
  (-> identity

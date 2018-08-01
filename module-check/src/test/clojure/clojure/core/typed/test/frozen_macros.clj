@@ -253,11 +253,6 @@
 
 (deftest map-test
   (is-tc-e (map identity [1 2 3]))
-  (is-tc-e (every? identity [1 2 3]))
-  (is-tc-e (every? identity [1 2 3]))
-  (is-tc-e (fn [a b]
-             {:pre [(every? number? [a b])]}
-             (+ a b)))
   (is-tc-e (map identity (map identity [1 2 3])))
   (is-tc-e (map + [1 2 3] [2 3 4]))
   (is-tc-e (map identity [1 2 3])
@@ -305,6 +300,58 @@
              (t/Transducer t/Bool t/Num))
   (is-tc-err (map identity))
   (is-tc-err (map (fn [a :- t/Any] a)))
+)
+
+(deftest every?-test
+  (is-tc-e (every? identity [1 2 3]))
+  (is-tc-e (core/fn [a]
+             (when (number? (first [a]))
+               (inc a))))
+  (is-tc-e (core/fn [a]
+             (when (number? (first [a]))
+               (inc a))))
+  (is-tc-err (core/fn [a]
+               (when (number? (first [0 a]))
+                 (inc a))))
+  (is-tc-e (core/fn [a]
+             (if ((complement number?) (first [a]))
+               nil
+               (inc a))))
+  (is-tc-e (core/fn [a]
+             (when (number? (first [a]))
+               (inc a))))
+  (is-tc-e (core/fn [a]
+             (when (number? (first (seq [a])))
+               (inc a))))
+  (is-tc-e (core/fn [a]
+             (when ((fn* [& args] (number? (first args))) a)
+               (inc a))))
+  (is-tc-e (core/fn [a]
+             (when ((fn* [& args] (apply number? args)) a)
+               (inc a))))
+  (is-tc-e (core/fn [a]
+             (when-not ((fn* [& args] (not (apply number? args))) a)
+               (inc a))))
+  (is-tc-e (core/fn [a]
+             (if ((complement (fn* [& args] (apply number? args))) a)
+               nil
+               (inc a))))
+  (is-tc-e (core/fn [a]
+             (if (if (apply number? [a]) false true)
+               nil
+               (inc a))))
+  (is-tc-e (core/fn [a]
+             (when (apply number? [a])
+               (inc a))))
+  (is-tc-e (core/fn [a b]
+             {:pre [(every? number? [a b])]}
+             (+ a b)))
+  (is-tc-e (fn [a b]
+             {:pre [(every? number? [a b])]}
+             (+ a b)))
+  (is-tc-e (fn [a b]
+             {:pre [(not-any? (complement number?) [a b])]}
+             (+ a b)))
 )
 
 (comment

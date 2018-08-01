@@ -2408,7 +2408,8 @@
 
 (defn union-Results [r1 r2]
   {:pre [(r/Result? r1)
-         (r/Result? r2)]}
+         (r/Result? r2)]
+   :post [(r/Result? %)]}
   (r/make-Result (Un (:t r1) (:t r2))
                  (ind/-FS
                    (ind/-or (-> r1 :fl :then)
@@ -2420,4 +2421,20 @@
                    or/-empty)
                  (ind/-or (-> r1 :flow)
                           (-> r1 :flow))))
+
+(defn intersect-Results [r1 r2]
+  {:pre [(r/Result? r1)
+         (r/Result? r2)]
+   :post [(r/Result? %)]}
+  (r/make-Result (In (:t r1) (:t r2))
+                 (ind/-FS
+                   (ind/-and (-> r1 :fl :then)
+                             (-> r1 :fl :then))
+                   (ind/-and (-> r1 :fl :else)
+                             (-> r1 :fl :else)))
+                 (if (= (-> r1 :o) (-> r2 :o))
+                   (-> r1 :o)
+                   or/-empty)
+                 (ind/-and (-> r1 :flow)
+                           (-> r1 :flow))))
 )

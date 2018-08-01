@@ -12,4 +12,5 @@
                      infer
                      PropEnv?
                      -or
+                     -and
                      type-of-nofail)

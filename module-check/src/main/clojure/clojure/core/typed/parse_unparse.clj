@@ -1780,7 +1780,7 @@
            (when (c/complete-hmap? v)
              [:complete? true]))))
 
-(defn unparse-heterogeneous* [sym [{:keys [types rest drest fs objects repeat] :as v}]]
+(defn unparse-heterogeneous* [sym {:keys [types rest drest fs objects repeat] :as v}]
   (let [first-part (concat
                      (map unparse-type (:types v))
                      (when rest [(unparse-type rest) '*])

@@ -427,7 +427,7 @@
                      ; don't check extend
                      ;(update-in [:fn] check-expr)
                      (assoc u/expr-type (below/maybe-check-below
-                                          (r/ret r/-nil (fo/-true-filter))
+                                          (r/ret r/-nil (fo/-false-filter))
                                           expected)))
         ; this is a Value type containing a java.lang.Class instance representing
         ; the type extending the protocol, or (Value nil) if extending to nil
@@ -949,10 +949,7 @@
 (defmethod -invoke-special 'clojure.core/apply
   [expr & [expected]]
   ;(prn "special apply:")
-  (or (when vs/*custom-expansions*
-        (when 1
-          ))
-      (check-apply expr expected)))
+  (check-apply expr expected))
 
 
 ;TODO this should be a special :do op
@@ -1303,6 +1300,19 @@
       r
       (invoke/normal-invoke check-expr expr fexpr args expected :cargs cargs))))
 
+;rest
+(defmethod -invoke-special 'clojure.core/rest
+  [{fexpr :fn :keys [args] :as expr} & [expected]]
+  {:post [(-> % u/expr-type r/TCResult?)]}
+  (when-not (= 1 (count args))
+    (err/int-error (str "'rest' accepts 1 argument, found "
+                        (count args))))
+  (let [cargs (mapv check-expr args)
+        r (nthnext/check-rest check-expr expr expected :cargs cargs)]
+    (if-not (#{cu/not-special} r)
+      r
+      (invoke/normal-invoke check-expr expr fexpr args expected :cargs cargs))))
+
 ;cons
 (defmethod -invoke-special 'clojure.core/cons
   [{fexpr :fn :keys [args] :as expr} & [expected]]
@@ -1314,8 +1324,48 @@
         ]
     ;;TODO
     #_(assert nil "Implement heterogeneous Cons for every? inlining")
-    :default
+    cu/not-special
     ))
+
+(defn first-result [t]
+  {:pre [(r/Type? t)]
+   :post [((some-fn nil? r/Result?) %)]}
+  (let [ftype (fn ftype [t]
+                (let [t (c/fully-resolve-type t)]
+                  (cond
+                    (r/Union? t) (let [ts (map ftype (:types t))]
+                                   (when (every? identity ts)
+                                     (apply c/union-Results ts)))
+                    (r/Intersection? t) (when-let [ts (seq (keep ftype (:types t)))]
+                                          (apply c/intersect-Results ts))
+                    (r/Nil? t) (r/ret r/-nil (fo/-false-filter))
+                    (r/HSequential? t) (cond
+                                         (seq (:types t))
+                                         (r/make-Result (first (:types t))
+                                                        (first (:fs t))
+                                                        (first (:objects t)))
+
+                                         (:rest t) (r/make-Result (c/Un r/-nil (:rest t)))
+                                         (:drest t) (r/make-Result r/-any)
+
+                                         (empty? (:types t)) (r/make-Result (r/ret r/-nil (fo/-false-filter)))))))]
+    (ftype (nthnext/seq-type t))))
+
+;first
+(defmethod -invoke-special 'clojure.core/first
+  [{fexpr :fn :keys [args] :as expr} & [expected]]
+  {:post [(-> % u/expr-type r/TCResult?)]}
+  (when-not (= 1 (count args))
+    (err/int-error (str "'first' accepts 1 argument, found "
+                        (count args))))
+  (let [[coll :as cargs] (mapv check-expr args)
+        ct (r/ret-t (u/expr-type coll))
+        fres (first-result ct)]
+    (if fres
+      (assoc expr
+             :args cargs
+             u/expr-type (r/Result->TCResult fres))
+      cu/not-special)))
 
 ;assoc
 (defmethod -invoke-special 'clojure.core/assoc
