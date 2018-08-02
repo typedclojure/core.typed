@@ -26,6 +26,7 @@
 (defmacro is-tc-err [& body]
   `(is (tc-err ~@body)))
 
+(comment
 (deftest ns-test
   (is-tc-e (ns foo) nil)
   (is-tc-err (ns foo) Symbol))
@@ -661,4 +662,5 @@
   [#'clojure.core.typed.test.frozen-macros/let-test 1221.219269]
   [#'clojure.core.typed.test.frozen-macros/update-in-inline-test 1641.337323])
 
+)
 )

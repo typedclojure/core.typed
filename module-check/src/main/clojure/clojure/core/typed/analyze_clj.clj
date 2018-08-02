@@ -455,12 +455,9 @@
   (t/tc-ignore
     {Compiler/LOADER     (clojure.lang.RT/makeClassLoader)
      #'ana2/macroexpand-1 macroexpand-1
-     #'ana2/run-passes    (if vs/*custom-expansions*
-                            (fn [ast]
-                              (ast/walk ast
-                                        (:pre @scheduled-passes-for-custom-expansions)
-                                        (:post @scheduled-passes-for-custom-expansions)))
-                            jana2/run-passes)
+     #'ana2/scheduled-passes (if vs/*custom-expansions*
+                               @scheduled-passes-for-custom-expansions
+                               jana2/scheduled-default-passes)
      #'pre/pre-parse      jpre/pre-parse
      #'ana2/var?          var?
      #'*ns*               (the-ns (or (-> opts :env :ns)

@@ -197,26 +197,13 @@
     })
 
 (def scheduled-default-passes
-  (delay
-    (schedule default-passes)))
+  (schedule default-passes))
 
 (comment
   (clojure.pprint/pprint
     (schedule default-passes
                      {:debug? true}))
   )
-
-(defn run-passes
-  "Function that will be invoked on the AST tree immediately after it has been constructed,
-   by default runs the passes declared in #'default-passes, should be rebound if a different
-   set of passes is required (via analyze2/run-passes).
-
-   Use #'clojure.tools.analyzer.passes/schedule to get a function from a set of passes that
-   run-passes can be bound to."
-  [ast]
-  (ast/walk ast
-            (:pre @scheduled-default-passes)
-            (:post @scheduled-default-passes)))
 
 (def default-passes-opts
   "Default :passes-opts for `analyze`"
@@ -249,7 +236,7 @@
      (with-bindings (merge {Compiler/LOADER     (RT/makeClassLoader)
                             #'ana/macroexpand-1 macroexpand-1
                             #'ana/create-var    taj/create-var
-                            #'ana/run-passes    run-passes
+                            #'ana/scheduled-passes    scheduled-default-passes
                             #'pre/pre-parse     jpre/pre-parse
                             #'ana/var?          var?
                             #'*ns*              (the-ns (:ns env))}
