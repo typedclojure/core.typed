@@ -2,6 +2,7 @@
   (:require [clojure.test :refer :all]
             [clojure.core.typed.analyzer2.pre-analyze :as pre]
             [clojure.core.typed.analyzer2.jvm.pre-analyze :as jpre]
+            [clojure.tools.analyzer.ast :as ast]
             [clojure.core.typed.analyzer2.jvm :as ana]
             [clojure.core.typed.analyze-clj :as anaclj]
             [clojure.tools.analyzer.passes.jvm.emit-form :refer [emit-form]]
@@ -68,50 +69,3 @@
              sym)
            (-> ret :body :ret :body :ret :name)))
     (is (not= 'a (-> ret :body :ret :body :ret :name)))))
-
-;; how to interleave checking and analysis?
-(defn check* [ast expected {:keys [pre post] :as opts}]
-  (case (:op ast)
-    :unanalyzed (check* (pre ast) expected opts)
-    :do (let [ast (-> ast
-                      (update :statements (fn [statements]
-                                            (mapv #(check* % nil opts) statements)))
-                      (update :ret #(check* % expected opts))
-                      post)]
-          (assoc ast :expr-type (-> ast :ret :expr-type)))
-    :const (post (assoc ast :expr-type `(Value ~(:val ast))))
-    :new (let [ast (-> ast
-                       (update :class #(check* % nil opts))
-                       (update :args #(mapv (fn [a] (check* a nil opts)) %))
-                       post)]
-           ast)
-    :maybe-class (let [ast (post ast)]
-                   ast)
-    :host-call (let [ast (-> ast
-                             (update :target #(check* % nil opts))
-                             (update :args #(mapv (fn [a] (check* a nil opts)) %))
-                             post)]
-                 ast)
-    :host-interop (let [_ (assert (empty? (:args ast)))
-                        ast (-> ast
-                                (update :target #(check* % nil opts))
-                                post)]
-                    ast)
-    :let (let [ast (update ast :bindings (fn [statements]
-                                           (mapv #(check* % nil opts) statements)))
-               ast (update :body #(check* % expected opts))
-               ast (post ast)]
-          (assoc ast :expr-type (-> ast :body :expr-type)))
-    ))
-
-(defn check [form expected]
-  (with-bindings (anaclj/thread-bindings)
-    (env/ensure (taj/global-env)
-      (check* (pre/pre-analyze-child form (taj/empty-env)) expected
-              ana/scheduled-default-passes))))
-
-(comment
-        (check 1 nil)
-        (keys (check '(.toString 1) nil))
-        (keys (check '(.compareTo (java.io.File. "a") (java.io.File. "a")) nil))
-        )

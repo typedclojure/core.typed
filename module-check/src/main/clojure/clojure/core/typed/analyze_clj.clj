@@ -460,6 +460,7 @@
                                jana2/scheduled-default-passes)
      #'pre/pre-parse      jpre/pre-parse
      #'ana2/var?          var?
+     #'ana2/create-var    taj/create-var
      #'*ns*               (the-ns (or (-> opts :env :ns)
                                       *ns*))}))
 

@@ -30,13 +30,14 @@
     (let [exprs (conj (vec (:statements expr)) (:ret expr))
           nexprs (count exprs)
           [env cexprs]
-          (reduce (fn [[env cexprs] [^long n expr]]
+          (reduce (fn [[env cexprs] ^long n]
                     {:pre [(lex/PropEnv? env)
                            (integer? n)
                            (< n nexprs)]
                      ; :post checked after the reduce
                      }
-                    (let [cexpr (binding [; always prefer envs with :line information, even if inaccurate
+                    (let [expr (get cexprs n)
+                          cexpr (binding [; always prefer envs with :line information, even if inaccurate
                                           vs/*current-env* (if (:line (:env expr))
                                                              (:env expr)
                                                              vs/*current-env*)
@@ -63,16 +64,17 @@
                           ]
                       (if @flow-atom
                         ;reachable
-                        [nenv (conj cexprs cexpr)]
+                        [nenv (assoc cexprs n cexpr)]
                         ;unreachable
                         (do ;(prn "Detected unreachable code")
-                          (reduced [nenv (conj cexprs 
-                                               (assoc cexpr 
-                                                      u/expr-type (r/ret (r/Bottom)
-                                                                         (fo/-unreachable-filter)
-                                                                         orep/-empty
-                                                                         (r/-flow fl/-bot))))])))))
-                  [(lex/lexical-env) []] (map-indexed vector exprs))
+                          (reduced [nenv (assoc cexprs n
+                                                (assoc cexpr 
+                                                       u/expr-type (r/ret (r/Bottom)
+                                                                          (fo/-unreachable-filter)
+                                                                          orep/-empty
+                                                                          (r/-flow fl/-bot))))])))))
+                  [(lex/lexical-env) []] (range nexprs))
+          _ (assert (= (count cexprs) nexprs))
           actual-types (mapv u/expr-type cexprs)
           _ (assert (lex/PropEnv? env))
           _ (assert ((every-pred vector? seq) cexprs)) ; make sure we conj'ed in the right order
