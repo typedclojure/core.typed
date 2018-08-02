@@ -150,7 +150,9 @@
     (flush))
   (binding [vs/*current-env* (if (:line env) env vs/*current-env*)
             vs/*current-expr* expr]
-    (-check expr expected)))
+    (let [#_#_{:keys [pre post] :as c} ana2/scheduled-passes]
+      #_(assert (map? c))
+      (-check expr expected))))
 
 (defmethod -check :const [expr expected]
   (const/check-const constant-type/constant-type false expr expected))

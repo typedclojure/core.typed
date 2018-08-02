@@ -27,7 +27,7 @@
     (internal-special-form expr expected)
 
     :else
-    (let [exprs (vec (concat (:statements expr) [(:ret expr)]))
+    (let [exprs (conj (vec (:statements expr)) (:ret expr))
           nexprs (count exprs)
           [env cexprs]
           (reduce (fn [[env cexprs] [^long n expr]]
@@ -79,6 +79,6 @@
           _ (assert ((every-pred (con/every-c? r/TCResult?) seq) actual-types))]
       ;(prn "do actual-types" actual-types)
       (assoc expr
-             :statements (vec (butlast cexprs))
+             :statements (pop cexprs)
              :ret (peek cexprs)
              u/expr-type (peek actual-types))))) ;should be a r/ret already

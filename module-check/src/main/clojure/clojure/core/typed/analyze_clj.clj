@@ -553,13 +553,6 @@
                      *ns*)]
     (analyze1 form)))
 
-(def reread-with-tr (comp tr/read readers/indexing-push-back-reader print-str))
-
-;(defn ast-for-str
-;  "Returns an AST node for the string, using tools.reader."
-;  [form-str]
-;  (analyze1 (-> form-str readers/indexing-push-back-reader tr/read) (taj/empty-env)))
-
 (defn ast-for-form
   "Returns an AST node for the form"
   ([form] (ast-for-form form {}))
