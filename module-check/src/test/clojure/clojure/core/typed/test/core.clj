@@ -1393,6 +1393,11 @@
                     (a [b] (inc b))]
              (a 1))
            Number)
+  ; erase objects
+  (is-clj (= (tc-t (letfn> [a :- [Number -> Number]
+                            (a [b] (inc b))]
+                     a))
+             (ret (parse-clj '[Number -> Number]) (-FS -top -bot) -empty)))
   ; annotation needed
   (is-tc-err (letfn> [(a [b] (inc b))]
                (a 1)))
