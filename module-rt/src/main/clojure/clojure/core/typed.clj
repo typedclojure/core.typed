@@ -2319,7 +2319,7 @@ for checking namespaces, cf for checking individual forms."}
   `(tc-ignore (warn-on-unannotated-vars* '~(ns-name *ns*))))
 
 (defn check-form-info 
-  "Type checks a (quoted) form and returns a map of results from type checking the
+  "Function that type checks a form and returns a map of results from type checking the
   form.
   
   Options
@@ -2351,7 +2351,7 @@ for checking namespaces, cf for checking individual forms."}
   (apply (impl/v 'clojure.core.typed.check-form-clj/check-form-info) form opt))
 
 (defn check-form*
-  "Takes a (quoted) form and optional expected type syntax and
+  "Function that takes a form and optional expected type syntax and
   type checks the form. If expected is provided, type-provided?
   must be true."
   ([form] (check-form* form nil nil))

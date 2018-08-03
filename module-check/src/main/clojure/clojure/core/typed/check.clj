@@ -228,15 +228,6 @@
                   {:pre [((some-fn nil? r/TCResult?) expected)]}
                   (:op expr)))
 
-#_
-(defn check-expr [{:keys [env] :as expr} & [expected]]
-  (when vs/*trace-checker*
-    (println "Checking line:" (:line env))
-    (flush))
-  (binding [vs/*current-env* (if (:line env) env vs/*current-env*)
-            vs/*current-expr* expr]
-    (-check expr expected)))
-
 (defn check-expr [{:keys [op env] :as expr} & [expected]]
   {:pre [(:op expr)
          ((some-fn nil? r/TCResult?) expected)]
@@ -261,7 +252,8 @@
                         pre
                         (-check expected)
                         post)]
-          ;(prn "pre post" op)
+          (prn "post" (:op cexpr))
+          (clojure.pprint/pprint (emit-form/emit-form cexpr))
           cexpr)))))
 
 (defn pre-gilardi [ast]
@@ -1118,7 +1110,10 @@
 (declare maybe-special-apply)
 
 (defn check-apply [expr expected]
-  (let [e (-invoke-apply expr expected)
+  (let [{:keys [pre post]} ana2/scheduled-passes
+        expr (-> expr
+                 (update-in [:args 0] pre))
+        e (-invoke-apply expr expected)
         e (if (= e cu/not-special)
             (maybe-special-apply check-expr expr expected)
             e)]
@@ -1426,15 +1421,11 @@
     (binding [vs/*current-expr* expr]
       (cond
         (r/HeterogeneousMap? tmap)
-        (let [r (c/HMap->KwArgsSeq tmap false)
-              ;; FIXME should be maybe-check-below
-              _ (when expected
-                  (when-not (sub/subtype? r (r/ret-t expected))
-                    (cu/expected-error r expected)))]
+        (let [r (c/HMap->KwArgsSeq tmap false)]
           (-> expr
               (update-in [:fn] check-expr)
               (assoc u/expr-type (below/maybe-check-below
-                                   (r/ret r)
+                                   (r/ret r (fo/-true-filter))
                                    expected))))
         :else cu/not-special))))
 
@@ -2375,32 +2366,36 @@
 (defmethod new-special :default [expr & [expected]] cu/not-special)
 
 (defmethod -check :new
-  [{cls :class :keys [args env] :as expr} expected]
+  [expr expected]
   {:post [(vector? (:args %))
           (-> % u/expr-type r/TCResult?)]}
   ;(prn ":new" (mapv (juxt :op :tag) args))
-  (u/trace 
-    (let [inline? (-> expr
-                      ast-u/new-op-class 
-                      coerce/Class->symbol
-                      str
-                      clojure-lang-call?)]
-      (str (when-not inline? "non-inlined ") "new Call: " (-> expr
-                                                              ast-u/new-op-class 
-                                                              coerce/Class->symbol))))
-  (profile-inlining :new
-    (str (-> expr
-             ast-u/new-op-class 
-             coerce/Class->symbol)))
   (binding [vs/*current-expr* expr
-            vs/*current-env* env]
-    (let [spec (new-special expr expected)]
+            vs/*current-env* (:env expr)]
+    (let [{:keys [args env] :as expr} (-> expr
+                                          (update :class ana2/run-passes))
+          _ (u/trace 
+              (let [inline? (-> expr
+                                ast-u/new-op-class 
+                                coerce/Class->symbol
+                                str
+                                clojure-lang-call?)]
+                (str (when-not inline? "non-inlined ") "new Call: " (-> expr
+                                                                        ast-u/new-op-class 
+                                                                        coerce/Class->symbol))))
+          _ (profile-inlining :new
+                              (str (-> expr
+                                       ast-u/new-op-class 
+                                       coerce/Class->symbol)))
+          spec (new-special expr expected)]
       (cond
         (not= cu/not-special spec) spec
         :else
         (let [inst-types *inst-ctor-types*
               cargs (binding [*inst-ctor-types* nil]
                       (mapv check-expr args))
+              {:keys [pre post]} ana2/scheduled-passes
+              expr (post (assoc expr :args cargs))
               ;; call when we're convinced there's no way to rewrite this AST node
               ;; in a non-reflective way.
               give-up (fn [expr cargs]
@@ -2520,7 +2515,12 @@
   ;TODO check fields match, handle extra fields in records
   (binding [vs/*current-env* env]
     (let [compiled-class (:class-name expr)
-          _ (assert (class? compiled-class))
+          ;; taj/validate turns :class-name into a class.
+          ;; might not be run at this point.
+          compiled-class (if (symbol? compiled-class)
+                           (coerce/symbol->Class compiled-class)
+                           compiled-class)
+          _ (assert (class? compiled-class) (class compiled-class))
           nme (coerce/Class->symbol compiled-class)
           field-syms (map :name fields)
           _ (assert (every? symbol? field-syms))

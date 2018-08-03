@@ -3336,32 +3336,17 @@
          0)))
 
 (deftest dotted-fn-test
-  (cf (tc/fn [f :- (clojure.core.typed/All [b ...]
-                     [-> [b ... b -> clojure.core.typed/Any]])] 
-        (f)))
-  (cf (tc/fn [f :- (clojure.core.typed/All [b ...]
-                     ['[b ... b] ... b -> [b ... b -> clojure.core.typed/Any]])] 
-        (f [1 2] [1 2])))
-  (cf (tc/fn [f :- (clojure.core.typed/All [b ...]
-                     [-> (HVec [b ... b])])] 
-        (f)))
-  (cf (tc/fn [f :- (clojure.core.typed/All [b ...]
-                     [-> (HSequential [b ... b])])] 
-        (f))))
-
-#_(check-form* '(do (ns unit-test.blah
-                    (:require [clojure.core.typed :as t]))
-                  #_(t/ann-form (+ 1 1) Number)))
-
-#_(cf (ns unit-test.blah
-      (:require [clojure.core.typed :as t])))
-#_(cf @#'clojure.core/*loaded-libs*
-    (clojure.core.typed/Ref1 (clojure.core.typed/Set clojure.lang.Symbol)))
-
-
-#_(tc-e nil)
-
-#_(cf @((inst ref Number) 1))
+  (is-tc-e (fn [f :- (All [b ...] [-> [b ... b -> Any]])] 
+             (f)))
+  (is-tc-e (fn [f :- (All [b ...]
+                          ['[b ... b] ... b -> [b ... b -> Any]])] 
+             (f [1 2] [1 2])))
+  (is-tc-e (fn [f :- (All [b ...]
+                          [-> (HVec [b ... b])])] 
+             (f)))
+  (is-tc-e (fn [f :- (All [b ...]
+                          [-> (HSequential [b ... b])])]
+             (f))))
 
 ;FIXME
 #_(deftest first-class-poly-test
