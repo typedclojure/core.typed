@@ -36,6 +36,7 @@
 (defn config-map2 []
   {:impl impl/clojure
    :check-top-level chk-clj/check-top-level
+   :unparse-ns (ns-name *ns*)
    :runtime-check-expr rt-chk/runtime-check-expr
    :runtime-infer-expr (fn [& args]
                          (require 'clojure.core.typed.runtime-infer)
@@ -55,7 +56,7 @@
 
 (defn check-form-info
   [form & opt]
-  (let [config (case version
+  (let [config (case (int version)
                  1 (config-map)
                  2 (config-map2))]
     (impl/with-full-impl (:impl config)
@@ -71,7 +72,7 @@
 
 (defn check-form*
   [form expected type-provided?]
-  (let [config (case version
+  (let [config (case (int version)
                  1 (config-map)
                  2 (config-map2))]
     (impl/with-full-impl (:impl config)
