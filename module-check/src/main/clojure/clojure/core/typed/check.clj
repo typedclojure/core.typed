@@ -273,7 +273,7 @@
                (::t/tc-ignore ast)))
     (let [form (emit-form/emit-form ast)
           ;_ (prn "before eval" *ns*)
-          _ (clojure.pprint/pprint form)
+          ;_ (clojure.pprint/pprint form)
           ;_ (prn "refers defmacro" ('defmacro (ns-refers *ns*)))
           result (clojure.lang.Compiler/eval form)]
       (taj/update-ns-map!)
