@@ -356,7 +356,7 @@
     (subtype? (parse-type `(~'List* (Value 1) (Value 2)))
               (RClass-of ISeq [-any])))
   (is-clj (= (tc-t [1 2])
-             (ret (-hvec [(-val 1) (-val 2)]) (-true-filter) -empty)))
+             (ret (-hvec [(-val 1) (-val 2)] :filters [(-true-filter) (-true-filter)]) (-true-filter) -empty)))
   (is-clj (= (tc-t '(1 2))
          (ret (HeterogeneousList-maker [(-val 1) (-val 2)]) (-true-filter) -empty)))
   (is-clj (= (tc-t {:a 1})
@@ -1049,7 +1049,8 @@
                     [a b c]))
              (-hvec [(-val 1)
                      (-val 2)
-                     (-hvec [(-val 1) (-val 2)])]
+                     (-hvec [(-val 1) (-val 2)]
+                            :filters [(-true-filter) (-true-filter)])]
                     :filters [(-true-filter) (-true-filter) (-true-filter)])))
   ;Map destructuring of vector
   ;FIXME needs implementing, but gives a decent error msg
@@ -4849,7 +4850,7 @@
 (deftest CTYP-215-zero?-test
   ; inlinings
   (is-tc-e (zero? 1) Boolean)
-  (is-tc-err (zero? 'a) Boolean)
+  (is-tc-err #(zero? 'a) [-> Boolean])
   (is-tc-e zero? [Number -> Boolean]))
 
 (deftest CTYP-181-prim-cast-test

@@ -2306,8 +2306,31 @@
                             :return (assoc expr u/expr-type r/-error))
       (check-expr expr expected))))
 
+(defmethod -invoke-special 'clojure.core/instance?
+  [{:keys [args] :as expr} & [expected]]
+  (when-not (#{2} (count args))
+    (err/int-error (str "Wrong number of arguments to clojure.core/instance?,"
+                      " expected 2, given " (count (:args expr)))))
+  (let [[cls-expr cexpr :as cargs] (-> args
+                                  (update 0 #(check-expr % (r/ret (c/RClass-of Class))))
+                                  (update 1 check-expr))]
+    (if-let [cls (when (and (= :const (:op cls-expr))
+                            (class? (:val cls-expr)))
+                   (:val cls-expr))]
+      (let [inst-of (c/RClass-of-with-unknown-params cls)
+            expr-tr (u/expr-type cexpr)]
+        (assoc expr
+               :args cargs
+               u/expr-type (below/maybe-check-below
+                             (r/ret (c/Un r/-true r/-false)
+                                    (fo/-FS (fo/-filter-at inst-of (r/ret-o expr-tr))
+                                            (fo/-not-filter-at inst-of (r/ret-o expr-tr))))
+                             expected)))
+      :default)))
+
 (defmethod -check :instance?
   [{cls :class the-expr :target :as expr} expected]
+  (assert nil ":instance? node not used")
   (let [inst-of (c/RClass-of-with-unknown-params cls)
         cexpr (check-expr the-expr)
         expr-tr (u/expr-type cexpr)]
