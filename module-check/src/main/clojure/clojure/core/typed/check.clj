@@ -268,9 +268,8 @@
 (defn post-gilardi [ast]
   {:pre [(:op ast)]}
   ;(prn "post-gilardi" (::eval-gildardi? ast))
-  (if (or (::eval-gildardi? ast)
-          (and (get-in ast [::pre/config :top-level])
-               (::t/tc-ignore ast)))
+  ;(clojure.pprint/pprint (emit-form/emit-form ast))
+  (if (::eval-gildardi? ast)
     (let [form (emit-form/emit-form ast)
           ;_ (prn "before eval" *ns*)
           ;_ (clojure.pprint/pprint form)

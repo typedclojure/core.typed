@@ -2198,8 +2198,7 @@
   
   (equal-types-noparse (assoc [3] 1 2)
                        (-hvec [(-val 3) (-val 2)]
-                              :filters [(-FS -top -top) ; embedded literals dont get any
-                                                        ; filter information (yet)?
+                              :filters [(-true-filter)
                                         (-true-filter)]
                               :objects [-empty -empty]))
   
@@ -2393,7 +2392,7 @@
   
   (equal-types-noparse (conj [1] 2 3)
                        (-hvec [(-val 1) (-val 2) (-val 3)]
-                              :filters [(-FS -top -top)
+                              :filters [(-true-filter)
                                         (-true-filter)
                                         (-true-filter)]
                               :objects [-empty -empty -empty]))
@@ -2401,8 +2400,7 @@
                              (ann-form nil (U nil '2))
                              3)
                        (-hvec [(-val 1) (Un -nil (-val 2)) (-val 3)]
-                              :filters [(-FS -top -top) ; embedded literals dont get any
-                                                        ; filter information (yet)?
+                              :filters [(-true-filter)
                                         (-FS -top -top)
                                         (-true-filter)]
                               :objects [-empty -empty -empty]))
@@ -3242,7 +3240,10 @@
         (check-ns 'clojure.core.typed.test.fail.reflection))))
 
 (deftest tc-ignore-test
-  (is-tc-e (fn [] (tc-ignore (+ 'a 1)))))
+  (is-tc-e (fn [] (tc-ignore (+ 'a 1))))
+  ;; evaluates body
+  (is (thrown? Exception
+               (tc-e (tc-ignore (+ 'a 1))))))
 
 (deftest loop-macro-test
   (is-tc-e (fn [] (loop [a 1] (recur a))))
@@ -4857,7 +4858,7 @@
   (is-tc-e float [Number -> Float])
   ;; inlinings
   (is-tc-e (float 1) Float)
-  (is-tc-err (float 'a) Float)
+  (is-tc-err #(float 'a) [-> Float])
   (is-tc-err (let [^Character c \c]
                (float c))
              Float)
@@ -4865,7 +4866,7 @@
   (is-tc-e double [Number -> Double])
   ;; inlinings
   (is-tc-e (double 1) Double)
-  (is-tc-err (double 'a) Double)
+  (is-tc-err #(double 'a) [-> Double])
   (is-tc-err (let [^Character c \c]
                (double c))
              Double)
@@ -4874,7 +4875,7 @@
   ;; inlinings
   (is-tc-e (int 1) Integer)
   (is-tc-e (int \c) Integer)
-  (is-tc-err (int 'a) Integer)
+  (is-tc-err #(int 'a) [-> Integer])
 
   (is-tc-e long [(U Character Number) -> Long])
   ;; inlinings
@@ -4882,7 +4883,7 @@
   (is-tc-e (let [^Character c \c]
              (long c)) 
            Long)
-  (is-tc-err (long 'a) Long)
+  (is-tc-err #(long 'a) [-> Long])
 
   (is-tc-e num [Number -> Number])
   ;; inlinings
@@ -4890,7 +4891,7 @@
   (is-tc-err (let [^Character c \c]
                (num c))
              Number)
-  (is-tc-err (num 'a) Number)
+  (is-tc-err #(num 'a) [-> Number])
 
   (is-tc-e short [(U Character Number) -> Short])
   ;; inlinings
@@ -4898,19 +4899,19 @@
   (is-tc-e (let [^Character c \c]
              (short c))
            Short)
-  (is-tc-err (short 'a) Short)
+  (is-tc-err #(short 'a) [-> Short])
 
   (is-tc-e byte [(U Character Number) -> Byte])
   (is-tc-e (byte 1) Byte)
   (is-tc-e (let [^Character c \c]
              (byte c))
            Byte)
-  (is-tc-err (byte 'a) Byte)
+  (is-tc-err #(byte 'a) [-> Byte])
 
   (is-tc-e char [(U Character Number) -> Character])
   (is-tc-e (char 1) Character)
   (is-tc-e (char \c) Character)
-  (is-tc-err (char 'a) Character)
+  (is-tc-err #(char 'a) [-> Character])
   )
 
 (deftest CTYP-170-test
@@ -5744,5 +5745,7 @@
 
 (deftest cf-throws-test
   (is (thrown? Throwable (cf (nil))))
-  (is (thrown? Throwable (cf (clojure.core/fn [:- :a]))))
-)
+  (is (thrown? Throwable (cf (clojure.core/fn [:- :a])))))
+
+(deftest check-form-info-result-test
+  (is (= 1 (:result (check-form-info (do (do (do 1))))))))
