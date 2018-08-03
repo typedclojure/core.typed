@@ -2163,6 +2163,10 @@
   [{:keys [m-or-f target args] :as expr} expected]
   (check-host expr expected))
 
+(defmethod -check :host-field
+  [{:keys [m-or-f target args] :as expr} expected]
+  (check-host expr expected))
+
 (defn clojure-lang-call? [^String m]
   (or 
     (.startsWith m "clojure.lang")

@@ -116,7 +116,7 @@
                           (check body expected))
                         (binding [vs/*current-expr* body]
                           (check body expected))))
-             unshadowed-ret (erase-objects (map :name bindings) (u/expr-type cbody))]
+             unshadowed-ret (erase-objects (map :name cbindings) (u/expr-type cbody))]
           (assoc expr
                  :body cbody
                  :bindings cbindings
