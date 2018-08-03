@@ -129,9 +129,6 @@
 
 (declare check-expr)
 
-(defn check-asts [asts]
-  (mapv check-top-level asts))
-
 (t/ann checked-ns! [t/Sym -> nil])
 (defn- checked-ns! [nsym]
   (t/when-let-fail [a vs/*already-checked*]
@@ -158,6 +155,8 @@
         ;; ensure namespace actually exists
         (when (ns-depsu/should-check-ns? nsym)
           (check-ns-and-deps dep))))))
+
+(declare check-top-level)
 
 (defn check-ns1
   "Type checks an entire namespace."
