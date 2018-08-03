@@ -18,7 +18,7 @@
   (cond
     (u/expr-type ast) ast
     (= :unanalyzed op) (do
-                         (prn ":unanalyzed")
+                         ;(prn ":unanalyzed")
                          (clojure.pprint/pprint (:form ast))
                          (recur (jpre/pre-analyze ast) expected opts))
     :else
@@ -291,12 +291,12 @@
 (defn post-gilardi [ast]
   (if (::eval-gildardi? ast)
     (let [form (emit-form/emit-form ast)
-          _ (prn "before eval" *ns*)
+          ;_ (prn "before eval" *ns*)
           _ (clojure.pprint/pprint form)
-          _ (prn "refers defmacro" ('defmacro (ns-refers *ns*)))
+          ;_ (prn "refers defmacro" ('defmacro (ns-refers *ns*)))
           result (eval form)]
       (taj/update-ns-map!)
-      (prn "afer eval" *ns*)
+      ;(prn "afer eval" *ns*)
       (assoc ast :result result))
     ast))
 
@@ -314,8 +314,7 @@
                       (pre/pre-analyze-child (taj/empty-env))
                       (assoc-in [::pre/config :top-level] true)
                       (check* expected passes))]
-          (prn "form" form)
-          ;(remove-ns nssym)
+          ;(prn "form" form)
           res)))))
 
 (comment

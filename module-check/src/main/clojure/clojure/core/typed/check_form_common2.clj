@@ -130,22 +130,22 @@
                              runtime-check-expr)
                            check-expr)
             terminal-error (atom nil)
-            _ (prn "before c-ast")
+            ;_ (prn "before c-ast")
             c-ast (try
                     (check-top-level form expected)
                     (catch Throwable e
-                      (prn "caught throwable")
+                      ;(prn "caught throwable")
                       (let [e (if (some-> e ex-data err/tc-error?)
                                 (try
-                                  (prn "printing errors")
+                                  ;(prn "printing errors")
                                   (err/print-errors! (vec (concat (delayed-errors-fn) [e])))
                                   (catch Throwable e
                                     e))
                                 e)]
-                        (prn "reset terminal-error")
+                        ;(prn "reset terminal-error")
                         (reset! terminal-error e)
                         nil)))
-            _ (prn "err" @terminal-error)
+            ;_ (prn "err" @terminal-error)
             res (some-> c-ast u/expr-type)
             delayed-errors (delayed-errors-fn)
             ex @terminal-error]

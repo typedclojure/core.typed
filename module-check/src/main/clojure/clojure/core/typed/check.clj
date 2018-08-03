@@ -1079,7 +1079,6 @@
   [{:keys [args] :as expr} & [expected]]
   {:post [(vector? (:args %))
           (-> % u/expr-type r/TCResult?)]}
-  (prn "clojure.lang.Util/identical case")
   (let [cargs (mapv check-expr args)]
     (assoc expr
            :args cargs
