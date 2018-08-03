@@ -235,11 +235,11 @@
   (when vs/*trace-checker*
     (println "Checking line:" (:line env))
     (flush))
-  (prn "check-expr" op)
-  (clojure.pprint/pprint (emit-form/emit-form expr))
+  ;(prn "check-expr" op)
+  ;(clojure.pprint/pprint (emit-form/emit-form expr))
   (cond
     (u/expr-type expr) (do
-                         (prn "skipping already analyzed form")
+                         ;(prn "skipping already analyzed form")
                          expr)
     (= :unanalyzed op) (-> expr
                            jpre/pre-analyze
@@ -252,13 +252,13 @@
                         pre
                         (-check expected)
                         post)]
-          (prn "post" (:op cexpr))
-          (clojure.pprint/pprint (emit-form/emit-form cexpr))
+          ;(prn "post" (:op cexpr))
+          ;(clojure.pprint/pprint (emit-form/emit-form cexpr))
           cexpr)))))
 
 (defn pre-gilardi [ast]
   {:pre [(not (= :unanalyzed (:op ast)))]}
-  (prn "pre-gilardi" (get-in ast [::pre/config :top-level]))
+  ;(prn "pre-gilardi" (get-in ast [::pre/config :top-level]))
   (if (get-in ast [::pre/config :top-level])
     (case (:op ast)
       :do (ast/update-children ast #(assoc-in % [::pre/config :top-level] true))
@@ -267,17 +267,17 @@
 
 (defn post-gilardi [ast]
   {:pre [(:op ast)]}
-  (prn "post-gilardi" (::eval-gildardi? ast))
+  ;(prn "post-gilardi" (::eval-gildardi? ast))
   (if (or (::eval-gildardi? ast)
           (and (get-in ast [::pre/config :top-level])
                (::t/tc-ignore ast)))
     (let [form (emit-form/emit-form ast)
-          _ (prn "before eval" *ns*)
+          ;_ (prn "before eval" *ns*)
           _ (clojure.pprint/pprint form)
           ;_ (prn "refers defmacro" ('defmacro (ns-refers *ns*)))
           result (clojure.lang.Compiler/eval form)]
       (taj/update-ns-map!)
-      (prn "after eval" *ns*)
+      ;(prn "after eval" *ns*)
       (assoc ast :result result))
     ast))
 
