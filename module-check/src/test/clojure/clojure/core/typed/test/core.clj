@@ -3243,7 +3243,11 @@
   (is-tc-e (fn [] (tc-ignore (+ 'a 1))))
   ;; evaluates body
   (is (thrown? Exception
-               (tc-e (tc-ignore (+ 'a 1))))))
+               (tc-e (tc-ignore (+ 'a 1)))))
+  (is (= 1
+         (:result
+           (check-form-info
+             '(do (tc-ignore 1)))))))
 
 (deftest loop-macro-test
   (is-tc-e (fn [] (loop [a 1] (recur a))))
@@ -5098,7 +5102,7 @@
         [java.io.File -> Any]))))
 
 (deftest rewrite-reflecting-ctor-test
-  (is-tc-err (java.io.File. 1))
+  (is-tc-err #(java.io.File. 1))
   (is-tc-err (fn [a]
                (java.io.File. a)))
   (is
@@ -5748,4 +5752,4 @@
   (is (thrown? Throwable (cf (clojure.core/fn [:- :a])))))
 
 (deftest check-form-info-result-test
-  (is (= 1 (:result (check-form-info (do (do (do 1))))))))
+  (is (= 1 (:result (check-form-info '(do (do (do 1))))))))

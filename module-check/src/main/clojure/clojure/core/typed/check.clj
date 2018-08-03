@@ -269,7 +269,9 @@
   {:pre [(:op ast)]}
   ;(prn "post-gilardi" (::eval-gildardi? ast))
   ;(clojure.pprint/pprint (emit-form/emit-form ast))
-  (if (::eval-gildardi? ast)
+  (if (or (::eval-gildardi? ast)
+          (and (get-in ast [::pre/config :top-level])
+               (::t/tc-ignore ast)))
     (let [form (emit-form/emit-form ast)
           ;_ (prn "before eval" *ns*)
           ;_ (clojure.pprint/pprint form)
@@ -278,7 +280,11 @@
       (taj/update-ns-map!)
       ;(prn "after eval" *ns*)
       (assoc ast :result result))
-    ast))
+    (cond-> ast
+      (and (= :do (:op ast))
+           (get-in ast [::pre/config :top-level])
+           (:result (:ret ast)))
+      (assoc :result (:result (:ret ast))))))
 
 (defn check-top-level 
   ([form expected] (check-top-level form expected {}))
@@ -2165,6 +2171,16 @@
 (defmethod -check :host-field
   [{:keys [m-or-f target args] :as expr} expected]
   (check-host expr expected))
+
+(defmethod -check :maybe-host-form
+  [expr expected]
+  (let [{:keys [pre post]} ana2/scheduled-passes
+        expr (pre expr)]
+    (if (= :maybe-host-form (:op expr))
+      (err/tc-delayed-error (str "Unresolved host interop: " (:form expr)
+                                 "\n\nHint: use *warn-on-reflection* to identify reflective calls")
+                            :return (assoc expr u/expr-type r/-error))
+      (check-expr expr expected))))
 
 (defn clojure-lang-call? [^String m]
   (or 

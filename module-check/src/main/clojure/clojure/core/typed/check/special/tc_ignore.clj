@@ -9,7 +9,7 @@
 (defn check-tc-ignore [check expr expected]
   (binding [vs/*current-expr* expr]
     (let [expr (-> expr
-                   (update :ret ana2/run-passes))]
+                   #_(update :ret ana2/run-passes))]
       (assoc expr
              ::t/tc-ignore true
              u/expr-type (below/maybe-check-below
