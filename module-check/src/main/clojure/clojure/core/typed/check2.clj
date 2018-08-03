@@ -11,8 +11,8 @@
             ))
 
 (defn check* [{:keys [op] :as ast} expected {:keys [pre post] :as opts}]
-  {:pre [((some-fn nil? r/TCResult?) expected)]
-   :post [(r/TCResult? (u/expr-type %))]}
+  ;{:pre [((some-fn nil? r/TCResult?) expected)]
+  ; :post [(r/TCResult? (u/expr-type %))]}
   ;(prn "op" (:op ast))
   ;(prn "check* ns" (get-in ast [:env :ns]))
   (cond

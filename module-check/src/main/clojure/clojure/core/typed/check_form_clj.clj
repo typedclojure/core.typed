@@ -8,7 +8,7 @@
             [clojure.core.typed.runtime-check :as rt-chk]
             [clojure.core.typed.current-impl :as impl]))
 
-(def version 1)
+(def version 2)
 
 (defn config-map []
   {:impl impl/clojure
@@ -35,7 +35,7 @@
 
 (defn config-map2 []
   {:impl impl/clojure
-   :check-top-level chk-clj2/check-top-level
+   :check-top-level chk-clj/check-top-level
    :runtime-check-expr rt-chk/runtime-check-expr
    :runtime-infer-expr (fn [& args]
                          (require 'clojure.core.typed.runtime-infer)

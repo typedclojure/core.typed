@@ -37,6 +37,7 @@
                      ; :post checked after the reduce
                      }
                     (let [expr (get cexprs n)
+                          _ (assert (map? expr))
                           cexpr (binding [; always prefer envs with :line information, even if inaccurate
                                           vs/*current-env* (if (:line (:env expr))
                                                              (:env expr)
@@ -73,7 +74,7 @@
                                                                           (fo/-unreachable-filter)
                                                                           orep/-empty
                                                                           (r/-flow fl/-bot))))])))))
-                  [(lex/lexical-env) []] (range nexprs))
+                  [(lex/lexical-env) exprs] (range nexprs))
           _ (assert (= (count cexprs) nexprs))
           actual-types (mapv u/expr-type cexprs)
           _ (assert (lex/PropEnv? env))

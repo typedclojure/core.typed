@@ -900,14 +900,9 @@ for checking namespaces, cf for checking individual forms."}
                            (next bindings)
                            (conj norm fbnd))
             :else (throw (Exception. (str "Unknown syntax to letfn>: " fbnd)))))
-        {anns false inits true} (group-by list? normalised-bindings)
-        ; init-syn unquotes local binding references to be compatible with hygienic expansion
-        init-syn (into {}
-                   (for [[lb type] anns]
-                     [lb `'~type]))]
+        {anns false inits true} (group-by list? normalised-bindings)]
     `(core/letfn ~(vec inits)
-       ;unquoted to allow bindings to resolve with hygiene
-       ~init-syn
+       '~(mapv second anns)
        ;preserve letfn empty body
        ~@(or body [nil]))))
 

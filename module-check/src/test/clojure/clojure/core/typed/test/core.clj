@@ -3335,18 +3335,19 @@
              :name)
          0)))
 
-(cf (tc/fn [f :- (clojure.core.typed/All [b ...]
-                   [-> [b ... b -> clojure.core.typed/Any]])] 
-      (f)))
-(cf (tc/fn [f :- (clojure.core.typed/All [b ...]
-                   ['[b ... b] ... b -> [b ... b -> clojure.core.typed/Any]])] 
-      (f [1 2] [1 2])))
-(cf (tc/fn [f :- (clojure.core.typed/All [b ...]
-                   [-> (HVec [b ... b])])] 
-      (f)))
-(cf (tc/fn [f :- (clojure.core.typed/All [b ...]
-                   [-> (HSequential [b ... b])])] 
-      (f)))
+(deftest dotted-fn-test
+  (cf (tc/fn [f :- (clojure.core.typed/All [b ...]
+                     [-> [b ... b -> clojure.core.typed/Any]])] 
+        (f)))
+  (cf (tc/fn [f :- (clojure.core.typed/All [b ...]
+                     ['[b ... b] ... b -> [b ... b -> clojure.core.typed/Any]])] 
+        (f [1 2] [1 2])))
+  (cf (tc/fn [f :- (clojure.core.typed/All [b ...]
+                     [-> (HVec [b ... b])])] 
+        (f)))
+  (cf (tc/fn [f :- (clojure.core.typed/All [b ...]
+                     [-> (HSequential [b ... b])])] 
+        (f))))
 
 #_(check-form* '(do (ns unit-test.blah
                     (:require [clojure.core.typed :as t]))
@@ -5704,6 +5705,7 @@
   (is (= ((clojure.core.typed/fn [] :- nil, nil)) nil)))
 
 #_
+;TODO
 (deftest nil-branch-test
   (is-tc-e (fn [a :- false]
              (when (false? a)
