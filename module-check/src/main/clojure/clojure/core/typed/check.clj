@@ -1805,24 +1805,23 @@
 ; FIXME this needs a line number from somewhere!
 (defmethod -host-call-special 'clojure.lang.MultiFn/addMethod
   [expr expected]
+  {:post [(every? :post-done (cons (:target %) (:args %)))]}
   (when-not (= 2 (count (:args expr)))
     (err/int-error "Wrong arguments to clojure.lang.MultiFn/addMethod"))
   (let [{:keys [pre post]} ana2/scheduled-passes
-        {[dispatch-val-expr method-expr :as args] :args target :target :keys [env] :as expr}
+        {[dispatch-val-expr _] :args target :target :keys [env] :as expr}
         (-> expr
-            (update :target check-expr)
-            (update-in [:args 0] check-expr)
-            (update-in [:args 1] pre))
+            (update :target pre))
         _ (when-not (#{:var} (:op target))
             (err/int-error "Must call addMethod with a literal var"))
         var (:var target)
         _ (assert (var? var))
         mmsym (coerce/var->symbol var)
-        ret-expr (assoc expr
-                        u/expr-type (binding [vs/*current-expr* expr]
-                                      (below/maybe-check-below
-                                        (r/ret (c/RClass-of clojure.lang.MultiFn))
-                                        expected)))
+        expr (assoc expr
+                    u/expr-type (binding [vs/*current-expr* expr]
+                                  (below/maybe-check-below
+                                    (r/ret (c/RClass-of clojure.lang.MultiFn))
+                                    expected)))
         default? (cu/default-defmethod? var (ast-u/emit-form-fn dispatch-val-expr))]
     (cond
       ;skip if warn-on-unannotated-vars is in effect
@@ -1832,9 +1831,16 @@
       (do (u/tc-warning (str "Not checking defmethod " mmsym " with dispatch value: " 
                              (pr-str (ast-u/emit-form-fn dispatch-val-expr))))
           (p/p :check/skip-MultiFn-addMethod)
-          ret-expr)
+          (-> expr
+              (update :target ana2/run-passes)
+              (update-in [:args 0] ana2/run-passes)
+              (update-in [:args 1] ana2/run-passes)))
       :else
-      (let [_ (assert (#{:var} (:op target)))
+      (let [{[dispatch-val-expr method-expr] :args :as expr}
+            (-> expr
+                (update :target check-expr)
+                (update-in [:args 0] check-expr))
+            _ (assert (#{:var} (:op target)))
             _ (when-not (#{:fn} (:op method-expr))
                 (err/int-error (str "Method must be a fn")))
             dispatch-type (mm/multimethod-dispatch-type mmsym)]
@@ -1842,7 +1848,8 @@
           (binding [vs/*current-env* env]
             (err/tc-delayed-error (str "Multimethod requires dispatch type: " mmsym
                                        "\n\nHint: defmulti must be checked before its defmethods")
-                                  :return ret-expr))
+                                  :return (-> expr
+                                              (update-in [:args 1] ana2/run-passes))))
           (let [method-expected (var-env/type-of mmsym)
                 cmethod-expr 
                 (binding [multi-u/*current-mm* 
@@ -1850,7 +1857,8 @@
                             {:dispatch-fn-type dispatch-type
                              :dispatch-val-ret (u/expr-type dispatch-val-expr)})]
                   (check-expr method-expr (r/ret method-expected)))]
-            (assoc-in ret-expr [:args 1] cmethod-expr)))))))
+            (-> expr
+                (assoc-in [:args 1] cmethod-expr))))))))
 
 (defmethod -invoke-special :default [& args] :default)
 (add-static-method-special-method :default [& args] :default)
@@ -2126,9 +2134,14 @@
 (defn check-host
   [{original-op :op :keys [m-or-f target args] :as expr} expected & {:keys [no-check]}]
   {:post [(-> % u/expr-type r/TCResult?)]}
-  (let [ctarget (check-expr target)
+  (let [check-expr (if no-check
+                     (fn [ast & args] ast)
+                     check-expr)
+        ctarget (check-expr target)
         cargs (when args
                 (mapv check-expr args))
+        _ (assert (:post-done ctarget))
+        _ (assert (every? :post-done cargs))
         {:keys [pre post]} ana2/scheduled-passes
         expr (-> (assoc expr
                         :target ctarget
@@ -2146,9 +2159,7 @@
                            u/expr-type (cu/error-ret expected))))]
     ;; try to rewrite, otherwise error on reflection
     (cond
-      (not= original-op (:op expr)) (if no-check
-                                      expr
-                                      (check-expr expr expected))
+      (not= original-op (:op expr)) (check-expr expr expected)
       (cu/should-rewrite?)
       (let [ctarget (add-type-hints ctarget)
             cargs (mapv add-type-hints cargs)
@@ -2176,14 +2187,14 @@
 (defmethod -check :host-call
   [expr expected]
   ;(prn "host-call" (:method expr))
-  (let [expr (update expr :target check-expr)
+  (let [expr (update expr :target ana2/run-passes)
         maybe-checked-expr (-host-call-special expr expected)]
     (if (= :default maybe-checked-expr)
       (check-host expr expected)
       (let [expr maybe-checked-expr]
-        (assert (u/expr-type (:target expr)))
-        (assert (every? u/expr-type (:args expr)))
-        (check-host maybe-checked-expr expected :no-check-rewrite true)))))
+        (assert (:post-done (:target expr)))
+        (assert (every? :post-done (:args expr)))
+        (check-host maybe-checked-expr expected :no-check true)))))
 
 (defmethod -check :host-field
   [{:keys [m-or-f target args] :as expr} expected]
