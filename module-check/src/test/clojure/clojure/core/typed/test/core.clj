@@ -1615,7 +1615,7 @@
   (is (check-ns 'clojure.core.typed.test.set-bang)))
 
 (deftest flow-unreachable-test
-  ; this will always throw a runtime exception, which is ok.
+  ; this will always throw a runtime exception, so it's unreachable
   (is-tc-e 
     (fn [a] 
       {:pre [(symbol? a)]}
