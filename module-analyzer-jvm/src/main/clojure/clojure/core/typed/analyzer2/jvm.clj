@@ -100,14 +100,7 @@
                              (fn [ast] ast)
                              passes))
         pre-passes  (pfns-fn pre-passes)
-        post-passes (pfns-fn post-passes)
-        #_#_
-        walk (fn [ast]
-               (let [state (or (-> ast :env ::ana/state)
-                               (u/update-vals state #(%)))]
-                 (ast/walk (assoc-in ast [:env ::ana/state] state)
-                           pre-passes
-                           post-passes)))]
+        post-passes (pfns-fn post-passes)]
     {:pre (fn [ast]
             (let [state (or (-> ast :env ::ana/state)
                             (u/update-vals state #(%)))]

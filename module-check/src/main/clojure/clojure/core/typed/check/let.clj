@@ -18,6 +18,7 @@
             [clojure.core.typed.check.recur-utils :as recur-u]
             [clojure.core.typed.subst-obj :as subst-obj]
             [clojure.core.typed.object-rep :as obj]
+            [clojure.core.typed.analyzer2 :as ana2]
             [clojure.core.typed.contract-utils :as con]))
 
 (defn update-env [env sym {:keys [t fl flow o] :as r} is-reachable]
@@ -92,8 +93,8 @@
               (let [expr (get cbindings n)
                     ; check rhs
                     {sym :name :as cexpr} (var-env/with-lexical-env env
-                                           (check expr (when is-loop
-                                                         (r/ret expected-bnd))))
+                                            (check expr (when is-loop
+                                                          (r/ret expected-bnd))))
                     new-env (update-env env sym (u/expr-type cexpr) is-reachable)
                     maybe-reduced (if @is-reachable identity reduced)]
                 (maybe-reduced

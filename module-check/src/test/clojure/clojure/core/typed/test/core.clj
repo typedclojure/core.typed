@@ -5074,6 +5074,16 @@
   (is
     (should-not-reflect
       (tc-e 
+        (let [^java.io.File a (java.io.File. "a")]
+          (.getParent a)))))
+  (is
+    (should-not-reflect
+      (tc-e 
+        (let [a (java.io.File. "a")]
+          (.getParent a)))))
+  (is
+    (should-not-reflect
+      (tc-e 
         (fn [a] (.getParent a))
         [java.io.File -> Any])))
   (is

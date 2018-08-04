@@ -241,9 +241,12 @@
     (u/expr-type expr) (do
                          ;(prn "skipping already analyzed form")
                          expr)
-    (= :unanalyzed op) (-> expr
-                           jpre/pre-analyze
-                           (check-expr expected))
+    (= :unanalyzed op) (let [{:keys [pre post]} ana2/scheduled-passes]
+                         (-> expr
+                             ;; ensures ::ana/state is propagated properly,
+                             ;; instead of simply calling pre-analyze
+                             pre
+                             (check-expr expected)))
     :else
     (let [{:keys [pre post]} ana2/scheduled-passes]
       (binding [vs/*current-env* (if (:line env) env vs/*current-env*)
@@ -2123,20 +2126,19 @@
 (defn check-host
   [{original-op :op :keys [m-or-f target args] :as expr} expected & {:keys [no-check]}]
   {:post [(-> % u/expr-type r/TCResult?)]}
-  ;(prn "host-interop" (:op expr) (:children expr))
   (let [ctarget (check-expr target)
         cargs (when args
                 (mapv check-expr args))
         {:keys [pre post]} ana2/scheduled-passes
-        expr (-> (assoc expr 
+        expr (-> (assoc expr
                         :target ctarget
                         :args cargs)
                  post)
         give-up (fn []
                   (do
-                    (err/tc-delayed-error (str "Unresolved host interop: " m-or-f
+                    (err/tc-delayed-error (str "Unresolved host interop: " (or m-or-f (:method expr))
                                                (type-hints/suggest-type-hints 
-                                                 m-or-f 
+                                                 (or m-or-f (:method expr))
                                                  (-> ctarget u/expr-type r/ret-t) 
                                                  [])
                                                "\n\nHint: use *warn-on-reflection* to identify reflective calls"))
@@ -2155,7 +2157,6 @@
                          :args cargs)
             ;_ (prn (-> nexpr :target ((juxt :o-tag :tag))))
             rewrite (try-resolve-reflection nexpr)]
-        ;(prn "rewrite" (:op rewrite))
         (case (:op rewrite)
           (:static-call :instance-call)
           (if no-check
@@ -2474,7 +2475,6 @@
                                   (cu/Constructor->Function ctor))))))
               ;; check a non-reflective constructor
               check-validated (fn [expr]
-                                ;(prn "found validation")
                                 (let [ifn (-> (if inst-types
                                                 (inst/manual-inst (ctor-fn expr) inst-types)
                                                 (ctor-fn expr))
