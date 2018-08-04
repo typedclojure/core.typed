@@ -2439,13 +2439,14 @@
         (not= cu/not-special spec) spec
         :else
         (let [inst-types *inst-ctor-types*
-              cargs (binding [*inst-ctor-types* nil]
-                      (mapv check-expr args))
               {:keys [pre post]} ana2/scheduled-passes
-              expr (post (assoc expr :args cargs))
+              expr (-> expr
+                       (update :args #(binding [*inst-ctor-types* nil]
+                                        (mapv check-expr %)))
+                       post)
               ;; call when we're convinced there's no way to rewrite this AST node
               ;; in a non-reflective way.
-              give-up (fn [expr cargs]
+              give-up (fn [expr]
                         (let [clssym (-> expr
                                          ast-u/new-op-class 
                                          coerce/Class->symbol)]
@@ -2453,12 +2454,11 @@
                                                      (type-hints/suggest-type-hints 
                                                        nil 
                                                        nil 
-                                                       (map (comp r/ret-t u/expr-type) cargs)
+                                                       (map (comp r/ret-t u/expr-type) (:args expr))
                                                        :constructor-call clssym)
                                                      ".\n\nHint: add type hints")
                                                 :form (ast-u/emit-form-fn expr)
                                                 :return (assoc expr
-                                                               :args cargs
                                                                u/expr-type (cu/error-ret expected)))))
               ;; returns the function type for this constructor, or nil if
               ;; it is reflective.
@@ -2473,30 +2473,28 @@
                                 (when-let [ctor (cu/NewExpr->Ctor expr)]
                                   (cu/Constructor->Function ctor))))))
               ;; check a non-reflective constructor
-              check-validated (fn [expr cargs]
+              check-validated (fn [expr]
                                 ;(prn "found validation")
                                 (let [ifn (-> (if inst-types
                                                 (inst/manual-inst (ctor-fn expr) inst-types)
                                                 (ctor-fn expr))
                                               r/ret)
                                       ;_ (prn "Expected constructor" (prs/unparse-type (r/ret-t ifn)))
-                                      res-type (funapp/check-funapp expr cargs ifn (map u/expr-type cargs) expected)]
+                                      res-type (funapp/check-funapp expr (:args expr) ifn (map u/expr-type (:args expr)) expected)]
                                   (assoc expr
-                                         :args cargs
                                          u/expr-type res-type)))]
-          ;(prn "validated?" (:validated? expr))
           ;; try to rewrite, otherwise error on reflection
           (cond
-            (:validated? expr) (check-validated expr cargs)
+            (:validated? expr) (check-validated expr)
 
-            (cu/should-rewrite?) (let [cargs (mapv add-type-hints cargs)
-                                       rexpr (try-resolve-reflection (assoc expr :args cargs))]
+            (cu/should-rewrite?) (let [expr (update expr :args #(mapv add-type-hints %))
+                                       rexpr (try-resolve-reflection expr)]
                                    ;; rexpr can only be :new
                                    (case (:op rexpr)
                                      (:new) (if (:validated? rexpr)
-                                              (check-validated rexpr cargs)
-                                              (give-up rexpr cargs))))
-            :else (give-up expr cargs)))))))
+                                              (check-validated rexpr)
+                                              (give-up rexpr))))
+            :else (give-up expr)))))))
 
 (defmethod -check :throw
   [expr expected]
