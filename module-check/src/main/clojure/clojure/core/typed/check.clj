@@ -1841,7 +1841,8 @@
       (let [{[dispatch-val-expr method-expr] :args :as expr}
             (-> expr
                 (update :target check-expr)
-                (update-in [:args 0] check-expr))
+                (update-in [:args 0] check-expr)
+                (update-in [:args 1] pre))
             _ (assert (#{:var} (:op target)))
             _ (when-not (#{:fn} (:op method-expr))
                 (err/int-error (str "Method must be a fn")))
