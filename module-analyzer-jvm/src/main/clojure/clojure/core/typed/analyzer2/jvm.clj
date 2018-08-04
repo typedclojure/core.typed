@@ -252,14 +252,12 @@
   (throw (.e ^ExceptionThrown e)))
 
 (defmethod emit-form/-emit-form :unanalyzed
-  [{:keys [analyzed-atom form] :as ast} opts]
-  (if-some [ast @analyzed-atom]
-    (emit-form/emit-form ast)
-    (do (assert (not (#{:hygienic :qualified-symbols} opts))
-                "Cannot support emit-form options on unanalyzed form")
-        #_(throw (Exception. "Cannot emit :unanalyzed form"))
-        #_(prn (str "WARNING: emit-form: did not analyze: " form))
-        form)))
+  [{:keys [form] :as ast} opts]
+  (assert (not (#{:hygienic :qualified-symbols} opts))
+          "Cannot support emit-form options on unanalyzed form")
+  #_(throw (Exception. "Cannot emit :unanalyzed form"))
+  #_(prn (str "WARNING: emit-form: did not analyze: " form))
+  form)
 
 (defn eval-ast [a {:keys [handle-evaluation-exception]
                    :or {handle-evaluation-exception throw!}

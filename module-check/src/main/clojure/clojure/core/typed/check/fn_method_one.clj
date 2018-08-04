@@ -56,17 +56,7 @@
     :cljs (assert method))
   #_(prn "checking syntax:" (ast-u/emit-form-fn method))
   (u/p :check/check-fn-method1
-  (let [_ (assert (and ((comp #{:unanalyzed} :op :ret :body) method)
-                       (every? (comp #{:unanalyzed} :op)
-                               ((comp :statements :body) method))))
-        ; invalidate analysis cache in case this method is rechecked
-        method (-> method
-                   (assoc-in [:body :ret :analyzed-atom] (atom nil))
-                   (update-in [:body :statements]
-                              #(mapv (fn [statement]
-                                       (assoc :analyzed-atom (atom nil)))
-                                     %)))
-        ignore-rng (or ignore-rng
+  (let [ignore-rng (or ignore-rng
                        (r/infer-any? (-> expected :rng :t)))
         ;_ (prn "ignore-rng" ignore-rng)
         body ((ast-u/method-body-kw) method)

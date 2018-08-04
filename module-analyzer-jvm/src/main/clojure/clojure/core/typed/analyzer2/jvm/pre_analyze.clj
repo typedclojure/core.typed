@@ -233,12 +233,10 @@
   [ast]
   {:post [(not= :unanalyzed (:op %))]}
   (case (:op ast)
-    :unanalyzed (let [{:keys [analyzed-atom form env ::pre/config]} ast]
-                  (if-some [ast @analyzed-atom]
-                    ast
-                    (let [ast (-> form
-                                  (pre/pre-analyze-form env)
-                                  ;TODO rename to ::pre/inherited
-                                  (assoc ::pre/config config))]
-                      (reset! analyzed-atom ast))))
+    :unanalyzed (let [{:keys [form env ::pre/config]} ast
+                      ast (-> form
+                              (pre/pre-analyze-form env)
+                              ;TODO rename to ::pre/inherited
+                              (assoc ::pre/config config))]
+                    ast)
     ast))

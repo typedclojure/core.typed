@@ -2231,17 +2231,10 @@
       spec
       (method/check-invoke-method check-expr expr expected))))
 
-#_
 (defmethod -check :instance-call
   [expr expected]
-  {:post [(-> % u/expr-type r/TCResult?)
-          (if (contains? % :args)
-            (vector? (:args %))
-            true)]}
-  (let [spec (-instance-method-special expr expected)]
-    (if (not= :default spec)
-      spec
-      (method/check-invoke-method check-expr expr expected))))
+  {:post [(-> % u/expr-type r/TCResult?)]}
+  (method/check-invoke-method check-expr expr expected))
 
 (defmethod -check :static-field
   [expr expected]
