@@ -502,10 +502,20 @@
                                   (cu/MethodExpr->qualsym expr)))
 (u/add-defmethod-generator static-method-special)
 
-(defmulti instance-method-special (fn [expr & args]
-                                    {:post [((some-fn nil? symbol?) %)]}
-                                    (cu/MethodExpr->qualsym expr)))
-(u/add-defmethod-generator instance-method-special)
+(defn host-call-qname [expr]
+  {:pre [(= :host-call (:op expr))]
+   :post [((some-fn nil? symbol?) %)]}
+  (when-let [tag (:tag (:target expr))]
+    (let [tag (if (class? tag)
+                (coerce/Class->symbol tag)
+                tag)]
+      (when (symbol? tag)
+        (let [sym (symbol (str tag) (str (:method expr)))]
+          sym)))))
+
+(defmulti -host-call-special (fn [expr expected]
+                               {:post [((some-fn nil? symbol?) %)]}
+                               (host-call-qname expr)))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Keyword lookups
@@ -1790,15 +1800,16 @@
                          expected))))
 
 ; FIXME this needs a line number from somewhere!
-(add-instance-method-special-method 'clojure.lang.MultiFn/addMethod
-  [expr & [expected]]
+(defmethod -host-call-special 'clojure.lang.MultiFn/addMethod
+  [expr expected]
   (when-not (= 2 (count (:args expr)))
     (err/int-error "Wrong arguments to clojure.lang.MultiFn/addMethod"))
   (let [{:keys [pre post]} ana2/scheduled-passes
-        {[dispatch-val-expr method-expr :as args] :args target :instance :keys [env] :as expr}
+        {[dispatch-val-expr method-expr :as args] :args target :target :keys [env] :as expr}
         (-> expr
-            (update :instance pre)
-            (update-in [:args 0] pre))
+            (update :target check-expr)
+            (update-in [:args 0] check-expr)
+            (update-in [:args 1] pre))
         _ (when-not (#{:var} (:op target))
             (err/int-error "Must call addMethod with a literal var"))
         var (:var target)
@@ -1823,31 +1834,24 @@
       (let [_ (assert (#{:var} (:op target)))
             _ (when-not (#{:fn} (:op method-expr))
                 (err/int-error (str "Method must be a fn")))
-            ctarget (check-expr target)
-            cdispatch-val-expr (check-expr dispatch-val-expr)
             dispatch-type (mm/multimethod-dispatch-type mmsym)]
-        (p/p :check/checked-MultiFn-addMethod)
         (if-not dispatch-type
           (binding [vs/*current-env* env]
             (err/tc-delayed-error (str "Multimethod requires dispatch type: " mmsym
                                        "\n\nHint: defmulti must be checked before its defmethods")
-                                  :return (assoc ret-expr
-                                               :instance ctarget)))
+                                  :return ret-expr))
           (let [method-expected (var-env/type-of mmsym)
                 cmethod-expr 
                 (binding [multi-u/*current-mm* 
                           (when-not default?
                             {:dispatch-fn-type dispatch-type
-                             :dispatch-val-ret (u/expr-type cdispatch-val-expr)})]
-                  (check-expr method-expr (r/ret method-expected)))
-                cargs [cdispatch-val-expr cmethod-expr]]
-            (assoc ret-expr
-                   :instance ctarget
-                   :args cargs)))))))
+                             :dispatch-val-ret (u/expr-type dispatch-val-expr)})]
+                  (check-expr method-expr (r/ret method-expected)))]
+            (assoc-in ret-expr [:args 1] cmethod-expr)))))))
 
 (defmethod -invoke-special :default [& args] :default)
 (add-static-method-special-method :default [& args] :default)
-(add-instance-method-special-method :default [& args] :default)
+(defmethod -host-call-special :default [& args] :default)
 
 (defn maybe-special-apply [check-expr expr expected]
   (let [t (apply/check-apply check-expr expr expected)]
@@ -2117,9 +2121,9 @@
       validate/validate))
 
 (defn check-host
-  [{original-op :op :keys [m-or-f target args] :as expr} expected]
+  [{original-op :op :keys [m-or-f target args] :as expr} expected & {:keys [no-check]}]
   {:post [(-> % u/expr-type r/TCResult?)]}
-  ;(prn "host-interop" (:op expr))
+  ;(prn "host-interop" (:op expr) (:children expr))
   (let [ctarget (check-expr target)
         cargs (when args
                 (mapv check-expr args))
@@ -2140,7 +2144,9 @@
                            u/expr-type (cu/error-ret expected))))]
     ;; try to rewrite, otherwise error on reflection
     (cond
-      (not= original-op (:op expr)) (check-expr expr expected)
+      (not= original-op (:op expr)) (if no-check
+                                      expr
+                                      (check-expr expr expected))
       (cu/should-rewrite?)
       (let [ctarget (add-type-hints ctarget)
             cargs (mapv add-type-hints cargs)
@@ -2151,11 +2157,13 @@
             rewrite (try-resolve-reflection nexpr)]
         ;(prn "rewrite" (:op rewrite))
         (case (:op rewrite)
-          (:static-call :instance-call) 
-          (let [e (method/check-invoke-method check-expr rewrite expected
-                                              :ctarget ctarget
-                                              :cargs cargs)]
-            e)
+          (:static-call :instance-call)
+          (if no-check
+            rewrite
+            (let [e (method/check-invoke-method check-expr rewrite expected
+                                                :ctarget ctarget
+                                                :cargs cargs)]
+              e))
           ;; TODO field cases
           (give-up)))
       :else (give-up))))
@@ -2165,8 +2173,16 @@
   (check-host expr expected))
 
 (defmethod -check :host-call
-  [{:keys [m-or-f target args] :as expr} expected]
-  (check-host expr expected))
+  [expr expected]
+  ;(prn "host-call" (:method expr))
+  (let [expr (update expr :target check-expr)
+        maybe-checked-expr (-host-call-special expr expected)]
+    (if (= :default maybe-checked-expr)
+      (check-host expr expected)
+      (let [expr maybe-checked-expr]
+        (assert (u/expr-type (:target expr)))
+        (assert (every? u/expr-type (:args expr)))
+        (check-host maybe-checked-expr expected :no-check-rewrite true)))))
 
 (defmethod -check :host-field
   [{:keys [m-or-f target args] :as expr} expected]
@@ -2215,20 +2231,14 @@
       spec
       (method/check-invoke-method check-expr expr expected))))
 
+#_
 (defmethod -check :instance-call
   [expr expected]
   {:post [(-> % u/expr-type r/TCResult?)
           (if (contains? % :args)
             (vector? (:args %))
             true)]}
-  (u/trace 
-    (let [inline? (-> (cu/MethodExpr->qualsym expr)
-                      str
-                      clojure-lang-call?)]
-      (str (when-not inline? "non-inlined ") "instance Call: " (cu/MethodExpr->qualsym expr))))
-  (profile-inlining :instance-call
-    (str (cu/MethodExpr->qualsym expr)))
-  (let [spec (instance-method-special expr expected)]
+  (let [spec (-instance-method-special expr expected)]
     (if (not= :default spec)
       spec
       (method/check-invoke-method check-expr expr expected))))
@@ -2365,14 +2375,22 @@
 (u/add-defmethod-generator new-special)
 
 (add-new-special-method 'clojure.lang.MultiFn
-  [{[nme-expr dispatch-expr default-expr hierarchy-expr :as args] :args :as expr} & [expected]]
-  (when-not (== 4 (count args))
+  [expr & [expected]]
+  (when-not (== 4 (count (:args expr)))
     (err/int-error "Wrong arguments to clojure.lang.MultiFn constructor"))
-  (when-not (= (:val hierarchy-expr) #'clojure.core/global-hierarchy)
-    (err/int-error "Multimethod hierarchy cannot be customised"))
-  (when-not (= (:val default-expr) :default)
-    (err/int-error "Non :default default dispatch value NYI"))
-  (let [mm-name (:val nme-expr)
+  (let [{[nme-expr dispatch-expr default-expr hierarchy-expr :as args] :args :as expr}
+        (-> expr
+            ;name
+            (update-in [:args 0] check-expr)
+            ;default
+            (update-in [:args 2] check-expr)
+            ;hierarchy
+            (update-in [:args 3] check-expr))
+        _ (when-not (= (:val hierarchy-expr) #'clojure.core/global-hierarchy)
+            (err/int-error "Multimethod hierarchy cannot be customised"))
+        _ (when-not (= (:val default-expr) :default)
+            (err/int-error "Non :default default dispatch value NYI"))
+        mm-name (:val nme-expr)
         _ (when-not (string? mm-name)
             (err/int-error "MultiFn name must be a literal string"))
         mm-qual (symbol (str (cu/expr-ns expr)) mm-name)
@@ -2391,18 +2409,13 @@
             (binding [vs/*current-expr* cdisp
                       vs/*current-env* (:env cdisp)]
               (cu/expected-error (-> cdisp u/expr-type r/ret-t) (r/ret expected-mm-disp))))
-        cargs [(check-expr nme-expr)
-               cdisp
-               (check-expr default-expr)
-               (check-expr hierarchy-expr)]
-        _ (assert (== (count cargs) (count args)))
         _ (mm/add-multimethod-dispatch-type mm-qual (r/ret-t (u/expr-type cdisp)))]
-    (assoc expr
-           :args cargs
-           u/expr-type (below/maybe-check-below
-                         (r/ret (c/In #_(c/RClass-of clojure.lang.MultiFn) 
-                                      expected-t))
-                         expected))))
+    (-> expr
+        (assoc-in [:args 1] cdisp)
+        (assoc u/expr-type (below/maybe-check-below
+                             (r/ret (c/In #_(c/RClass-of clojure.lang.MultiFn) 
+                                          expected-t))
+                             expected)))))
 
 (defmethod new-special :default [expr & [expected]] cu/not-special)
 

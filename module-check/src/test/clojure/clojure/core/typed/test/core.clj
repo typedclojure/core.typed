@@ -5744,8 +5744,7 @@
   (is-tc-e (let [f (let [b :- t/Num, 1]
                      (fn [] :- (t/TypeOf b)
                        1))]
-             (inc (f))))
-)
+             (inc (f)))))
 
 (deftest cf-throws-test
   (is (thrown? Throwable (cf (nil))))
