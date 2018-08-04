@@ -1031,10 +1031,12 @@
 ;swap!
 ;
 ; attempt to rewrite a call to swap! to help type inference
+#_
 (defmethod -invoke-special 'clojure.core/swap!
   [expr & [expected]]
-  (let [{[ctarget-expr :as args] :args :keys [env] :as expr} (-> expr
-                                        (update-in [:args 0] check-expr))
+  (let [{[ctarget-expr :as args] :args :keys [env] :as expr}
+        (-> expr
+            (update-in [:args 0] check-expr))
         target-t (-> ctarget-expr u/expr-type r/ret-t c/fully-resolve-type)
         deref-type (when (and (r/RClass? target-t)
                               (= 'clojure.lang.Atom (:the-class target-t)))
