@@ -17,6 +17,13 @@
    :post [(-> % u/expr-type r/TCResult?)
           (vector? (::t/cmethods %))]}
   ;(prn "check-fn" methods)
+  ; handy check-fn-method1 to invalidate analysis caches to recheck
+  ; functions
+  (assert (and (every? (comp #{:unanalyzed} :op :ret :body) methods)
+               (every? (comp #{:unanalyzed} :op)
+                       ((comp :statements :body) methods)))
+          [(mapv (comp :op :ret :body) methods)
+           (mapv (juxt class :op) ((comp :statements :body) methods))])
   (let [{:keys [ifn methods cmethods]}
         (fn-methods/check-fn-methods 
           methods
