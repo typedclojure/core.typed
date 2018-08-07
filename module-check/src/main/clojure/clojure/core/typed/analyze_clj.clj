@@ -35,8 +35,7 @@
             [clojure.set :as set]
             [clojure.string :as str]
             [clojure.core :as core]
-            [clojure.core.typed.rules :as rules]
-            [clojure.core.typed.expand :as expand]
+            [clojure.core.typed.rule :as rule]
             [clojure.core.typed.current-impl :as impl]
             [clojure.core.typed.ns-deps :as dep]
             [clojure.core.typed.ns-deps-utils :as dep-u])
@@ -160,12 +159,8 @@
   {:post [(ifn? %)]}
   (or (when vs/*custom-expansions*
         (let [vsym (coerce/var->symbol var)]
-          (when (expand/custom-expansion? vsym)
-            (fn [form locals & _args_]
-              (expand/expand-macro form 
-                                   (merge (custom-expansion-opts)
-                                          {:vsym vsym
-                                           :locals locals}))))))
+          (when (rule/custom-type-rule? vsym)
+            rule/-type-rules)))
       (get *typed-macros* var)
       var))
 
@@ -196,11 +191,12 @@
                   inline? (if vs/*custom-expansions*
                             (when (and (not local?) (var? v))
                               (let [vsym (coerce/var->symbol v)]
-                                (when (expand/custom-inline? vsym)
-                                  (fn [& _args_]
-                                    (expand/expand-inline form
-                                                          (merge (custom-expansion-opts)
-                                                                 {:vsym vsym}))))))
+                                (when (rule/custom-type-rule? vsym)
+                                  (fn [& args]
+                                    (apply rule/-type-rules
+                                           form
+                                           (:locals env)
+                                           args)))))
                             (and (not local?)
                                  (or (not inline-arities-f)
                                      (inline-arities-f (count args)))
@@ -477,9 +473,9 @@
                   vsym (when (var? v)
                          (coerce/var->symbol v))]
               (or (when (and (not local?) vsym)
-                    (expand/custom-inline? vsym))
+                    (rule/custom-type-rule? vsym))
                   (when (and macro? vsym)
-                    (expand/custom-expansion? vsym))))))))))
+                    (rule/custom-type-rule? vsym))))))))))
 
 (comment
   (clojure.pprint/pprint
