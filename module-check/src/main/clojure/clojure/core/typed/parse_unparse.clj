@@ -34,7 +34,7 @@
                                         JSObj)
            (clojure.core.typed.filter_rep TopFilter BotFilter TypeFilter NotTypeFilter AndFilter OrFilter
                                           ImpFilter NoFilter)
-           (clojure.core.typed.object_rep NoObject EmptyObject Path)
+           (clojure.core.typed.object_rep NoObject EmptyObject Path Closure)
            (clojure.core.typed.path_rep KeyPE CountPE ClassPE KeysPE ValsPE NthPE KeywordPE)
            (clojure.lang Cons IPersistentList Symbol IPersistentVector)))
 
@@ -1877,6 +1877,7 @@
 (defmethod unparse-object EmptyObject [_] 'empty)
 (defmethod unparse-object NoObject [_] 'no-object)
 (defmethod unparse-object Path [{:keys [path id]}] (conj {:id id} (when (seq path) [:path (mapv unparse-path-elem path)])))
+(defmethod unparse-object Closure [{:keys [id]}] (list 'Closure id))
 
 ; Path elems
 

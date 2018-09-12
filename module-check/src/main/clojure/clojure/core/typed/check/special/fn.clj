@@ -193,15 +193,23 @@
   (let [self-name (cu/fn-self-name fexpr)
         _ (assert ((some-fn nil? symbol?) self-name))
         flat-expecteds (gen-defaults fexpr)]
-    (lex/with-locals (when self-name
-                       (let [this-type (self-type flat-expecteds)
-                             ;_ (prn "this-type" this-type)
-                             ]
-                         {self-name this-type}))
-      (check-anon
-        fexpr
-        flat-expecteds
-        nil))))
+    (cond
+      ;; delay check until we get an expected type
+      (not self-name) (assoc fexpr
+                             u/expr-type (r/ret (r/TopFunction-maker)
+                                                (fo/-true-filter)
+                                                (or/-closure (gensym "fn")
+                                                             (lex/lexical-env)
+                                                             fexpr)))
+      :else (lex/with-locals (when self-name
+                               (let [this-type (self-type flat-expecteds)
+                                     ;_ (prn "this-type" this-type)
+                                     ]
+                                 {self-name this-type}))
+              (check-anon
+                fexpr
+                flat-expecteds
+                nil)))))
 
 (defn check-special-fn 
   [check {statements :statements fexpr :ret :as expr} expected]

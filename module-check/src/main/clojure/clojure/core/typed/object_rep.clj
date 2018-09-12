@@ -81,3 +81,13 @@
   {:pre [(fr/name-ref? sym)]
    :post [(RObject? %)]}
   (-path nil sym))
+
+(u/def-object Closure [id lex-env expr]
+  ""
+  [(symbol? id)
+   (map? expr)]
+  :methods
+  [p/IRObject])
+
+(defn -closure [id lex-env expr]
+  (Closure-maker id lex-env expr))

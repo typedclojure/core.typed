@@ -2,6 +2,122 @@
   (:require [clojure.core.typed :as t]
             [clojure.core.typed.internal :as internal]))
 
+; {:op :unanalyzed
+;  :form '(update {:a 1} :a inc)}
+; =>
+; (macroexpand-1 '(update {:a 1} :a inc))
+; =>
+; (invoke-type-rule 'clojure.core/update '(update {:a 1} :a inc) '{:a 1} ':a 'inc)
+; =>
+; {:op :unanalyzed
+;  ::t/tc-ignore true
+;  :form '(update {:a 1} :a inc)
+;  :expr-type (ret '{:a Number})}
+; (Atom (Map Symbol {:op (U :fn :macro) :rewrite-fn ?}))
+
+(defonce registry (atom {}))
+
+(defn inspect-registry []
+  (into {}
+        (map (fn [[k {:keys [op] :as v}]]
+               (case op
+                 :fn (let [{:keys [fixed flat-arg-syms var-arg? rewrite-fn args-vector]} v]
+                       [k (list 'fn args-vector (apply rewrite-fn flat-arg-syms))])
+                 ; illegible, don't think there's a fix since so much structure gets
+                 ; lost in syntax-quote, and we need valid arguments to the macro.
+                 :macro [k (:rewrite-fn-form v)])))
+        @registry))
+
+(defmacro defmacrorule [sym args rewrite]
+  (let [fn-out `(fn ~args ~rewrite)]
+    `(swap! registry assoc ~sym
+            {:op :macro
+             :rewrite-fn-form '~fn-out
+             :rewrite-fn ~fn-out})))
+
+(defmacro defnrule [sym args rewrite]
+  {:pre [(vector? args)]}
+  (let [vararg? (and (<= 2 (count args))
+                     (= '& (nth args (- (count args) 2))))
+        flatargs (if vararg?
+                   (conj (subvec args 0 (- (count args) 2))
+                         (peek args))
+                   args)
+        _ (assert (every? symbol? flatargs)
+                  (str "Args vector to defnrule must not use destructuring, only plain symbols allowed. "
+                       "If you need destructuring, let-bind the arguments in a let in the syntax returned by your defnrule."))
+        ; TODO ensure locals use init's form in errors
+        fn-out `(fn ~flatargs ~rewrite)]
+    `(swap! registry assoc ~sym
+            {:op :fn
+             :flat-arg-syms '~flatargs
+             :args-vector '~args
+             :fixed-args ~((if vararg? dec identity) (count flatargs))
+             :var-arg? ~vararg?
+             :rewrite-fn ~fn-out})))
+
+#_
+(defmacrorule `when
+  [test & args]
+  `(if ~test
+     (do ~@args)
+     nil))
+
+; fn arguments evaluate before they are passed (but we
+; might delay type checking). Clojure guarantees this, and
+; so the body of a fn depends on the side effects (eg. error checking)
+; of arguments evaluating. So we set this up for the user implicitly,
+; and do our best to delay type checking problematic arguments (like
+; lambda's).
+#_
+(defnrule `clojure.core/update
+  [m k f & args]
+  `(assoc ~m ~k (apply ~f (get ~m ~k) ~args)))
+
+(defnrule `clojure.core/update
+  [m k f]
+  `(assoc ~m ~k (~f (get ~m ~k))))
+
+; bindings in rewrite will be lazily resolved, so you'd want
+; your ns defs/refers to be stable.
+#_
+(defmacro defnrule [sym args rewrite]
+  (let [vararg? (and (<= 2 (count args))
+                     (= '& (nth args (- (count args) 2))))
+        flatargs (if vararg?
+                   (into (subvec args 0 (- (count args) 2))
+                         (peek args))
+                   args)
+        ; TODO ensure locals use init's form in errors
+        rewrite-out '`(let
+                        ; bind argument expressions to locals
+                        ~(vec (interleave flatargs (map emit-form/emit-form flatargs)))
+                        ~rewrite)
+        fn-out `(fn ~args ~rewrite-out)]
+    `(swap! registry assoc ~sym
+            {:op :fn
+             ;; used to resolve rewrite-out
+             :ns (ns-name *ns*)
+             :rewrite-fn '~fn-out})))
+
+#_
+(defmacro defnrule* [sym args syntax-quoted-rewrite]
+  (let [fn-out `(fn ~args ~syntax-quoted-rewrite)]
+    `(swap! registry assoc ~sym
+            {:op :fn
+             :ns (ns-name *ns*)
+             :rewrite-fn '~fn-out})))
+
+#_
+(defmacro defmacrorule [sym args rewrite]
+  (let [fn-out `(fn ~args ~rewrite)]
+    `(swap! registry assoc ~sym
+            {:op :macro
+             :ns (ns-name *ns*)
+             :rewrite-fn '~fn-out})))
+
+(comment
+
 (defmulti -type-rules (fn [&form &env & args]
                         (when (and (seq? &form)
                                    (seq &form))
@@ -17,33 +133,17 @@
    (assert nil "TODO check")))
 
 (defmacro deftyperule
-  "Takes a qualified symbol naming the var or macro whoes invocation
+  "Takes a qualified symbol naming the var or macro whose invocation
   will trigger the type rule, and a binding vector like defn/defmacro.
-  Also binds &form and &env like defmacro.
-  
-  Most type information can be derived from &form -- for convenience,
-  &expected is (form-expected &form) and &tenv is (form-tenv &form).
-  
-  eg. (form-expected &form) is the expected type-result of the current type rule.
-  eg. (form-tenv &form) is the initial type environment of the current type rule.
-
-  "
+  Binds &expr as a local variable, which is a tools.analyzer node that
+  represents this invocation (often :unanalyzed or :invoke)."
   [name args & body]
   {:pre [(symbol? name)]}
   `(defmethod -type-rules '~name
-     [~'&form ~'&env ~@args]
-     (let [~'&expected (form-expected ~'&form)
-           ~'&tenv (form-tenv ~'&form)
-           res# (do ~@body)]
-       ;; output must be unifiable with input
-       (assert
-         (= (unexpand-from-template
-              (fn ~args
-                (list* (first ~'&form) ~@args))
-              ~'&form
-              res#)
-            res#))
-       (vary-meta res# assoc ::t/untyped true))))
+     [~'&expr ~@args]
+     (let [res# (do ~@body)]
+       (assert (:op res#))
+       (assoc res# assoc ::t/tc-ignore true))))
 
 (defn form-expected [form]
   (-> form meta ::t/expected))
@@ -77,7 +177,7 @@
                `(do ~form))]
     (vary-meta form assoc ::t/type-result res)))
 
-#_
+  #_
 (deftyperule clojure.core/when
   [test & body]
   (let [ctest (check test)
@@ -102,22 +202,8 @@
     (-> (ignore `(when ~ctest ~cbody))
         (annotate-result (combine-results (mapv form-result [cthen celse]))))))
 
-#_
-(defrewriterule clojure.core/when
-  [test & body]
-  `(if ~test
-     (do ~@body)
-     nil))
-
-(defn make-lvar []
-  (with-meta (gensym 'lvar) {::lvar true}))
-
-(defn lvar? [s]
-  (and (symbol? s)
-       (boolean (-> s meta ::lvar))))
-
-(defn unify
-  "Loosely unify template u (can contain lvars) with instantiation v (cannnot contain lvars).
+(defn match
+  "Loosely match template u (can contain lvars) with instantiation v (cannnot contain lvars).
 
   If u is a lvar not in s, records its value as v; if it's already
   in s, unification fails.
@@ -131,22 +217,24 @@
   [u v s]
   (cond
     (not s) s
-    (lvar? u) (when-not (contains? s u)
-                (assoc s u v))
+    (lvar? u) (when (or (not (contains? s u))
+                        (= (get s u) v))
+                (when (not= (::lvar-default u) v)
+                  (assoc s u v)))
     (and (sequential? u)
          (sequential? v)
          (seq u)
-         (seq v)) (some->> (unify (first u) (first v) s)
-                           (unify (rest u) (rest v)))
+         (seq v)) (some->> (match (first u) (first v) s)
+                           (match (rest u) (rest v)))
     :else s))
 
 (defn unexpand-from-template
   [template-fn [nme & args :as form] expanded]
   {:pre [(seq? form)
          (seq form)]}
-  (let [lvars (repeatedly (count args) make-lvar)
+  (let [lvars (map make-lvar args)
         template (template-fn lvars)
-        eargs (unify template expanded {})]
+        eargs (match template expanded {})]
     (-> (list* nme (mapv (fn [lvar arg]
                            (if-let [[_ v] (find eargs lvar)]
                              v
@@ -155,37 +243,119 @@
                          args))
         (with-meta (meta form)))))
 
-(defmacro defrewriterule [sym args rewrite]
-  `(deftyperule ~sym [& args#]
+(defmacro defmacrorule [sym args rewrite]
+  `(defrule ~sym [& args#]
      (let [template-fn# (fn ~args ~rewrite)
            expr# (apply template-fn# args#)
-           cexpr# (check expr# ~'&expected)
+           cexpr# (check expr# (form-expected ~'&form))
            uform# (unexpand-from-template
                     template-fn#
                     ~'&form
                     cexpr#)]
        (-> uform#
-           (inherit-result cexpr#)))))
+           (annotate-result (form-result cexpr#))))))
+
+#_
+(defmacro defnrule [sym args rewrite]
+  (let [vararg? (and (<= 2 (count args))
+                     (= '& (nth args (- (count args) 2))))
+        flatargs (if vararg?
+                   (into (subvec args 0 (- (count args) 2))
+                         (peek args))
+                   args)]
+    `(defrule ~sym [& args#]
+       (let [template-fn# (fn ~args
+                            (list `let
+                                  ; TODO ensure locals use init's form in errors
+                                  (vec (interleave
+                                         '~flatargs
+                                         (map emit-form/emit-form ~flatargs)))
+                                  '~rewrite))
+             expr# (apply template-fn# args#)
+             cexpr# (check-form expr# (:env ~'&expr))
+             uform# (unexpand-from-template
+                      template-fn#
+                      ~'&form
+                      cexpr#)]
+         (-> uform#
+             (annotate-result (form-result cexpr#)))))))
+
+(defmacrorule clojure.core/when
+  [test & body]
+  `(if ~test
+     (do ~@body)
+     nil))
+
+(defmacrorule clojure.core/or
+  ([] nil)
+  ([x] x)
+  ([x & next]
+   `(let [or# ~x]
+      (if or# or# (or ~@next)))))
+
+(defrule clojure.core.typed/type-cond
+  [& args]
+  (let [chose (atom 0)
+        expr (reduce (fn [_ [test expr]]
+                       (if (eval `(let [~@(mapcat (juxt :form :name) &env)]
+                                    ~test))
+                         (reduced expr)
+                         (swap! chose inc)))
+                     nil
+                     (partition 2 args))
+        cexpr (check expr expected)
+        ]
+    ))
+
+; IDEA: store delayed type checks in the object of a Result
+; then we can delay things like (let [[a] [(fn [a] (inc a))]] (a 1))
+(defnrule clojure.core/map
+  ([f]
+   ; TODO automatically require an expected type and blame &form
+   (fn [rf]
+     (fn
+       ([] (rf))
+       ([result] (rf result))
+       ([result input]
+        (rf result (f input))))))
+  ([f & colls]
+   ; (type-case-as out (first colls)
+   ;   `(Map f ~@colls)
+   ;   (All [x] [(Seqable x) -> x])
+   (lazy-seq
+     (t/type-cond
+       ;; colls are their local symbols
+       (some #(t/subtype? `(t/TypeOf ~'%) `(t/ExactCount 0))
+             colls)
+       nil
+       (and (every? #(t/subtype? `(t/TypeOf ~'%) `(t/CountRange 1))
+                    colls)
+            (some #(t/subtype? `(t/TypeOf ~'%) `(t/CountRange 1 10))
+                  colls))
+       (cons (apply f (map first colls))
+             (apply map f (map rest colls)))
+       :else (-> (apply f (-> colls
+                              (t/utransform
+                                (t/All [t ...]
+                                  [(t/HSequential [(t/U nil (t/Seqable t)) ... t]) :->
+                                   (t/HSequential [t ... t])]))))
+                 (t/utransform
+                   (t/All [t] [t :-> (t/Seq t)])))))))
+
+(defn make-lvar [default]
+  (with-meta (gensym 'lvar) {::lvar true
+                             ::lvar-default default}))
+
+(defn lvar? [s]
+  (and (symbol? s)
+       (boolean (-> s meta ::lvar))))
+
 
 #_
 (defexpandrule clojure.core/ns
   [& args]
   nil)
 
-#_
-(defrewriterule1 clojure.core/update
-  [m k f & args]
-  `((fn [m# k# f# & args#]
-      (assoc m# k# (apply f# (get m# k#) args#)))
-    ~m ~k ~f ~@args))
-
-#_
-(definlinerule1 clojure.core/update
-  [m k f & args]
-  (assoc m k (apply f (get m k) args)))
-
-#_
-; all args are locals, but how to undo?
 (defnrule clojure.core/update
   [m k f & args]
   `(assoc ~m ~k (~f (get ~m ~k) ~@args)))
@@ -202,8 +372,8 @@
 #_
 (defmacrorule clojure.core/when-let
   {:template-lvars (fn [bindings & body]
-                     (cons [(make-lvar) (make-lvar)]
-                           (repeatedly (count body) make-lvar)))}
+                     (cons (map make-lvar bindings)
+                           (map make-lvar body)))}
   [bindings & body]
   {:pre [(vector? bindings)
          (= 2 (count bindings))]}
@@ -216,11 +386,8 @@
 #_
 (defmacrorule clojure.core/binding
   {:template-lvars (fn [bindings & body]
-                     (cons (vec
-                             (mapcat (fn [[v init]]
-                                       [v (make-lvar)])
-                                     (partition 2 bindings)))
-                           (repeatedly (count body) make-lvar)))}
+                     (cons (mapv make-lvar bindings)
+                           (mapv make-lvar body)))}
   [bindings & body]
   {:pre [(vector? bindings)
          (even? (count bindings))]}
@@ -233,11 +400,8 @@
 #_
 (defmacrorule clojure.core/for
   {:template-lvars (fn [seq-exprs body-expr]
-                     [(vec
-                        (mapcat (fn [[binding expr]]
-                                  [binding (make-lvar)])
-                                (partition 2 seq-exprs)))
-                      (make-lvar)])}
+                     [(map make-lvar seq-exprs)
+                      (make-lvar body-expr)])}
   [seq-exprs body-expr]
   (reduce
     (fn [body [expr binding]]
@@ -307,8 +471,7 @@
 ;            (update :vals #(mapv check %)))
 ;        kts (mapv form-result keys)
 ;        vts (mapv form-result vals)
-;        rt (`(t/
-;        ]
+;        ]))
 
 ;(deftyperule `class
 ;  [x]
@@ -388,3 +551,4 @@
 
       `(t/tc-ignore
          (for ~cseq-exprs ~cbody))))
+)

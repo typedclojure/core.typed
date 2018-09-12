@@ -8,6 +8,7 @@
             [clojure.core.typed.debug :refer [dbg]]
             [clojure.core.typed.profiling :as p]
             [clojure.core.typed.rules :as rules]
+            [clojure.core.typed.rule :as rule]
             [clojure.core.typed.check-below :as below]
             [clojure.core.typed.abo :as abo]
             [clojure.core.typed.analyze-clj :as ana-clj]
@@ -21,6 +22,7 @@
             [clojure.tools.analyzer.jvm.utils :as jtau]
             [clojure.tools.analyzer.passes.jvm.validate :as validate]
             [clojure.tools.analyzer.passes.jvm.analyze-host-expr :as ana-host]
+            [clojure.tools.analyzer.utils :as ta-utils]
             [clojure.core.typed.analyzer2.passes.beta-reduce :as beta-reduce]
             [clojure.core.typed.analyzer2.pre-analyze :as pre]
             [clojure.core.typed.analyzer2 :as ana2]
@@ -228,6 +230,68 @@
                   {:pre [((some-fn nil? r/TCResult?) expected)]}
                   (:op expr)))
 
+(defn make-lvar []
+  (with-meta (gensym 'lvar) {::lvar true}))
+
+(defn lvar? [s]
+  (and (symbol? s)
+       (boolean (-> s meta ::lvar))))
+
+(defn match
+  "Loosely match template u (can contain lvars) with instantiation v (cannnot contain lvars).
+
+  If u is a lvar not in s, records its value as v; if it's already
+  in s, unification fails.
+
+  If u and v are non-empty sequential collections, unifies their
+  first's and rest's.
+
+  Otherwise returns s.
+  
+  Returns a substitution map if unification was successful, otherwise nil."
+  [u v s]
+  (cond
+    (not s) s
+    (lvar? u) (when (or (not (contains? s u))
+                        (= (get s u) v))
+                (assoc s u v))
+    (and (sequential? u)
+         (sequential? v)
+         (seq u)
+         (seq v)) (some->> (match (first u) (first v) s)
+                           (match (rest u) (rest v)))
+    :else s))
+
+(declare check-form)
+
+(defn special-ops [{:keys [env form] :as expr} expected]
+  {:pre [(= :unanalyzed (:op expr))]}
+  (when (seq? form)
+    (let [op (first form)
+          local? (-> env :locals (get op))]
+      (when-let [vsym (let [v (ta-utils/resolve-sym op env)]
+                        (when (and (not local?) (var? v))
+                          (coerce/var->symbol v)))]
+        (when-let [{:keys [op] :as custom} (@rule/registry vsym)]
+          (case op
+            :fn (let [{:keys [fixed-args var-arg? rewrite-fn]} custom
+                      nparams ((if var-arg? inc identity) fixed-args)
+                      lvars (repeatedly nparams make-lvar)
+                      template (apply rewrite-fn lvars)
+                      args (let [args (rest form)]
+                             (when ((if var-arg? = <=) fixed-args (count args))
+                               (concat (take fixed-args args)
+                                       (when var-arg?
+                                         [`(seq [~@(drop fixed-args args)])]))))
+                      _ (assert args (str "Bad number of arguments to .."))
+                      _ (assert (= nparams (count args)))
+                      applied (apply rewrite-fn args)
+                      cexpr (check-form applied expected {:env env})]
+                  ;; TODO forward expanded args
+                  (assoc expr
+                         ::t/tc-ignore true
+                         u/expr-type (u/expr-type cexpr)))))))))
+
 (defn check-expr [{:keys [op env] :as expr} & [expected]]
   {:pre [(:op expr)
          ((some-fn nil? r/TCResult?) expected)]
@@ -235,18 +299,22 @@
   (when vs/*trace-checker*
     (println "Checking line:" (:line env))
     (flush))
-  ;(prn "check-expr" op)
-  ;(clojure.pprint/pprint (emit-form/emit-form expr))
+  (prn "check-expr" op)
+  (clojure.pprint/pprint (emit-form/emit-form expr))
   (cond
+    (::t/tc-ignore expr) (ana2/run-passes expr)
     (u/expr-type expr) (do
                          ;(prn "skipping already analyzed form")
                          expr)
-    (= :unanalyzed op) (let [{:keys [pre post]} ana2/scheduled-passes]
-                         (-> expr
-                             ;; ensures ::ana/state is propagated properly,
-                             ;; instead of simply calling pre-analyze
-                             pre
-                             (check-expr expected)))
+    (= :unanalyzed op) (let [{:keys [pre post]} ana2/scheduled-passes
+                             expr (-> expr
+                                      (assoc-in [::pre/config ::t/expected] expected))]
+                         (or (special-ops expr expected)
+                             (-> expr
+                                 ;; ensures ::ana/state is propagated properly,
+                                 ;; instead of simply calling pre-analyze
+                                 pre
+                                 (check-expr expected))))
     :else
     (let [{:keys [pre post]} ana2/scheduled-passes]
       (binding [vs/*current-env* (if (:line env) env vs/*current-env*)
@@ -289,6 +357,14 @@
            (:result (:ret ast)))
       (assoc :result (:result (:ret ast))))))
 
+(defn check-form
+  ([form expected] (check-form form expected {}))
+  ([form expected {:keys [env] :as opts}]
+   (-> form
+       (pre/pre-analyze-child (or env (taj/empty-env)))
+       (check-expr expected))))
+
+
 (defn check-top-level 
   ([form expected] (check-top-level form expected {}))
   ([form expected {:keys [env] :as opts}]
@@ -313,11 +389,7 @@
                                                                         (assoc :post-done true)))))))
     (env/ensure (taj/global-env)
                 (taj/update-ns-map!)
-                (let [res (-> form
-                              (pre/pre-analyze-child (or env (taj/empty-env)))
-                              (assoc-in [::pre/config :top-level] true)
-                              (check-expr expected))]
-                  res)))))
+                (check-form form expected opts)))))
 
 (defmethod -check :const [expr expected]
   (const/check-const constant-type/constant-type false expr expected))
@@ -1929,28 +2001,33 @@
   ;(prn "invoke:" ((some-fn :var :keyword :op) fexpr))
   (binding [vs/*current-env* env
             vs/*current-expr* expr]
-    (or (when vs/*custom-expansions*
-          (let [replace-atom (atom nil)
-                fexpr (visit-tail-pos fexpr
-                                      (fn [{:keys [op] :as ast}]
-                                        (cond-> ast
-                                          (#{:var :fn} op)
-                                          (assoc ::invoke-args args
-                                                 ::invoke-expected expected
-                                                 ::replace-invoke-atom replace-atom))))
-                cfexpr (check-expr fexpr)]
-            (prn "in invoke" (some-> expr ast-u/emit-form-fn))
-            (prn "replace-atom"
-                 (some-> @replace-atom ast-u/emit-form-fn))
-            ;; instead of inserting cfexpr directly, we instead erase any
-            ;; wrapping forms around the fexpr.
-            ;; eg. so
-            ;;     ((ann-form inc [Int :-> Int]) 1)
-            ;;     ;=> (inc 1)
-            ;;     not
-            ;;     ;=> (ann-form (inc 1) [Int :-> Int])
-            @replace-atom))
-        (check-invoke expr expected))))
+    (let [cfn (check-expr fexpr)]
+      (cond
+        (-> cfn u/expr-type :o obj/Closure?) (let [{closure-expr :expr :keys [lex-env]} (-> cfn u/expr-type :o)
+                                                   cargs (mapv check-expr args)
+                                                   cret (binding [vs/*lexical-env* lex-env]
+                                                          (check-expr closure-expr (r/ret (r/make-FnIntersection
+                                                                                            (r/make-Function
+                                                                                              (mapv (comp :t u/expr-type) cargs)
+                                                                                              (if expected
+                                                                                                (:t expected)
+                                                                                                r/-infer-any)
+                                                                                              :filter (if expected
+                                                                                                        (:fl expected)
+                                                                                                        (fo/-FS fl/-infer-top
+                                                                                                                fl/-infer-top))
+                                                                                              :object (if expected
+                                                                                                        (:o expected)
+                                                                                                        ;; FIXME does this infer?
+                                                                                                        obj/-empty)
+                                                                                              :flow (if expected
+                                                                                                      (:flow expected)
+                                                                                                      (r/-flow fl/-infer-top)))))))]
+                                               (-> expr
+                                                   (assoc :args cargs
+                                                          ;; FIXME erase references visible in Closure but not here
+                                                          u/expr-type (u/expr-type cret))))
+        :else (check-invoke expr expected)))))
 
 (defn check-rest-fn [remain-dom & {:keys [rest drest kws prest pdot]}]
   {:pre [((some-fn nil? r/Type?) rest)

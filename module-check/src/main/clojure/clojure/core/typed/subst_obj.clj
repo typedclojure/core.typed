@@ -41,7 +41,7 @@
                                 ;; TODO delete this case - Ambrose
                                 (free-in/index-free-in? k t) (if polarity fl/-top fl/-bot)
                                 :else f))
-              :else (err/int-error (str "what is this? " o))))]
+              :else (throw (Exception. (str "what is this? " o)))))]
     (cond
       (fl/ImpFilter? f) (let [{ant :a consq :c} f]
                           (fo/-imp (subst-filter ant k o (not polarity)) (ap consq)))

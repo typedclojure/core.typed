@@ -229,6 +229,7 @@
              Sym))
 
 (deftest update-in-inline-test
+  (is-tc-e (update {:a {:b 1}} :a identity))
   (is-tc-e (update-in {:a {:b 1}} [:a :b] identity)
            '{:a '{:b Num}})
   (is-tc-e (update-in {:a {:b 1 :c 2}} [:a] dissoc :b)
@@ -613,6 +614,12 @@
               :iterate [x Int :-> ^::t/infer Any]
               }))
   )
+
+(deftest delayed-fn-test
+  (is-tc-e (let [f (fn* [a] (inc a))]
+             (f 1)))
+  (is-tc-err (let [f (fn [a] (inc a))]
+               (f 'a))))
 
 (comment
   (defn timet

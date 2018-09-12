@@ -27,12 +27,15 @@
          (r/TCResult? r)
          (instance? clojure.lang.IAtom is-reachable)]
    :post [(lex/PropEnv? %)]}
+  (prn "r" r)
   (let [{:keys [then else]} fl
         p* (cond
              ;; init has object `o`.
              ;; we don't need any new info -- aliasing and the
              ;; lexical environment will have the needed info.
-             (obj/Path? o) []
+             (or (obj/Path? o)
+                 (obj/Closure? o))
+             []
 
              ;; FIXME can we push this optimisation further into
              ;; the machinery? like, check-below?

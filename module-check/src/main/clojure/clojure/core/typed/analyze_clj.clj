@@ -157,11 +157,7 @@
 (T/ann ^:no-check typed-macro-lookup [T/Any :-> T/Any])
 (defn typed-macro-lookup [var]
   {:post [(ifn? %)]}
-  (or (when vs/*custom-expansions*
-        (let [vsym (coerce/var->symbol var)]
-          (when (rule/custom-type-rule? vsym)
-            rule/-type-rules)))
-      (get *typed-macros* var)
+  (or (get *typed-macros* var)
       var))
 
 ;; copied from tools.analyze.jvm to insert `*typed-macros*`
@@ -184,25 +180,27 @@
             (let [v (ta-utils/resolve-sym op env)
                   m (meta v)
                   local? (-> env :locals (get op))
+                  #_#_typed? (when vs/*custom-expansions*
+                           (when (and (not local?) (var? v))
+                             (let [vsym (coerce/var->symbol v)]
+                               (when (rule/custom-type-rule? vsym)
+                                 (fn [& args]
+                                   (apply (get (methods rule/-type-rules) vsym)
+                                          args))))))
                   macro? (and (not local?) (:macro m)) ;; locals shadow macros
                   inline-arities-f (:inline-arities m)
-                  ;; disable :inline with custom expansions to avoid arity errors
-                  ;; in symbolic execution.
-                  inline? (if vs/*custom-expansions*
-                            (when (and (not local?) (var? v))
-                              (let [vsym (coerce/var->symbol v)]
-                                (when (rule/custom-type-rule? vsym)
-                                  (fn [& args]
-                                    (apply rule/-type-rules
-                                           form
-                                           (:locals env)
-                                           args)))))
-                            (and (not local?)
-                                 (or (not inline-arities-f)
-                                     (inline-arities-f (count args)))
-                                 (:inline m)))
+                  inline? (and (not local?)
+                               (or (not inline-arities-f)
+                                   (inline-arities-f (count args)))
+                               (:inline m))
                   t (:tag m)]
               (cond
+                #_typed?
+                #_(let [res (apply typed? form env (rest form))] ; (t form env & args)
+                  (taj/update-ns-map!)
+                  (if (ta-utils/obj? res)
+                    (vary-meta res merge (meta form))
+                    res))
 
                 macro?
                 (let [res (apply (typed-macro-lookup v) form (:locals env) (rest form))] ; (m &form &env & args)
@@ -460,6 +458,7 @@
      #'*ns*               (the-ns (or (-> opts :env :ns)
                                       *ns*))}))
 
+#_
 (defn will-custom-expand? [form env]
   (boolean
     (when vs/*custom-expansions*
@@ -523,6 +522,7 @@
                        :additional-gilardi-condition 
                        (fn [mform env]
                          (not (special-form? mform)))
+                       #_#_
                        :stop-gildardi-check 
                        ;; cut off custom expansions to preserve :original-form's
                        (fn [mform env]

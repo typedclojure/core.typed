@@ -22,7 +22,6 @@
             [clojure.tools.analyzer.passes.jvm.validate :as validate]
             [clojure.tools.analyzer.passes.jvm.validate-loop-locals :as validate-loop-locals]
             [clojure.tools.analyzer.passes.jvm.validate-recur :as validate-recur]
-            [clojure.tools.analyzer.passes.elide-meta :as elide-meta]
             [clojure.tools.analyzer.passes.source-info :as source-info]
             [clojure.tools.analyzer.passes.jvm.constant-lifter :as constant-lift]
             [clojure.tools.analyzer.passes.jvm.classify-invoke :as classify-invoke]

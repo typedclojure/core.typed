@@ -3526,6 +3526,17 @@
   (is-tc-e (atom :- Number 1))
   (is-tc-e (atom (ann-form 1 Number)) (Atom1 Number))
   (is-tc-err (atom :- Number 1) (Atom1 Boolean))
+  ; naive intersection types w/ effects is unsound. I can't find
+  ; a counterexample in Typed Clojure, reset! seems to prevent
+  ; the future unsound reads.
+  ; https://www.cs.cmu.edu/~fp/papers/icfp00.pdf
+  ; pg 65: https://www.irif.fr/~gc/papers/semantic_subtyping.pdf
+  (is-tc-err (let [a (ann-form (atom 1) (I (Atom1 Num) (Atom1 Int)))
+                   _ (reset! a 1.1)]
+               (ann-form @a Int)))
+  (is-tc-e (let [a (ann-form (atom 1) (I (Atom1 Num) (Atom1 Int)))
+                 _ (reset! a 1)]
+             (ann-form @a Int)))
 )
 
 (deftest ref-test

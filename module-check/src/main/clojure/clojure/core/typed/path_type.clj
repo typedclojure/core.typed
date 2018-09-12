@@ -15,7 +15,7 @@
 ; ported from Typed Racket, originally by Andrew Kent
 ;; returns the result of following a path into a type
 ;;  Type (Listof PathElem)-> Type
-;; Ex. (Pair α ) β'(CarPE) -> α
+;; Ex. (Pair α β) (CarPE) -> α
 ;; resolved is the set of resolved types so far at a particular
 ;; path - it ensures we are making progress, that we do not
 ;; continue unfolding types infinitely while not progressing.
@@ -58,7 +58,7 @@
            (r/RClass? t) (let [_ (assert (= (:the-class t) 'clojure.lang.IPersistentMap))
                                _ (assert (= 2 (count (:poly? t))))]
                            (second (:poly? t)))
-           :else (err/int-error (str "Bad call to path-type: bad KeysPE, " (pr-str t) ", " (pr-str ps)))))
+           :else (err/int-error (str "Bad call to path-type: bad ValsPE, " (pr-str t) ", " (pr-str ps)))))
 
 
        (and (pe/KeyPE? (first ps))

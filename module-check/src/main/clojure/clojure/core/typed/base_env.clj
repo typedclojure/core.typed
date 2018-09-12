@@ -1767,6 +1767,9 @@ complete.core/completions
 ;    [:b] 
 ;    inc)
 ;
+;  clojure.core/update (All [a b] [x :- (Associative Any) k :- Any, f :- [(Get x k) b ... b :-> o], b ... b :-> (Assoc x k o)])
+;  clojure.core/update (All [m k f] [m k f & args :-> `(assoc ~m ~k (apply ~f (get ~m ~k) ~args))])
+;
 ;  clojure.core/update-in
 ;       (FixedPoint
 ;         (All [[x :< (U nil (Associative Any Any))] k [l :< k] v r e

@@ -58,17 +58,20 @@
    :post [((some-fn nil? r/Type?) %)]}
   (let [; see if sym is an alias for an object
         ; if not (-id-path sym) is returned
-        obj (lookup-alias sym)
-        [alias-path alias-id] (cond
-                                (obj/Path? obj) [(:path obj) (:id obj)]
-                                (obj/EmptyObject? obj) [nil sym]
-                                :else (err/int-error (str "what is this?" (pr-str obj))))
-        _ (assert (pr/path-elems? alias-path))
-        _ (assert (fr/name-ref? alias-id))
-        lt (get-in (lexical-env) [:l alias-id])]
-    ;(prn "lex-env" (lexical-env))
-    (when lt
-      (path-type/path-type lt alias-path))))
+        obj (lookup-alias sym)]
+    (cond
+      (obj/Closure? obj) (r/TopFunction-maker)
+      :else
+      (let [[alias-path alias-id] (cond
+                                    (obj/Path? obj) [(:path obj) (:id obj)]
+                                    (obj/EmptyObject? obj) [nil sym]
+                                    :else (throw (Exception. (str "what is this? " (class obj)))))
+            _ (assert (pr/path-elems? alias-path))
+            _ (assert (fr/name-ref? alias-id))
+            lt (get-in (lexical-env) [:l alias-id])]
+        ;(prn "lex-env" (lexical-env))
+        (when lt
+          (path-type/path-type lt alias-path))))))
 
 (defn merge-locals [env new]
   {:pre [(PropEnv? env)]
@@ -103,7 +106,9 @@
       ; it to TR because tests were failing.
       (-> env
           (assoc-in [:l (:id o)] t)
-          (assoc-in [:aliases id] o))
-      )))
+          (assoc-in [:aliases id] o)))
+
+    (obj/Closure? o) (-> env (assoc-in [:aliases id] o))
+    :else (throw (Exception. (str "What is this? " (class o))))))
 
 (indu/add-indirection ind/PropEnv? PropEnv?)
