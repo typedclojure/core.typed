@@ -2,8 +2,7 @@
   "A contract system a la racket/contract.
 
   Main entry point is the `contract` macro."
-  (:require [clojure.test :refer :all]
-            [clojure.set :as set]))
+  (:require [clojure.set :as set]))
 
 ;; A contract, the first argument to the `contract` macro
 ;; - name : Symbol
