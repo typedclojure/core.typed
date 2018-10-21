@@ -674,6 +674,10 @@
     (symbol? m) (case m
                   (clojure.core.typed/Nothing Nothing) -nothing
                   (clojure.core.typed/Sym Sym) (-class :symbol [])
+                  (Integer Long
+                   java.lang.Long java.lang.Integer) (-class :int [])
+                  (String java.lang.String) (-class :string [])
+                  (Boolean) (-class :boolean [])
                   (cond
                     (contains? *type-var-scope* m)
                     {:op :var
@@ -683,11 +687,7 @@
                     (-alias m)
 
                     :else
-                    #?(:clj
-                       (do
-                         (assert (class? (resolve m)) m)
-                         (-class (classify (resolve m)) []))
-                       :cljs (throw (ex-info "No resolution in CLJS" {})))))
+                    (throw (ex-info (str "No resolution for " m) {}))))
     (seq? m) (case (first m)
                 All (let [[vs t :as rst] (second m)
                           _ (assert (= 2 (count rst)))]
@@ -716,15 +716,19 @@
                 HMap (parse-HMap m)
                 Vec (-class :vector
                             [(parse-type (second m))])
-                (clojure.core.typed/Map) (let [[_ k v] m]
-                                               (-class :map
-                                                       [(parse-type k)
-                                                        (parse-type v)]))
+                (Seqable clojure.lang.Seqable) (-class :seqable
+                                                       [(parse-type (second m))])
+                (clojure.core.typed/Map
+                  IPersistentMap
+                  clojure.lang.IPersistentMap) (let [[_ k v] m]
+                                                 (-class :map
+                                                         [(parse-type k)
+                                                          (parse-type v)]))
                 Set (-class :set
                             [(parse-type (second m))])
                 #?(:clj
                    (let [res (resolve (first m))]
-                     (assert nil "TODO no more classes in :class")
+                     (assert nil (str "TODO no more classes in :class" res))
                      (cond ;(contains? (alias-env @*envs*) (:name (first m)))
                            ;(-alias (first m))
 
@@ -805,8 +809,9 @@
   (qualify-symbol-in 'clojure.core s))
 
 (defn resolve-class [c]
-  {:pre [(string? c)]
+  {:pre []
    :post [(symbol? %)]}
+  (assert (string? c) c)
   (symbol c)
   #_
   (symbol
@@ -1450,11 +1455,11 @@
                                     (when (#{:vector} cls)
                                       [:into (qualify-core-symbol 'vector?)])))
 
-                                :else (list (qualify-core-symbol 'partial)
-                                            (qualify-core-symbol 'instance?)
-                                            (if (.isArray cls)
-                                              (list 'Class/forName (.getName cls))
-                                              (symbol (.getName cls))))))
+                                :else (do
+                                        (assert (string? cls))
+                                        (list (qualify-core-symbol 'partial)
+                                              (qualify-core-symbol 'instance?)
+                                              (symbol cls)))))
              :else
              (letfn [(unparse-class [c args]
                        (let [cls (condp = c
@@ -1468,11 +1473,13 @@
                                    :seq (qualify-typed-symbol 'Coll)
                                    :list (qualify-typed-symbol 'Coll)
                                    :coll (qualify-typed-symbol 'Coll)
+                                   :seqable (qualify-typed-symbol 'Seqable)
                                    :number  (qualify-typed-symbol 'Num)
                                    :int (qualify-typed-symbol 'Int)
                                    :integer (qualify-typed-symbol 'Int)
                                    :ifn 'AnyFunction
                                    :string (qualify-typed-symbol 'Str)
+                                   :boolean (qualify-typed-symbol 'Bool)
                                    (resolve-class c))
                              _ (assert (symbol? cls))]
                          (if (seq args)
