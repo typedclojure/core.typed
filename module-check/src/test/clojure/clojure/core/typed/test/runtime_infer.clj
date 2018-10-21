@@ -81,7 +81,7 @@
                   :arg clojure.lang.Symbol,
                   :body '{:name clojure.lang.Symbol, :E ':var},
                   :arg-type
-                  '{:T ':intersection, :types clojure.lang.PersistentHashSet}}
+                  '{:T ':intersection, :types (Seqable Any)}}
                 '{:name clojure.lang.Symbol, :E ':var}),
                :E ':app})])]
 
@@ -96,7 +96,7 @@
                    :arg clojure.lang.Symbol,
                    :body '{:name clojure.lang.Symbol, :E ':var},
                    :arg-type
-                   '{:T ':intersection, :types clojure.lang.PersistentHashSet}}
+                   '{:T ':intersection, :types (Seqable Any)}}
                  '{:name clojure.lang.Symbol, :E ':var}),
                 :E ':app})))))
   (checking

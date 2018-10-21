@@ -420,9 +420,10 @@
        (keyword? (:op t))))
 
 (defn -class [cls args]
-  {:pre [((some-fn keyword? string?) cls)
+  {:pre [
          (vector? args)
          (every? type? args)]}
+  (assert ((some-fn keyword? string?) cls) cls)
   {:op :class
    ::class-instance cls
    :args args})
@@ -679,6 +680,7 @@
                   (String java.lang.String) (-class :string [])
                   (Boolean) (-class :boolean [])
                   (Double) (-class :double [])
+                  (Number clojure.lang.Number) (-class :number [])
                   (clojure.lang.IFn) (-class :ifn [])
                   (clojure.lang.Symbol Symbol) (-class :symbol [])
                   (cond
@@ -721,6 +723,10 @@
                             [(parse-type (second m))])
                 (Seqable clojure.lang.Seqable) (-class :seqable
                                                        [(parse-type (second m))])
+                (PersistentHashSet clojure.lang.PersistentHashSet
+                                   IPersistentSet
+                                   clojure.lang.IPersistentSet)
+                (-class :set [(parse-type (second m))])
                 (clojure.core.typed/Map
                   IPersistentMap
                   clojure.lang.IPersistentMap) (let [[_ k v] m]
