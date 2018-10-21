@@ -149,6 +149,7 @@
   (env/swap-checker! assoc-in [ns-opts-kw nsym :warn-on-unannotated-vars] true)
   nil)
 
+#?(:clj
 (defmacro create-env
   "For name n, creates defs for {n}, {n}-kw, add-{n},
   and reset-{n}!"
@@ -170,7 +171,7 @@
          (defn ~reset-def [m#]
            (env/swap-checker! assoc ~kw-def m#)
            nil)
-         nil)))
+         nil))))
 
 ;; runtime environments
 (create-env var-env)
@@ -216,9 +217,10 @@
 
 (declare bindings-for-impl)
 
+#?(:clj
 (defmacro with-impl [impl & body]
   `(with-bindings (get (bindings-for-impl) ~impl {})
-     ~@body))
+     ~@body)))
 
 (defonce clj-checker-atom 
   (doto (env/init-checker)
@@ -230,9 +232,10 @@
 (defn clj-bindings []
   {#'env/*checker* (clj-checker)})
 
+#?(:clj
 (defmacro with-clojure-impl [& body]
   `(with-impl clojure
-     ~@body))
+     ~@body)))
 
 (defonce cljs-checker-atom 
   (doto (env/init-checker)
@@ -245,9 +248,10 @@
 (defn cljs-bindings []
   {#'env/*checker* (cljs-checker)})
 
+#?(:clj
 (defmacro with-cljs-impl [& body]
   `(with-impl clojurescript
-     ~@body))
+     ~@body)))
 
 (defn impl-for []
   {:clojure (cljs-checker)
@@ -257,9 +261,10 @@
   {clojure (clj-bindings)
    clojurescript (cljs-bindings)})
 
+#?(:clj
 (defmacro with-full-impl [impl & body]
   `(with-impl ~impl
-     ~@body))
+     ~@body)))
 
 (defn implementation-specified? []
   ((complement #{unknown}) (current-impl)))
@@ -287,6 +292,7 @@
 ;; :clojure = ::clojure
 ;; :cljs = ::clojurescript
 ;; :unknown = ::unknown
+#?(:clj
 (defmacro impl-case [& {clj-case :clojure cljs-case :cljs unknown :unknown :as opts}]
   (assert (empty? (set/difference (set (keys opts)) #{:clojure :cljs :unknown}))
           "Incorrect cases to impl-case")
@@ -295,7 +301,7 @@
      ~clojurescript ~cljs-case
      ~(if (contains? opts :unknown)
         unknown
-        `(assert nil (str "No case matched for impl-case " (current-impl))))))
+        `(assert nil (str "No case matched for impl-case " (current-impl)))))))
 
 (defn var->symbol [^clojure.lang.Var var]
   {:pre [(var? var)]
@@ -307,9 +313,6 @@
   {:pre [(class? cls)]
    :post [(symbol? %)]}
   (symbol (.getName cls)))
-
-(defn bounded-length [s len]
-  (clojure.lang.RT/boundedLength s len))
 
 ; for type-contract
 (defn hmap-c? [& {:keys [mandatory optional absent-keys complete?]}]
