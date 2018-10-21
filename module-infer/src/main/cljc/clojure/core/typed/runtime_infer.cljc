@@ -678,6 +678,9 @@
                    java.lang.Long java.lang.Integer) (-class :int [])
                   (String java.lang.String) (-class :string [])
                   (Boolean) (-class :boolean [])
+                  (Double) (-class :double [])
+                  (clojure.lang.IFn) (-class :ifn [])
+                  (clojure.lang.Symbol Symbol) (-class :symbol [])
                   (cond
                     (contains? *type-var-scope* m)
                     {:op :var
@@ -1423,6 +1426,7 @@
                                 (#{:int} cls) (qualify-core-symbol 'int?)
                                 (#{:integer} cls) (qualify-core-symbol 'integer?)
                                 (#{:decimal} cls) (qualify-core-symbol 'decimal?)
+                                (#{:double} cls) (qualify-core-symbol 'double?)
                                 (#{:number} cls) (qualify-core-symbol 'number?)
                                 (#{:char} cls) (qualify-core-symbol 'char?)
                                 (#{:symbol} cls) (qualify-core-symbol 'symbol?)
@@ -1474,6 +1478,8 @@
                                    :list (qualify-typed-symbol 'Coll)
                                    :coll (qualify-typed-symbol 'Coll)
                                    :seqable (qualify-typed-symbol 'Seqable)
+                                   :double (qualify-typed-symbol 'Num)
+                                   :decimal (qualify-typed-symbol 'Num)
                                    :number  (qualify-typed-symbol 'Num)
                                    :int (qualify-typed-symbol 'Int)
                                    :integer (qualify-typed-symbol 'Int)
