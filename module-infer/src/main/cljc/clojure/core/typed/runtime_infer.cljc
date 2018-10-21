@@ -1,26 +1,27 @@
 (ns clojure.core.typed.runtime-infer
-  (:refer-clojure :exclude [any?])
+  (:refer-clojure :exclude [any? #?(:cljs -val)])
   (:require [#?(:clj clojure.pprint :cljs cljs.pprint) :as pp]
             [#?(:clj clojure.core :cljs cljs.core) :as core]
             [clojure.set :as set]
             [clojure.string :as str]
-            [clojure.java.io :as io]
-            [clojure.core.typed.ast-utils :as ast]
             [clojure.core.typed.util-vars :as vs]
             [clojure.core.typed.current-impl :as impl]
             [clojure.tools.namespace.parse :as nprs]
             [clojure.math.combinatorics :as comb]
-            [clojure.core.typed.coerce-utils :as coerce]
             [clojure.core.typed.contract-utils :as con]
             [clojure.walk :as walk]
-            [clojure.tools.analyzer.passes.jvm.emit-form :as emit-form]
             #?@(:clj [[clojure.core.typed.dep.potemkin.collections :as pot]
                       [clojure.tools.reader.reader-types :as rdrt]
+                      [clojure.java.io :as io]
+                      [clojure.core.typed.ast-utils :as ast]
+                      [clojure.tools.analyzer.passes.jvm.emit-form :as emit-form]
+                      [clojure.core.typed.coerce-utils :as coerce]
                       ])
             )
   )
 
 ;; START copied from clojure.core.typed.utils
+#?(:clj
 (defn ^:private try-resolve-nsyms [nsyms]
   (reduce (fn [_ s]
             (try
@@ -29,11 +30,13 @@
               (catch #?(:clj Throwable :cljs :default) e
                 nil)))
           nil
-          nsyms))
+          nsyms)))
 (def spec-ns'
-  (try-resolve-nsyms '[clojure.spec clojure.spec.alpha]))
+  #?(:clj (try-resolve-nsyms '[clojure.spec clojure.spec.alpha])
+     :cljs 'clojure.spec.alpha))
 (def core-specs-ns'
-  (try-resolve-nsyms '[clojure.core.specs clojure.core.specs.alpha]))
+  #?(:clj (try-resolve-nsyms '[clojure.core.specs clojure.core.specs.alpha])
+     :cljs 'clojure.core.specs.alpha))
 ;; END copied from clojure.core.typed.utils
 
 (def spec-ns (or spec-ns' 'clojure.spec.alpha))
@@ -127,7 +130,7 @@
        ::class-string String
        :args (Vec Type)}
      '{:op :class 
-       ::class-instance Class
+       ::class-instance (U Keyword String)
        :args (Vec Type)}
      '{:op :IFn
        :arities (Vec (HMap
@@ -417,7 +420,7 @@
        (keyword? (:op t))))
 
 (defn -class [cls args]
-  {:pre [(class? cls)
+  {:pre [((some-fn keyword? string?) cls)
          (vector? args)
          (every? type? args)]}
   {:op :class
@@ -633,6 +636,29 @@
         (update-type-env (constantly tenv))
         (update-alias-env (constantly aenv)))))
 
+; classify : Any -> Kw
+(defn classify [v]
+  {:pre [v]}
+  (cond
+    ;(nil? v) :nil
+    (char? v) :char
+    (int? v) :int
+    (integer? v) :integer
+    #?@(:clj [(decimal? v) :decimal])
+    (number? v) :number
+    (vector? v) :vector
+    (map? v) :map
+    (boolean? v) :boolean
+    (keyword? v) :keyword
+    (symbol? v) :symbol
+    (string? v) :string
+    (fn? v) :ifn
+    (coll? v) :coll
+    (seqable? v) :seqable
+    #?@(:clj [(instance? clojure.lang.ITransientCollection v) :transient])
+    :else #?(:clj (.getName (class v))
+             :cljs (goog/typeOf v))))
+
 (defn parse-type [m]
   (cond
     (#{'Any 'clojure.core.typed/Any} m) -any
@@ -647,7 +673,7 @@
 
     (symbol? m) (case m
                   (clojure.core.typed/Nothing Nothing) -nothing
-                  (clojure.core.typed/Sym Sym) (-class clojure.lang.Symbol [])
+                  (clojure.core.typed/Sym Sym) (-class :symbol [])
                   (cond
                     (contains? *type-var-scope* m)
                     {:op :var
@@ -657,11 +683,11 @@
                     (-alias m)
 
                     :else
-                    (do
-                      (assert (class? (resolve m)) m)
-                      {:op :class
-                       ::class-instance (resolve m)
-                       :args []})))
+                    #?(:clj
+                       (do
+                         (assert (class? (resolve m)) m)
+                         (-class (classify (resolve m)) []))
+                       :cljs (throw (ex-info "No resolution in CLJS" {})))))
     (seq? m) (case (first m)
                 All (let [[vs t :as rst] (second m)
                           _ (assert (= 2 (count rst)))]
@@ -688,21 +714,23 @@
                           (map parse-type)
                           (rest m)))
                 HMap (parse-HMap m)
-                Vec (-class clojure.lang.IPersistentVector
+                Vec (-class :vector
                             [(parse-type (second m))])
                 (clojure.core.typed/Map) (let [[_ k v] m]
-                                               (-class clojure.lang.IPersistentMap
+                                               (-class :map
                                                        [(parse-type k)
                                                         (parse-type v)]))
-                Set (-class clojure.lang.IPersistentSet
+                Set (-class :set
                             [(parse-type (second m))])
-                (let [res (resolve (first m))]
-                  (cond ;(contains? (alias-env @*envs*) (:name (first m)))
-                        ;(-alias (first m))
+                #?(:clj
+                   (let [res (resolve (first m))]
+                     (assert nil "TODO no more classes in :class")
+                     (cond ;(contains? (alias-env @*envs*) (:name (first m)))
+                           ;(-alias (first m))
 
-                        (class? res) (-class res (mapv parse-type (drop 1 m)))
-                        
-                        :else (assert nil (str "What is this?" m)))))
+                           (class? res) (-class res (mapv parse-type (drop 1 m)))
+
+                           :else (assert nil (str "What is this?" m))))))
 
 
     :else (assert nil (str "bad type " m))))
@@ -717,15 +745,19 @@
   (fn [] #?(:clj *ns*
             :cljs (throw (ex-info "No annotation namespace bound" {})))))
 
-(defn current-ns [] (ns-name (*ann-for-ns*)))
+(defn current-ns []
+  #?(:clj (ns-name (*ann-for-ns*))
+     :cljs (*ann-for-ns*)))
 
+#?(:clj
 (defn namespace-alias-in [ns maybe-aliased-ns]
   {:pre [((some-fn nil? #(instance? clojure.lang.Namespace %)) maybe-aliased-ns)]
    :post [((some-fn nil? symbol) %)]}
-  (get (set/map-invert (ns-aliases ns)) maybe-aliased-ns))
+  (get (set/map-invert (ns-aliases ns)) maybe-aliased-ns)))
 
 (def ^:dynamic *verbose-specs* nil)
 
+#?(:clj 
 (defn qualify-symbol-in [nsym s]
   {:pre [(symbol? nsym)
          (symbol? s)
@@ -749,6 +781,13 @@
                       (str (ns-name ns)))
                     (name nsym))))
             (str s))))
+:cljs
+(defn qualify-symbol-in [nsym s]
+  {:pre [(symbol? nsym)
+         (symbol? s)
+         (not (namespace s))]
+   :post [(symbol? %)]}
+  (symbol (str nsym) (str s))))
 
 (defn qualify-spec-symbol [s]
   {:pre [(symbol? s)]
@@ -765,9 +804,11 @@
    :post [(symbol? %)]}
   (qualify-symbol-in 'clojure.core s))
 
-(defn resolve-class [^Class c]
-  {:pre [(class? c)]
+(defn resolve-class [c]
+  {:pre [(string? c)]
    :post [(symbol? %)]}
+  (symbol c)
+  #_
   (symbol
     (if (= (ns-resolve (current-ns) (symbol (.getSimpleName c)))
            c)
@@ -824,11 +865,11 @@
                                                (or (#{:val} (:op t))
                                                    (and (#{:class} (:op t))
                                                         (not
-                                                          (#{clojure.lang.IPersistentSet
-                                                             clojure.lang.IPersistentMap
-                                                             clojure.lang.IPersistentVector
-                                                             clojure.lang.IPersistentCollection
-                                                             clojure.lang.ISeq}
+                                                          (#{:set
+                                                             :map
+                                                             :vector
+                                                             :coll
+                                                             :seq}
                                                             (::class-instance t)))))))
                                            alts)]
     ;(prn "or-spec" alts)
@@ -971,25 +1012,19 @@
 
 (declare join alias-matches-key-for-spec-keys? alternative-arglists kw-vals?)
 
-(def resolve-JVM-primitive
-  {"B" Byte/TYPE
-   "C" Character/TYPE
-   "D" Double/TYPE
-   "F" Float/TYPE
-   "I" Integer/TYPE
-   "J" Long/TYPE
-   "S" Short/TYPE
-   "Z" Boolean/TYPE})
-
 (defn find-top-level-var [top-level-def]
-  (when (and (symbol? top-level-def)
-             (namespace top-level-def)) ;; testing purposes
-    (some-> top-level-def find-var)))
+  #?(:cljs nil
+     :clj
+     (when (and (symbol? top-level-def)
+                (namespace top-level-def)) ;; testing purposes
+       (some-> top-level-def find-var))))
 
 (defn arglists-for-top-level-var [top-level-var]
-  (when top-level-var
-    (or (-> top-level-var meta :arglists)
-        (->> top-level-var coerce/var->symbol (get @alternative-arglists)))))
+  #?(:cljs nil
+     :clj
+     (when top-level-var
+       (or (-> top-level-var meta :arglists)
+           (->> top-level-var coerce/var->symbol (get @alternative-arglists))))))
 
 (defn separate-fixed-from-rest-arglists [arglists]
   (group-by (fn [v]
@@ -1003,7 +1038,7 @@
 (defn unq-spec-nstr [] (str (current-ns)))
 
 (defn gen-unique-multi-spec-name [env multispecs sym]
-  (if (or (resolve sym)
+  (if (or #?(:clj (resolve sym))
           (contains? multispecs sym))
     (gen-unique-multi-spec-name env multispecs (symbol (str (name sym) "__0")))
     sym))
@@ -1252,7 +1287,7 @@
                                                    (when d
                                                      (and
                                                        (#{:class} (:op d))
-                                                       (= clojure.lang.IPersistentVector
+                                                       (= :vector
                                                           (::class-instance d))))))
                                                arities)
                                    [:bindings (keyword (str core-specs-ns) "bindings")])
@@ -1331,7 +1366,7 @@
                                                         (and (zero? n)
                                                              macro?
                                                              (#{:class} (:op d))
-                                                             (= clojure.lang.IPersistentVector
+                                                             (= :vector
                                                                 (::class-instance d)))
                                                         (keyword (str core-specs-ns) "bindings")
 
@@ -1376,42 +1411,23 @@
                (if (== 1 (count as))
                  (first as)
                  (list* (qualify-typed-symbol 'IFn) as)))))
-    :unresolved-class (cond
-                        *unparse-spec* (let [cls-str (::class-string m)
-                                             args (:args m)]
-                                         (list (qualify-core-symbol 'partial)
-                                               (qualify-core-symbol 'instance?)
-                                               (list 'Class/forName cls-str)))
-                        :else (letfn [(unparse-class [^String cstr args]
-                                        {:pre [(string? cstr)]}
-                                        (cond
-                                          (.startsWith cstr "[") (list 'Array (unparse-class (.substring cstr 1) args))
-                                          :else
-                                          (let [cls (if-some [c (resolve-JVM-primitive cstr)]
-                                                      (resolve-class c)
-                                                      (symbol cstr))
-                                                _ (assert (symbol? cls))]
-                                            (if (seq args)
-                                              (list*-force cls (map unparse-type args))
-                                              cls))))]
-                                (unparse-class (::class-string m) (:args m))))
     :class (cond
-             *unparse-spec* (let [^Class cls (::class-instance m)
+             *unparse-spec* (let [cls (::class-instance m)
                                   args (:args m)]
                               (cond
-                                (#{Long Integer Short Byte} cls) (qualify-core-symbol 'int?)
-                                (#{BigInteger} cls) (qualify-core-symbol 'integer?)
-                                (#{BigDecimal} cls) (qualify-core-symbol 'bigdec?)
-                                (.isAssignableFrom Number cls) (qualify-core-symbol 'number?)
-                                (#{Character} cls) (qualify-core-symbol 'char?)
-                                (#{clojure.lang.Symbol} cls) (qualify-core-symbol 'symbol?)
-                                (#{clojure.lang.Keyword} cls) (qualify-core-symbol 'keyword?)
-                                (#{String} cls) (qualify-core-symbol 'string?)
-                                (#{clojure.lang.IFn} cls) (qualify-core-symbol 'ifn?)
-                                (#{Boolean} cls) (qualify-core-symbol 'boolean?)
+                                (#{:int} cls) (qualify-core-symbol 'int?)
+                                (#{:integer} cls) (qualify-core-symbol 'integer?)
+                                (#{:decimal} cls) (qualify-core-symbol 'decimal?)
+                                (#{:number} cls) (qualify-core-symbol 'number?)
+                                (#{:char} cls) (qualify-core-symbol 'char?)
+                                (#{:symbol} cls) (qualify-core-symbol 'symbol?)
+                                (#{:keyword} cls) (qualify-core-symbol 'keyword?)
+                                (#{:string} cls) (qualify-core-symbol 'string?)
+                                (#{:ifn} cls) (qualify-core-symbol 'ifn?)
+                                (#{:boolean} cls) (qualify-core-symbol 'boolean?)
                                 ;; TODO check set elements
-                                (#{clojure.lang.IPersistentSet} cls) (qualify-core-symbol 'set?)
-                                (#{clojure.lang.IPersistentMap} cls)
+                                (#{:set} cls) (qualify-core-symbol 'set?)
+                                (#{:map} cls)
                                 ;; NOTE if we change the `empty?` specs here, also update
                                 ;; `or-spec` tag generation.
                                 (if (some nothing? args)
@@ -1422,8 +1438,7 @@
                                     (list (qualify-spec-symbol 'map-of)
                                           (unparse-spec k)
                                           (unparse-spec v))))
-                                (#{clojure.lang.IPersistentVector clojure.lang.IPersistentCollection
-                                   clojure.lang.ISeq} cls) 
+                                (#{:vector :coll :seq} cls) 
                                 (if (nothing? (first args))
                                   (list (qualify-spec-symbol 'and)
                                         (qualify-core-symbol 'empty?)
@@ -1432,7 +1447,7 @@
                                     (qualify-spec-symbol 'coll-of)
                                     (unparse-spec
                                       (first args))
-                                    (when (#{clojure.lang.IPersistentVector} cls)
+                                    (when (#{:vector} cls)
                                       [:into (qualify-core-symbol 'vector?)])))
 
                                 :else (list (qualify-core-symbol 'partial)
@@ -1441,31 +1456,28 @@
                                               (list 'Class/forName (.getName cls))
                                               (symbol (.getName cls))))))
              :else
-             (letfn [(unparse-class [^Class c args]
-                       {:pre [(class? c)]}
-                       (cond
-                         (.isArray c) (list 'Array (unparse-class (.getComponentType c) args))
-                         :else
-                         (let [cls (condp = c
-                                     clojure.lang.IPersistentMap (qualify-typed-symbol 'Map)
-                                     clojure.lang.IPersistentVector (qualify-typed-symbol 'Vec)
-                                     clojure.lang.IPersistentSet (qualify-typed-symbol 'Set)
-                                     clojure.lang.Symbol (qualify-typed-symbol 'Sym)
-                                     clojure.lang.Keyword (qualify-typed-symbol 'Kw)
-                                     clojure.lang.IAtom (qualify-typed-symbol 'Atom1)
-                                     clojure.lang.ISeq (qualify-typed-symbol 'Coll)
-                                     clojure.lang.IPersistentList (qualify-typed-symbol 'Coll)
-                                     clojure.lang.IPersistentCollection (qualify-typed-symbol 'Coll)
-                                     Number  (qualify-typed-symbol 'Num)
-                                     Long    (qualify-typed-symbol 'Int)
-                                     Integer (qualify-typed-symbol 'Int)
-                                     clojure.lang.IFn 'AnyFunction
-                                     java.lang.String (qualify-typed-symbol 'Str)
-                                     (resolve-class c))
-                               _ (assert (symbol? cls))]
-                           (if (seq args)
-                             (list*-force cls (map unparse-type args))
-                             cls))))]
+             (letfn [(unparse-class [c args]
+                       (let [cls (condp = c
+                                   :array 'Array
+                                   :map (qualify-typed-symbol 'Map)
+                                   :vector (qualify-typed-symbol 'Vec)
+                                   :set (qualify-typed-symbol 'Set)
+                                   :symbol (qualify-typed-symbol 'Sym)
+                                   :keyword (qualify-typed-symbol 'Kw)
+                                   :atom (qualify-typed-symbol 'Atom1)
+                                   :seq (qualify-typed-symbol 'Coll)
+                                   :list (qualify-typed-symbol 'Coll)
+                                   :coll (qualify-typed-symbol 'Coll)
+                                   :number  (qualify-typed-symbol 'Num)
+                                   :int (qualify-typed-symbol 'Int)
+                                   :integer (qualify-typed-symbol 'Int)
+                                   :ifn 'AnyFunction
+                                   :string (qualify-typed-symbol 'Str)
+                                   (resolve-class c))
+                             _ (assert (symbol? cls))]
+                         (if (seq args)
+                           (list*-force cls (map unparse-type args))
+                           cls)))]
                (unparse-class (::class-instance m) (:args m))))
     :Top (cond 
            *unparse-spec* (qualify-core-symbol 'any?)
@@ -1478,7 +1490,7 @@
             *unparse-spec* (alias->spec-kw (:name m))
             :else (:name m))
     :poly (cond
-            *unparse-spec* (throw (Exception. "TODO"))
+            *unparse-spec* (throw (ex-info "TODO" {}))
             :else (list 'All (into (mapv (fn [[ps {:keys [weight name types]}]]
                                            {:pre [(= 2 (count ps))]}
                                            [name 
@@ -1555,7 +1567,7 @@
 (defn upcast-HVec [h]
   {:pre [(#{:HVec} (:op h))]
    :post [(type? %)]}
-  (-class clojure.lang.IPersistentVector 
+  (-class :vector 
           [(apply join* (:vec h))]))
 
 
@@ -1605,7 +1617,7 @@
                            (empty? common-keys)
                            (do
                              ;(debug-flat (println "no common keys, upcasting to (Map Any Any)"))
-                             ;#{(-class clojure.lang.IPersistentMap [-any -any])}
+                             ;#{(-class :map [-any -any])}
                              #{{:op :HMap
                                 ::HMap-req {}
                                 ::HMap-opt (apply merge-with join (mapcat (juxt ::HMap-req ::HMap-opt) hmaps-merged))}})
@@ -1671,23 +1683,18 @@
         non-hmaps (let [{classes true non-classes false} (group-by -class? non-hmaps)
                         ;; important invariant: all these classes take 1 argument. This is used in
                         ;; the upcasting logic below.
-                        relevant-seqables #{clojure.lang.ISeq
-                                            clojure.lang.IPersistentCollection
-                                            clojure.lang.IPersistentList
-                                            clojure.lang.IPersistentVector}
+                        relevant-seqables #{:seq :coll :list :vector}
                         ;; upcast seqables if appropriate
                         classes (let [{seqable-classes true 
                                        non-seqable-classes false} 
                                       (group-by #(contains? relevant-seqables (::class-instance %)) classes)
                                       seqable-classes
-                                      (if (some (comp #{clojure.lang.IPersistentList
-                                                        clojure.lang.ISeq
-                                                        clojure.lang.IPersistentCollection}
+                                      (if (some (comp #{:list :seq :coll}
                                                       ::class-instance)
                                                 seqable-classes)
                                         ;; upcast all to Coll since we've probably lost too much type information
                                         ;; to bother keeping seqable-classes around.
-                                        [(-class clojure.lang.IPersistentCollection 
+                                        [(-class :coll 
                                                  [(apply join* 
                                                          ;; assume all seqable-classes take a collection
                                                          ;; member type parameter
@@ -1708,7 +1715,7 @@
         ;; unless it's a (Map Nothing Nothing)
         hmaps-merged (if (some (fn [m]
                                  (and (-class? m)
-                                      (#{clojure.lang.IPersistentMap} (::class-instance m))
+                                      (#{:map} (::class-instance m))
                                       (not-every? nothing? (:args m))))
                                non-hmaps)
                        #{}
@@ -1717,30 +1724,24 @@
         ts (into hmaps-merged non-hmaps)
         
         ;; upcast true/false singletons to Boolean if Boolean is present
-        ts (if (contains? ts (-class Boolean []))
+        ts (if (contains? ts (-class :boolean []))
              (disj ts (-val true) (-val false))
              ts)
 
         _ (assert (set? ts))
         ;; upcast Long and Double combination to t/Num
         ts (cond
-             (or (and (or (contains? ts (-class Long []))
-                          (contains? ts (-class Integer []))
-                          (contains? ts (-class Short []))
-                          (contains? ts (-class Byte []))
-                          (contains? ts (-class BigInteger [])))
-                      (or (contains? ts (-class Double []))
-                          (contains? ts (-class BigDecimal []))))
-                 (contains? ts (-class Number [])))
+             (or (and (or (contains? ts (-class :int []))
+                          (contains? ts (-class :integer [])))
+                      (or (contains? ts (-class :double []))
+                          (contains? ts (-class :decimal []))))
+                 (contains? ts (-class :number [])))
              (-> (disj ts 
-                       (-class Long [])
-                       (-class Integer [])
-                       (-class Short [])
-                       (-class Byte [])
-                       (-class BigInteger [])
-                       (-class Double [])
-                       (-class BigDecimal []))
-                 (conj (-class Number [])))
+                       (-class :int [])
+                       (-class :integer [])
+                       (-class :double [])
+                       (-class :decimal []))
+                 (conj (-class :number [])))
 
              :else ts)
 
@@ -1767,8 +1768,7 @@
                        (group-by
                          (every-pred
                            -class?
-                           (comp boolean #{clojure.lang.IPersistentVector
-                                           clojure.lang.IPersistentCollection} ::class-instance))
+                           (comp boolean #{:vector :coll} ::class-instance))
                          non-HVecs)
                        _ (assert (= (count non-HVecs) (+ (count vec-classes) (count non-vecs))))
                        ;; erase HVec's if we have a IPV class
@@ -1776,9 +1776,9 @@
                        (if (seq vec-classes)
                          [[]
                           (cons 
-                            (let [class-name (if (every? (comp boolean #{clojure.lang.IPersistentVector} ::class-instance) vec-classes)
-                                               clojure.lang.IPersistentVector
-                                               clojure.lang.IPersistentCollection)
+                            (let [class-name (if (every? (comp boolean #{:vector} ::class-instance) vec-classes)
+                                               :vector
+                                               :coll)
                                   upcasted-HVecs (map upcast-HVec HVecs)]
                               (-class class-name
                                       [(apply join*
@@ -1794,23 +1794,19 @@
         ;; simplify multiple keywords to Kw if
         ;ts (let [{kws true non-kws false} (group-by kw-val? ts)]
         ;     (if (>= (count kws) 2)  ;; tweak simplification threshold here
-        ;       (conj (set non-kws) (-class clojure.lang.Keyword []))
+        ;       (conj (set non-kws) (-class :keyword []))
         ;       ts))
         seqable-t? (fn [m]
                      (boolean
                        (when (-class? m)
-                         (or (= clojure.lang.Seqable (::class-instance m))
-                             (contains? (set (supers (::class-instance m))) 
-                                        clojure.lang.Seqable)))))
+                         (#{:vector :map :string :coll :seqable} (::class-instance m)))))
         atomic-type? (fn [v]
                        (boolean
                          (or
                            (and (val? v)
                                 (some? (:val v)))
                            (and (-class? v)
-                                (#{clojure.lang.Symbol
-                                   String
-                                   clojure.lang.Keyword}
+                                (#{:symbol :string :keyword}
                                   (::class-instance v))))))
         ]
     ;(prn "union ts" ts)
@@ -2076,13 +2072,13 @@
               (-class (::class-instance t1) (mapv join (:args t1) (:args t2)))
 
               (and (#{:class} (:op t1))
-                   (= clojure.lang.IFn
+                   (= :ifn
                       (::class-instance t1))
                    (#{:IFn} (:op t2)))
               t2
 
               (and (#{:class} (:op t2))
-                   (= clojure.lang.IFn
+                   (= :ifn
                       (::class-instance t2))
                    (#{:IFn} (:op t1)))
               t1
@@ -2152,11 +2148,11 @@
         (map (fn [[cur-pth next-group]]
                (let [type (update-grouped-paths env config next-group)]
                  (case (:op cur-pth)
-                   :var (throw (Exception. "Var path element must only be first path element"))
+                   :var (throw (ex-info "Var path element must only be first path element" {}))
                    :key (let [{:keys [kw-entries keys key]} cur-pth
                               forbidden-aliases *forbidden-aliases*
                               _ (when (and spec? forbidden-aliases)
-                                  (swap! forbidden-aliases into (map coerce/kw->symbol (cons key keys))))]
+                                  (swap! forbidden-aliases into (map kw->sym (cons key keys))))]
                           {:op :HMap
                            ::HMap-req (merge (zipmap keys (repeat {:op :unknown}))
                                              ;; immediately associate kw->kw entries
@@ -2164,17 +2160,17 @@
                                              kw-entries
                                              {key type})
                            ::HMap-opt {}})
-                   :set-entry (-class clojure.lang.IPersistentSet [type])
-                   :seq-entry (-class clojure.lang.ISeq [type])
-                   :vec-entry (-class clojure.lang.IPersistentVector [type])
-                   :map-keys (-class clojure.lang.IPersistentMap [type {:op :unknown}])
-                   :map-vals (-class clojure.lang.IPersistentMap [{:op :unknown} type])
-                   :transient-vector-entry (-class clojure.lang.ITransientVector [type])
-                   :atom-contents (-class clojure.lang.IAtom [type])
+                   :set-entry (-class :set [type])
+                   :seq-entry (-class :seq [type])
+                   :vec-entry (-class :vector [type])
+                   :map-keys (-class :map [type {:op :unknown}])
+                   :map-vals (-class :map [{:op :unknown} type])
+                   :transient-vector-entry (-class "clojure.lang.ITransientVector" [type])
+                   :atom-contents (-class :atom [type])
                    :index (if true #_(= 2 (:count cur-pth))
                             {:op :HVec
                              :vec (assoc (vec (repeat (:count cur-pth) -unknown)) (:nth cur-pth) type)}
-                            #_(-class clojure.lang.IPersistentVector [type]))
+                            #_(-class :vector [type]))
                    :fn-domain (let [{:keys [arity position]} cur-pth]
                                 {:op :IFn
                                  :arities [{:op :IFn1
@@ -2873,7 +2869,7 @@
     (if (empty? worklist)
       env
       (let [t (nth worklist 0)
-            _ (assert (alias? t) [t (class t)])
+            _ (assert (alias? t) [t #?(:clj (class t))])
             ;_ (prn "squash" (unp t))
             ;; find all keysets for downstream (and upstream) aliases
             ;; and merge.
@@ -3100,9 +3096,7 @@
         (when (next aseq)
           (.write ^java.io.Writer *out* ", ")
           (pp/pprint-newline :linear)
-          (recur (next aseq)))))))
-:cljs
-pp/code-dispatch)
+          (recur (next aseq))))))))
 
 ;; deterministic printing of HMaps
 (defmethod wrap-dispatch #?(:clj clojure.lang.IPersistentMap
@@ -3121,12 +3115,14 @@ pp/code-dispatch)
                (concat
                  (mapcat identity tagged)
                  (mapcat identity untagged)))]
-    (pprint-map ordered)))
+    #?(:clj (pprint-map ordered)
+       :cljs (pp/code-dispatch ordered))))
 
 (defmethod wrap-dispatch #?(:clj clojure.lang.Keyword
                             :cljs :keyword)
   [kw]
-  (let [aliases (ns-aliases (current-ns))
+  (let [aliases #?(:clj (ns-aliases (current-ns))
+                   :cljs #{})
         some-alias (delay
                      (some (fn [[k v]]
                              (when (= (namespace kw)
@@ -3161,19 +3157,6 @@ pp/code-dispatch)
                        [k (unparse-type v)]))
                 env)))
 
-; type-of : Any -> Kw
-(defn type-of [v]
-  (cond
-    (nil? v) :nil
-    (keyword? v) :keyword
-    (symbol? v) :symbol
-    (string? v) :string
-    (instance? Boolean v) :bool
-    (coll? v) :coll
-    (number? v) :number
-    (fn? v) :fn
-    #?@(:clj [(instance? clojure.lang.ITransientCollection v) :transient])
-    :else :other))
 
 (defn path-root [path]
   (-> path first :name))
@@ -3289,7 +3272,7 @@ pp/code-dispatch)
 (defn unwrap-value [v]
   (if-some [[_ u] (or (-> v meta (find ::unwrapped-fn))
                       (-> v meta (find ::unwrapped-seq))
-                      #(:clj
+                      #?(:clj
                          (when (instance? PersistentMapProxy v)
                            [nil (.m ^PersistentMapProxy v)])))]
     ;; values are only wrapped one level, no recursion calls needed
@@ -3304,6 +3287,7 @@ pp/code-dispatch)
    {:pre [((con/set-c? vector?) paths)
           (seq paths)
           ((con/set-c? vector?) call-ids)]}
+   #?(:clj
    (when (string? track-metric)
      (let [tm (or (get @track-metric-cache track-metric)
                   (-> track-metric read-string eval))
@@ -3313,7 +3297,7 @@ pp/code-dispatch)
                   {:results-atom results-atom
                    :v v 
                    :paths paths 
-                   :call-ids call-ids}))))
+                   :call-ids call-ids})))))
    (let [;FIXME memory intensive
          #_#_
          _ (let [hs ((juxt 
@@ -3383,7 +3367,7 @@ pp/code-dispatch)
                      ;; Now, remember this value is at least a function, in case it is never invoked.
                      ;; This will get noted redundantly for older paths, if that's
                      ;; some kind of issue, we should remember which paths we've already noted.
-                     _ (add-infer-results! results-atom (infer-results paths (-class clojure.lang.IFn [])))
+                     _ (add-infer-results! results-atom (infer-results paths (-class :ifn [])))
                      call-ids (conj call-ids (gen-call-id paths))
                      ;; space-efficient function wrapping
                      wrap-fn (fn [paths unwrapped-fn]
@@ -3421,7 +3405,7 @@ pp/code-dispatch)
            (add-infer-results!
              results-atom
              (infer-results paths
-                           (-class clojure.lang.IPersistentList [(make-Union #{})]))))
+                           (-class :list [-nothing]))))
          (let [res 
                (with-meta
                  (apply list
@@ -3456,7 +3440,7 @@ pp/code-dispatch)
                            results-atom
                            (infer-results
                              paths-where-original-coll-could-be-empty
-                             (-class clojure.lang.ISeq [(make-Union #{})]))))
+                             (-class :seq [-nothing]))))
                        unwrapped-seq)
                      (cons (track config results-atom
                                   (first unwrapped-seq)
@@ -3499,7 +3483,7 @@ pp/code-dispatch)
              len (count v)
              so-far (atom 0)]
          (when (= 0 len)
-           (add-infer-results! results-atom (infer-results paths (-class clojure.lang.IPersistentVector [{:op :union :types #{}}]))))
+           (add-infer-results! results-atom (infer-results paths (-class :vector [-nothing]))))
          (reduce
            (fn [e [k v]]
              (swap! so-far inc)
@@ -3528,8 +3512,7 @@ pp/code-dispatch)
            (add-infer-results!
              results-atom
              (infer-results paths
-                           (-class clojure.lang.IPersistentSet
-                                   [{:op :union :types #{}}]))))
+                           (-class :set [-nothing]))))
          ;; preserve sorted sets
          (binding [*should-track* false]
            (into (empty v)
@@ -3720,7 +3703,7 @@ pp/code-dispatch)
           v)
 
        :else (do
-               (add-infer-results! results-atom (infer-results paths (-class (class v) [])))
+               (add-infer-results! results-atom (infer-results paths (-class (classify v) [])))
                v)))))
 
 #?(:clj
@@ -4353,8 +4336,9 @@ pp/code-dispatch)
                                  {pth-elem (group-by-path (inc path-index) rs)})
                                ps))})))
 
-(declare pprint-env local-fn-symbol? macro-symbol?)
+(declare pprint-env local-fn-symbol? #?(:clj macro-symbol?))
 
+#?(:clj
 (defn polymorphic-function-reports [config call-flows]
   (doseq [[vname call-ids] call-flows
           :when (not ((some-fn local-fn-symbol?
@@ -4381,7 +4365,7 @@ pp/code-dispatch)
       ;(prn "")
       ;(prn "Path" (unparse-path path) (count hss))
       #_(prn "N paths" (count path-hashes))
-      #_(prn "N hashes" (count hash-occurrences)))))
+      #_(prn "N hashes" (count hash-occurrences))))))
 
 
 ; generate-tenv : InferResultEnv -> AliasTypeEnv
@@ -5116,12 +5100,13 @@ pp/code-dispatch)
 (defn loop-var-symbol? [s]
   (= :loop-var (::track-kind (meta s))))
 
+#?(:clj 
 (defn macro-symbol? [s]
   {:pre [(symbol? s)]}
   (boolean
     (when (namespace s)
       (when-let [v (find-var s)]
-        (:macro (meta v))))))
+        (:macro (meta v)))))))
 
 (defn imported-symbol? [s]
   {:pre [(symbol? s)]}
@@ -5247,10 +5232,11 @@ pp/code-dispatch)
       #_:poly  ;TODO
       (assert nil (str "No implicit-aliases-for-type case: " m)))))
 
+#?(:clj
 (defn get-spec-form [spec-name]
   (some-> spec-name
           ((impl/v (symbol (str spec-ns) "get-spec")))
-          ((impl/v (symbol (str spec-ns) "form")))))
+          ((impl/v (symbol (str spec-ns) "form"))))))
 
 (defn implicit-aliases-for-tenv [env config]
   (loop [tenv (type-env env)
@@ -5342,7 +5328,8 @@ pp/code-dispatch)
 (defn envs-to-specs [env {:keys [spec-macros] :as config}]
   ;(prn "envs-to-specs" (keys (alias-env env)))
   (let [should-spec-macros? (boolean spec-macros)
-        trim-type-env #(into {}
+        trim-type-env #?(:clj
+                         #(into {}
                              (remove (fn [[k v]]
                                        (or ;; don't spec local functions
                                            (local-fn-symbol? k)
@@ -5358,6 +5345,7 @@ pp/code-dispatch)
                                            ;; omitting non-function specs.
                                            (not (#{:IFn} (:op v))))))
                              %)
+                         :cljs identity)
         env (update-type-env env trim-type-env)
         env (implicit-aliases-for-env env config)
         aliases-generated (atom #{})]
@@ -5378,7 +5366,7 @@ pp/code-dispatch)
                                         (symbol (name k))
                                         ;; imports
                                         k)
-                                  old-spec (get-spec-form k)
+                                  ;old-spec (get-spec-form k)
                                   spec-to-maybe-fdef 
                                   (fn [sym s]
                                     (if (and (seq? s)
@@ -5430,26 +5418,27 @@ pp/code-dispatch)
                                            key))
                              full-type-env))
         ;_ (prn "local-fn-env" local-fn-env)
-        tenv (into {}
-                   (remove (fn [[k v]]
-                             {:pre [(symbol? k)]}
-                             (let [s (if (namespace k)
-                                       (symbol (str k))
-                                       (symbol (str (current-ns)) (str k)))]
-                               #_
-                               (prn "metas" k
-                                    (symbol (str (current-ns)) (str (name k)))
-                                    (meta (find-var (symbol (str (current-ns)) (str (name k))))))
-                               (or
-                                 ;; don't annotate macros
-                                 (some-> (find-var s)
-                                         meta
-                                         :macro)
-                                 ;; don't annotate local functions
-                                 (local-fn-symbol? k)
-                                 ;; or loop variables
-                                 (loop-var-symbol? k)))))
-                   full-type-env)
+        tenv #?(:clj (into {}
+                           (remove (fn [[k v]]
+                                     {:pre [(symbol? k)]}
+                                     (let [s (if (namespace k)
+                                               (symbol (str k))
+                                               (symbol (str (current-ns)) (str k)))]
+                                       #_
+                                       (prn "metas" k
+                                            (symbol (str (current-ns)) (str (name k)))
+                                            (meta (find-var (symbol (str (current-ns)) (str (name k))))))
+                                       (or
+                                         ;; don't annotate macros
+                                         (some-> (find-var s)
+                                                 meta
+                                                 :macro)
+                                         ;; don't annotate local functions
+                                         (local-fn-symbol? k)
+                                         ;; or loop variables
+                                         (loop-var-symbol? k)))))
+                           full-type-env)
+                :cljs full-type-env)
         as (alias-env env)]
     (binding [*envs* (atom env)
               ;; disable for now
@@ -5458,10 +5447,11 @@ pp/code-dispatch)
                 (mapv unparse-defalias-entry
                       (sort-by (comp name first) as)))
               (declares-for-aliases [as]
-                (list* (if (= (ns-resolve (current-ns) 'declare)
-                              #'clojure.core/declare)
-                         'declare
-                         'clojure.core/declare)
+                (list* #?(:clj (if (= (ns-resolve (current-ns) 'declare)
+                                      #'clojure.core/declare)
+                                 'declare
+                                 'clojure.core/declare)
+                          :cljs 'declare)
                        (sort (map (comp symbol name) as))))
               (unp-anns [tenv]
                 (vec
@@ -6110,11 +6100,12 @@ pp/code-dispatch)
            out (if spec? 
                  envs-to-specs
                  envs-to-annotations)
-           infer-results (if-let [load-infer-results (:load-infer-results config)]
+           infer-results (if-let [load-infer-results nil #_(:load-infer-results config)]
                            (do (println (str "Loading inference results from " load-infer-results))
                              (read-string (slurp load-infer-results)))
                            @results-atom)
            _ (assert (infer-results? infer-results))
+           #_#_
            _ (when-let [save-infer-results (:save-infer-results config)]
                (let [;; turn :class types into :unresolved-class's
                      infer-results (update infer-results :infer-results

@@ -1,6 +1,6 @@
 ; untyped, clojure.core.typed depends on this namespace
 (ns clojure.core.typed.current-impl
-  (:require [clojure.core.typed.profiling :as p]
+  (:require #?(:clj [clojure.core.typed.profiling :as p])
             [clojure.set :as set]
             [clojure.core.typed.env :as env]
             [clojure.core.typed.contract-utils :as con]
@@ -174,13 +174,20 @@
          nil))))
 
 ;; runtime environments
-(create-env var-env)
-(create-env alias-env)
-(create-env protocol-env)
-(create-env rclass-env)
-(create-env datatype-env)
-(create-env jsnominal-env)
+#?(:clj
+(create-env var-env))
+#?(:clj
+(create-env alias-env))
+#?(:clj 
+(create-env protocol-env))
+#?(:clj 
+(create-env rclass-env))
+#?(:clj 
+(create-env datatype-env))
+#?(:clj 
+(create-env jsnominal-env))
 
+#?(:clj
 (defn v [vsym]
   {:pre [(symbol? vsym)
          (namespace vsym)]}
@@ -188,8 +195,9 @@
         _ (assert ns (str "Cannot find namespace: " (namespace vsym)))
         var (ns-resolve ns (symbol (name vsym)))]
     (assert (var? var) (str "Cannot find var: " vsym))
-    @var))
+    @var)))
 
+#?(:clj
 (defn the-var [vsym]
   {:pre [(symbol? vsym)
          (namespace vsym)]
@@ -198,7 +206,7 @@
         _ (assert ns (str "Cannot find namespace: " (namespace vsym)))
         var (ns-resolve ns (symbol (name vsym)))]
     (assert (var? var) (str "Cannot find var: " vsym))
-    var))
+    var)))
 
 (def clojure ::clojure)
 (def clojurescript ::clojurescript)
@@ -304,16 +312,18 @@
         unknown
         `(assert nil (str "No case matched for impl-case " (current-impl)))))))
 
+#?(:clj
 (defn var->symbol [^clojure.lang.Var var]
   {:pre [(var? var)]
    :post [((every-pred symbol? namespace) %)]}
   (symbol (str (ns-name (.ns var)))
-          (str (.sym var))))
+          (str (.sym var)))))
 
+#?(:clj
 (defn Class->symbol [^Class cls]
   {:pre [(class? cls)]
    :post [(symbol? %)]}
-  (symbol (.getName cls)))
+  (symbol (.getName cls))))
 
 ; for type-contract
 (defn hmap-c? [& {:keys [mandatory optional absent-keys complete?]}]
@@ -689,6 +699,7 @@ Transducer
 (assert (even? (count init-aliases)))
 (assert (apply distinct? (map first (partition 2 init-aliases))))
 
+#?(:clj
 (defn gen-protocol* [current-env current-ns vsym binder mths]
   {:pre [(symbol? current-ns)
          ((some-fn nil? map?) mths)]}
@@ -803,7 +814,7 @@ Transducer
         (add-nocheck-var kq)
         (add-tc-var-type kq mt-ann)))
     ;(prn "end gen-protocol" s)
-    nil))
+    nil)))
 
 (defn add-datatype-ancestors
   "Add a mapping of ancestor overrides (from the type syntax of the override
@@ -815,6 +826,7 @@ Transducer
   (env/swap-checker! update-in [current-dt-ancestors-kw sym] merge tmap)
   nil)
 
+#?(:clj
 (defn gen-datatype* [current-env current-ns provided-name fields vbnd opt record?]
   {:pre [(symbol? current-ns)]}
   (with-clojure-impl
@@ -957,4 +969,4 @@ Transducer
           (when record?
             (add-method-override (symbol (str s) "create") map-ctor)
             (add-tc-var-type map-ctor-name map-ctor)
-            (add-nocheck-var map-ctor-name)))))))
+            (add-nocheck-var map-ctor-name))))))))
