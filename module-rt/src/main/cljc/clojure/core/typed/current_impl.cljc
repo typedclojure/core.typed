@@ -242,7 +242,8 @@
     (swap! assoc current-impl-kw clojurescript)))
 
 (defn cljs-checker []
-  {:post [(instance? clojure.lang.IAtom %)]}
+  {:post [#?(:clj (instance? clojure.lang.IAtom %)
+             :cljs (instance? Atom %))]}
   cljs-checker-atom)
 
 (defn cljs-bindings []

@@ -1,16 +1,18 @@
-(ns clojure.core.typed.env
-  #?(:clj (:import (clojure.lang IAtom))))
+(ns clojure.core.typed.env)
 
 (def ^:dynamic *checker* nil)
 
 (defn checker-or-nil []
-  {:post [(or (instance? IAtom %)
+  {:post [(or #?(:clj (instance? clojure.lang.IAtom %)
+                 :cljs (instance? Atom %))
               (nil? %))]}
   *checker*)
 
 (defn checker []
   (let [c *checker*]
-    (assert (instance? IAtom c) (str "No checker state: " (pr-str c)))
+    (assert #?(:clj (instance? clojure.lang.IAtom c)
+               :cljs (instance? Atom c))
+            (str "No checker state: " (pr-str c)))
     c))
 
 (defn empty-checker []

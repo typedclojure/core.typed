@@ -1,25 +1,24 @@
 (ns clojure.core.typed.runtime-infer
   (:refer-clojure :exclude [any?])
-  (:require [clojure.pprint :as pp]
-            [clojure.core :as core]
+  (:require [#?(:clj clojure.pprint :cljs cljs.pprint) :as pp]
+            [#?(:clj clojure.core :cljs cljs.core) :as core]
             [clojure.set :as set]
             [clojure.string :as str]
             [clojure.java.io :as io]
             [clojure.core.typed.ast-utils :as ast]
             [clojure.core.typed.util-vars :as vs]
             [clojure.core.typed.current-impl :as impl]
-            [clojure.tools.reader.reader-types :as rdrt]
             [clojure.tools.namespace.parse :as nprs]
             [clojure.math.combinatorics :as comb]
             [clojure.core.typed.coerce-utils :as coerce]
             [clojure.core.typed.contract-utils :as con]
             [clojure.walk :as walk]
             [clojure.tools.analyzer.passes.jvm.emit-form :as emit-form]
-            [clojure.core.typed.dep.potemkin.collections :as pot]
-            ))
-
-(create-ns 'clojure.core.typed)
-(alias 't 'clojure.core.typed)
+            #?@(:clj [[clojure.core.typed.dep.potemkin.collections :as pot]
+                      [clojure.tools.reader.reader-types :as rdrt]
+                      ])
+            )
+  )
 
 ;; START copied from clojure.core.typed.utils
 (defn ^:private try-resolve-nsyms [nsyms]
@@ -27,7 +26,7 @@
             (try
               (require [s])
               (reduced s)
-              (catch Throwable e
+              (catch #?(:clj Throwable :cljs :default) e
                 nil)))
           nil
           nsyms))
@@ -714,7 +713,9 @@
 (def ^:dynamic *unparse-abbrev-alias* false)
 (def ^:dynamic *unparse-abbrev-class* false)
 
-(def ^:dynamic *ann-for-ns* (fn [] *ns*))
+(def ^:dynamic *ann-for-ns* 
+  (fn [] #?(:clj *ns*
+            :cljs (throw (ex-info "No annotation namespace bound" {})))))
 
 (defn current-ns [] (ns-name (*ann-for-ns*)))
 
@@ -3058,16 +3059,34 @@
 
 (declare generate-tenv)
 
+;; copied from cljs.pprint
+#?(:cljs
+(defn- pp-type-dispatcher [obj]
+  (cond
+    (instance? PersistentQueue obj) :queue
+    (satisfies? IDeref obj) :deref
+    (symbol? obj) :symbol
+    (keyword? obj) :keyword
+    (seq? obj) :list
+    (map? obj) :map
+    (vector? obj) :vector
+    (set? obj) :set
+    (nil? obj) nil
+    :default :default)))
+
 (defmulti wrap-dispatch
   "A wrapper for code dispatch that prints local keywords with ::"
   {:arglists '[[object]]}
-  class)
+  #?(:clj class
+     :cljs pp-type-dispatcher))
 
 (defmethod wrap-dispatch :default
   [o]
   (pp/code-dispatch o))
 
 ;;; (def pprint-map (formatter-out "~<{~;~@{~<~w~^ ~_~w~:>~^, ~_~}~;}~:>"))
+#?(:clj
+   ;FIXME is this copy-pasted? it's since been updated in clojure.pprint
 (defn- pprint-map [amap]
   (pp/pprint-logical-block :prefix "{" :suffix "}"
     (pp/print-length-loop [aseq (seq amap)]
@@ -3082,9 +3101,12 @@
           (.write ^java.io.Writer *out* ", ")
           (pp/pprint-newline :linear)
           (recur (next aseq)))))))
+:cljs
+pp/code-dispatch)
 
 ;; deterministic printing of HMaps
-(defmethod wrap-dispatch clojure.lang.IPersistentMap
+(defmethod wrap-dispatch #?(:clj clojure.lang.IPersistentMap
+                            :cljs :map)
   [o]
   (let [{tagged true untagged false}
         (group-by (fn [[k v]]
@@ -3101,7 +3123,8 @@
                  (mapcat identity untagged)))]
     (pprint-map ordered)))
 
-(defmethod wrap-dispatch clojure.lang.Keyword
+(defmethod wrap-dispatch #?(:clj clojure.lang.Keyword
+                            :cljs :keyword)
   [kw]
   (let [aliases (ns-aliases (current-ns))
         some-alias (delay
@@ -3149,7 +3172,7 @@
     (coll? v) :coll
     (number? v) :number
     (fn? v) :fn
-    (instance? clojure.lang.ITransientCollection v) :transient
+    #?@(:clj [(instance? clojure.lang.ITransientCollection v) :transient])
     :else :other))
 
 (defn path-root [path]
@@ -3176,6 +3199,7 @@
 
 (declare track)
 
+#?(:clj
 (pot/def-map-type PersistentMapProxy [^clojure.lang.IPersistentMap m k-to-track-info config results-atom 
                                       ;; if started as HMap tracking map, map from kw->Type
                                       ;; for all keyword keys with keyword values
@@ -3260,13 +3284,14 @@
                                               results-atom
                                               current-kw-entries-types
                                               current-ks
-                                              current-all-kws?)))
+                                              current-all-kws?))))
 
 (defn unwrap-value [v]
   (if-some [[_ u] (or (-> v meta (find ::unwrapped-fn))
                       (-> v meta (find ::unwrapped-seq))
-                      (when (instance? PersistentMapProxy v)
-                        [nil (.m ^PersistentMapProxy v)]))]
+                      #(:clj
+                         (when (instance? PersistentMapProxy v)
+                           [nil (.m ^PersistentMapProxy v)])))]
     ;; values are only wrapped one level, no recursion calls needed
     u
     v))
@@ -3447,7 +3472,7 @@
                          ::unwrapped-seq unwrapped-seq})))]
          (wrap-lseq unwrapped-seq paths-where-original-coll-could-be-empty))
 
-       (instance? clojure.lang.ITransientVector v)
+       (instance? #?(:clj clojure.lang.ITransientVector :cljs TransientVector) v)
        (let [cnt (count v)]
          (reduce
            (fn [v i]
@@ -3514,7 +3539,8 @@
                                  call-ids))))
                  v)))
 
-       (instance? PersistentMapProxy v)
+       #?(:clj (instance? PersistentMapProxy v))
+       #?(:clj
        (let [^PersistentMapProxy v v
              ks (.current-ks v)
              _ (assert (set? ks))
@@ -3540,11 +3566,13 @@
                               (.results-atom v)
                               (.current-kw-entries-types v)
                               (.current-ks v)
-                              (.current-all-kws? v)))
+                              (.current-all-kws? v))))
 
-       (or (instance? clojure.lang.PersistentHashMap v)
-           (instance? clojure.lang.PersistentArrayMap v)
-           (instance? clojure.lang.PersistentTreeMap v))
+       #?(:clj
+           (or (instance? clojure.lang.PersistentHashMap v)
+               (instance? clojure.lang.PersistentArrayMap v)
+               (instance? clojure.lang.PersistentTreeMap v))
+          :cljs (map? v))
        (let [ks (set (keys v))]
          (when (empty? v)
            (add-infer-results!
@@ -3575,20 +3603,21 @@
                               (binding [*should-track* false]
                                 (extend-paths paths (key-path kw-entries-types ks k)))
                               call-ids)))
-                 v (if (= track-strategy :lazy)
-                     (PersistentMapProxy. v
-                                          (zipmap (apply disj ks with-kw-val)
-                                                  (repeat {{:all-kws? true
-                                                            :kw-entries-types kw-entries-types
-                                                            :ks ks}
-                                                           {:paths paths
-                                                            :call-ids call-ids}}))
-                                          config
-                                          results-atom
-                                          kw-entries-types
-                                          ks
-                                          true)
-                     v)]
+                 v #?(:cljs v
+                      :clj (if (= track-strategy :lazy)
+                             (PersistentMapProxy. v
+                                                  (zipmap (apply disj ks with-kw-val)
+                                                          (repeat {{:all-kws? true
+                                                                    :kw-entries-types kw-entries-types
+                                                                    :ks ks}
+                                                                   {:paths paths
+                                                                    :call-ids call-ids}}))
+                                                  config
+                                                  results-atom
+                                                  kw-entries-types
+                                                  ks
+                                                  true)
+                             v))]
              (reduce
                (fn [m [k orig-v]]
                  (let [v (track config results-atom orig-v
@@ -3607,19 +3636,20 @@
 
            :else
            (let [so-far (atom 0)
-                 v (if (= track-strategy :lazy)
-                     (PersistentMapProxy. v
-                                          (zipmap ks (repeat {{:all-kws? false
-                                                               :kw-entries-types {}
-                                                               :ks ks}
-                                                              {:paths paths
-                                                               :call-ids call-ids}}))
-                                          config
-                                          results-atom
-                                          {}
-                                          ks
-                                          false)
-                     v)]
+                 v #?(:cljs v
+                      :clj (if (= track-strategy :lazy)
+                             (PersistentMapProxy. v
+                                                  (zipmap ks (repeat {{:all-kws? false
+                                                                       :kw-entries-types {}
+                                                                       :ks ks}
+                                                                      {:paths paths
+                                                                       :call-ids call-ids}}))
+                                                  config
+                                                  results-atom
+                                                  {}
+                                                  ks
+                                                  false)
+                             v))]
              (reduce
                (fn [m k]
                  (swap! so-far inc)
@@ -3669,8 +3699,8 @@
                v
                (keys v)))))
 
-        (instance? clojure.lang.IAtom v)
-        (let [old-val (-> v meta ::t/old-val)
+        (instance? #?(:clj clojure.lang.IAtom :cljs Atom) v)
+        (let [old-val (-> v meta :clojure.core.typed/old-val)
               new-paths (binding [*should-track* false]
                          (extend-paths paths (atom-contents)))
               should-track? (binding [*should-track* false]
@@ -3693,6 +3723,7 @@
                (add-infer-results! results-atom (infer-results paths (-class (class v) [])))
                v)))))
 
+#?(:clj
 (def prim-invoke-interfaces
   (into #{}
         (->>
@@ -3701,24 +3732,27 @@
                       (for [n (range 1 6)]
                         (apply comb/cartesian-product (repeat n [\D \O \L])))))
           (remove (fn [ss]
-                    (every? #{\O} ss))))))
+                    (every? #{\O} ss)))))))
 
+#?(:clj
 (defn char->tag [c]
   {:pre [(char? c)]
    :post [(symbol? %)]}
   (case c
     \L 'long
     \D 'double
-    \O 'java.lang.Object))
+    \O 'java.lang.Object)))
 
+#?(:clj
 (defn tag->char [t]
   {:pre [((some-fn nil? symbol?) t)]
    :post [(char? %)]}
   (case t
     long \L
     double \D
-    \O))
+    \O)))
 
+#?(:clj
 (defn gen-prim-invokes [f-this prims]
   ;(prn "gen-prim-invokes" prims)
   (mapcat
@@ -3743,31 +3777,36 @@
         [interface
          (list 'invokePrim argvec
                `(~(f-this this) ~@(map #(with-meta % nil) args)))]))
-    prims))
+    prims)))
 
+#?(:clj
 (defn gen-nonvariadic-invokes [f-this]
   (for [arity (range 0 20),
         :let [args (repeatedly arity gensym)
               this (gensym 'this)]]
     `(~'invoke [~this ~@args]
-       (~(f-this this) ~@args))))
+       (~(f-this this) ~@args)))))
 
+#?(:clj
 (defn gen-variadic-invoke [f-this]
   (let [args (repeatedly 21 gensym)
         this (gensym 'this)]
-    `(~'invoke [~this ~@args] (apply ~(f-this this) ~@args))))
+    `(~'invoke [~this ~@args] (apply ~(f-this this) ~@args)))))
 
+#?(:clj
 (defn gen-apply-to [f-this]
   (let [this (gensym 'this)]
-    `(~'applyTo [~this args#] (apply ~(f-this this) args#))))
+    `(~'applyTo [~this args#] (apply ~(f-this this) args#)))))
 
+#?(:clj
 (defn extend-IFn [f-this prims]
   `(clojure.lang.IFn
     ~@(gen-nonvariadic-invokes f-this)
     ~(gen-variadic-invoke f-this)
     ~(gen-apply-to f-this)
-    ~@(gen-prim-invokes f-this prims)))
+    ~@(gen-prim-invokes f-this prims))))
 
+#?(:clj
 (defmacro deftypefn
   "Like deftype, but accepts a function f before any specs that is
   used to implement clojure.lang.IFn.  f should accept at least one
@@ -3782,10 +3821,12 @@
     #_
     (binding [*print-meta* true]
       (pprint source))
-    source))
+    source)))
 
-(def this-ns *ns*)
+#?(:clj
+(def this-ns *ns*))
 
+#?(:clj
 (defn arglist-prim-string [args]
   {:pre [(vector? args)]
    :post [((some-fn nil? string?) %)]}
@@ -3796,8 +3837,9 @@
                    (map tag->char))
               [(tag->char (-> args meta :tag))]))]
     (when (prim-invoke-interfaces s)
-      s)))
+      s))))
 
+#?(:clj
 (defn wrap-prim [vr f]
   {:pre [(var? vr)]}
   ;(prn "wrap-prim" vr)
@@ -3826,7 +3868,7 @@
             _ (assert (var? ctor))]
         (ctor f))
       
-      :else f)))
+      :else f))))
 
 (defn gen-track-config []
   (merge 
@@ -3837,12 +3879,13 @@
     vs/*instrument-infer-config*))
 
 ; track-var : (IFn [Var -> Value] [(Atom Result) Var Sym -> Value])
+#?(:clj
 (defn track-var'
   ([vr] (track-var' (gen-track-config) results-atom vr *ns*))
   ([config vr] (track-var' config results-atom vr *ns*))
   ([config results-atom vr ns]
    {:pre [(var? vr)
-          (instance? clojure.lang.IAtom results-atom)]}
+          (instance? #?(:clj clojure.lang.IAtom :cljs Atom) results-atom)]}
    ;(prn "tracking" vr "in ns" ns)
    (wrap-prim
      vr
@@ -3850,12 +3893,14 @@
             results-atom @vr #{[(var-path
                                   (ns-name (the-ns ns))
                                   (impl/var->symbol vr))]}
-            #{}))))
+            #{})))))
 
+#?(:clj
 (defmacro track-var [v]
-  `(track-var' (var ~v)))
+  `(track-var' (var ~v))))
 
 ; track-def-init : Sym Sym Value -> Value
+#?(:clj 
 (defn track-def-init [config vsym ns val]
   {:pre [(symbol? vsym)
          (namespace vsym)]}
@@ -3869,8 +3914,9 @@
              #{[{:op :var
                  :ns (ns-name ns)
                  :name vsym}]}
-             #{}))))
+             #{})))))
 
+#?(:clj 
 (defn track-local-fn [config track-kind line column end-line end-column ns val]
   {:pre [(#{:local-fn :loop-var} track-kind)]}
   #_
@@ -3911,7 +3957,7 @@
                       :end-line end-line
                       :end-column end-column
                       :ns (ns-name ns)})}]}
-         #{}))
+         #{})))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Analysis compiler pass
@@ -3930,6 +3976,7 @@
     'clojure.test
     'clojure.string})
 
+#?(:clj
 (defn dummy-do [env statements ret]
   {:pre [((some-fn nil? vector) statements)]}
   {:op :do
@@ -3937,40 +3984,45 @@
    :env env
    :statements statements
    :ret ret
-   :children [:statements :ret]})
+   :children [:statements :ret]}))
 
+#?(:clj
 (defn dummy-let [env bindings body]
   {:op :let
    :form '(let)
    :env env
    :bindings bindings
    :body (assoc body :body? true)
-   :children [:bindings :body]})
+   :children [:bindings :body]}))
 
 ; dummy-sym : Env Sym -> TAExpr
+#?(:clj
 (defn dummy-sym [env vsym]
   {:pre [(symbol? vsym)]}
   {:op :const
    :type :symbol
    :form `'~vsym
    :env env
-   :val vsym})
+   :val vsym}))
 
+#?(:clj
 (defn dummy-kw [env kw]
   {:pre [(keyword? kw)]}
   {:op :const
    :type :keyword
    :form kw
    :env env
-   :val kw})
+   :val kw}))
 
+#?(:clj
 (defn dummy-num [env n]
   {:op :const
    :type :number
    :form n
    :env env
-   :val n})
+   :val n}))
 
+#?(:clj
 (defn dummy-const-map [env m]
   ; if we need something more specific, think more carefully
   ; about whether this is a :const node, maybe with a :quote
@@ -3981,9 +4033,10 @@
    :type :map
    :form m
    :env env
-   :val m})
+   :val m}))
 
 ; wrap-var-deref : TAExpr Sym Namespace -> TAExpr
+#?(:clj
 (defn wrap-var-deref [{:keys [env] :as expr} vsym var-ns]
   ;(prn "wrap-var-deref")
   (let [var-nsym (ns-name var-ns)
@@ -4015,9 +4068,10 @@
                             :var (:var expr)}
                            (dummy-sym env var-nsym)]}
         ]
-    invoke-ast))
+    invoke-ast)))
 
 ; wrap-def-init : TAExpr Sym Namespace -> TAExpr
+#?(:clj
 (defn wrap-def-init [{:keys [env] :as expr} vsym def-ns]
   ;(prn ((juxt identity class) (-> expr :env :ns)))
   (let [def-nsym (ns-name def-ns)]
@@ -4038,8 +4092,9 @@
      :args [(dummy-const-map env (gen-track-config))
             (dummy-sym (:env expr) vsym)
             (dummy-sym (:env expr) (:ns (:env expr)))
-            expr]}))
+            expr]})))
 
+#?(:clj
 (defn wrap-local-fn [track-kind coord {:keys [env] :as expr} fn-ns]
   {:pre [(#{:local-fn :loop-var} track-kind)]}
   (let [nsym (ns-name fn-ns)]
@@ -4067,11 +4122,12 @@
             (dummy-num env (:end-line coord))
             (dummy-num env (:end-column coord))
             (dummy-sym env nsym)
-            expr]}))
+            expr]})))
 
 (def ^:dynamic *found-fn* false)
 (def alternative-arglists (atom {}))
 
+#?(:clj
 (defn infer-arglists [v expr]
   {:pre [(var? v)]}
   (letfn [(arglists-for [expr]
@@ -4087,28 +4143,31 @@
     (let [arglists (arglists-for expr)]
       (when arglists
         (swap! alternative-arglists assoc (coerce/var->symbol v) arglists)))
-    nil))
+    nil)))
 
 ;; Only wrap library imports so we can infer how they are used.
 ;; Also wrap :dynamic vars since they can be rebound at runtime
 ;; and lose instrumentation.
+#?(:clj
 (defn should-wrap-var? [v]
   (let [vsym (impl/var->symbol v)
         vns (symbol (namespace vsym))
         excluded? (contains? (conj ns-exclusions (ns-name *ns*)) vns)
         ;dynamic? (-> (:var expr) meta :dynamic)
-        no-infer? (-> v meta ::t/no-infer)
-        should-infer? (-> v meta ::t/infer)
+        no-infer? (-> v meta :clojure.core.typed/no-infer)
+        should-infer? (-> v meta :clojure.core.typed/infer)
         should-wrap? (or should-infer? (not (or excluded? no-infer?)))]
     ;(prn "should-wrap-var?" v should-infer? excluded? no-infer? should-wrap?)
-    should-wrap?))
+    should-wrap?)))
 
+#?(:clj
 (defn wrap-var-expr [expr]
   (if (should-wrap-var? (:var expr))
     (wrap-var-deref expr (impl/var->symbol (:var expr)) *ns*)
-    expr))
+    expr)))
 
 ; check : (IFn [TAExpr -> TAExpr] [TAExpr CTType -> TAExpr]
+#?(:clj
 (defn check
   "Assumes collect-expr is already called on this AST."
   ([expr expected] (check expr))
@@ -4149,7 +4208,7 @@
        ;; namespace.
        :def (let [v (:var expr)
                   _ (assert ((some-fn nil? var?) v))
-                  no-infer? (or (some-> v meta ::t/no-infer)
+                  no-infer? (or (some-> v meta :clojure.core.typed/no-infer)
                                 ;; if we enable macros, make sure we don't traverse
                                 ;; &env or &form -- &env at least pollutes HMaps.
                                 (some-> v meta :macro))
@@ -4253,13 +4312,13 @@
                      (let [m (-> b :form meta)]
                        ;(prn "let binding" m)
                        (or
-                         (when-let [coord (::t/auto-ann m)]
+                         (when-let [coord (:clojure.core.typed/auto-ann m)]
                            ;(prn ":let coord" coord
                            ;     (skip-track? coord)
-                           ;     (::t/track-kind m))
+                           ;     (:clojure.core.typed/track-kind m))
                            (when-not (skip-track? coord)
-                             (case (::t/track-kind m)
-                               (::t/for-return ::t/for-param)
+                             (case (:clojure.core.typed/track-kind m)
+                               (:clojure.core.typed/for-return :clojure.core.typed/for-param)
                                (assoc b
                                       :init
                                       (wrap-local-fn
@@ -4274,9 +4333,10 @@
          (assoc expr
                 :bindings bindings))
 
-       (ast/walk-children check expr)))))
+       (ast/walk-children check expr))))))
 
-(def runtime-infer-expr check)
+#?(:clj
+(def runtime-infer-expr check))
 
 (defn group-by-path
   ([infer-results] (group-by-path 0 infer-results))
@@ -5556,6 +5616,7 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 ;; adapted from tools.namespace
+#?(:clj 
 (defn update-file
   "Reads file as a string, calls f on the string plus any args, then
   writes out return value of f as the new contents of file, or writes
@@ -5577,15 +5638,19 @@
               out))
         out (or out file)]
     (spit out new)
-    (println "Output annotations to " out)))
+    (println "Output annotations to " out))))
 
+#?(:clj
 (defn ns-file-name [sym]
   (io/resource
-    (coerce/ns->file sym)))
+    (coerce/ns->file sym))))
 
-(def generate-ann-start ";; Start: Generated by clojure.core.typed - DO NOT EDIT")
-(def generate-ann-end ";; End: Generated by clojure.core.typed - DO NOT EDIT")
+#?(:clj
+(def generate-ann-start ";; Start: Generated by clojure.core.typed - DO NOT EDIT"))
+#?(:clj
+(def generate-ann-end ";; End: Generated by clojure.core.typed - DO NOT EDIT"))
 
+#?(:clj
 (defn delete-generated-annotations-in-str 
   "Delete lines between generate-ann-start and generate-ann-end."
   [old]
@@ -5614,8 +5679,9 @@
             (recur current-open
                    (next lines)
                    (conj out (first lines)))))
-        (str/join "\n" out)))))
+        (str/join "\n" out))))))
 
+#?(:clj
 (defn ns-end-line 
   "Returns the last line of the ns form."
   [s]
@@ -5629,10 +5695,12 @@
         _ (assert (integer? end-line) 
                   (str "No end-line found for ns form"
                        (meta ns-form)))]
-    end-line))
+    end-line)))
 
-(def ^:dynamic *indentation* 2)
+#?(:clj
+(def ^:dynamic *indentation* 2))
 
+#?(:clj
 (defn split-at-column 
   ([s column] (split-at-column s column nil))
   ([s column end-column]
@@ -5640,9 +5708,10 @@
          after  (if end-column
                   (subs s (dec column) (dec end-column))
                   (subs s (dec column)))]
-     [before after])))
+     [before after]))))
 
 ;; returns a pair [leading-first-line file-slice trailing-final-line]
+#?(:clj
 (defn extract-file-slice [ls line column end-line end-column]
   (let [;_ (prn "ls" (count ls) (dec line) end-line)
         v (subvec ls (dec line) end-line)
@@ -5661,14 +5730,16 @@
        (assoc v
               0 after-column
               (dec (count v)) before-end-column))
-     after-end-column]))
+     after-end-column])))
 
+#?(:clj
 (defn restitch-ls [ls line end-line split]
   (vec (concat
          (subvec ls 0 (dec line))
          split
-         (subvec ls end-line))))
+         (subvec ls end-line)))))
 
+#?(:clj
 (defn insert-loop-var [{:keys [line column end-line end-column] :as f} ls]
   {:pre [(#{:loop-var} (::track-kind f))
          #_(= line end-line)
@@ -5684,10 +5755,10 @@
                           *print-level* nil]
                   (with-out-str 
                     ;(print "^")
-                    ;(print (pprint-str-no-line ::t/rt-gen))
+                    ;(print (pprint-str-no-line :clojure.core.typed/rt-gen))
                     ;(print " ")
                     (print "^{")
-                    (print (pprint-str-no-line ::t/ann))
+                    (print (pprint-str-no-line :clojure.core.typed/ann))
                     (print " ")
                     (print (pprint-str-no-line (unparse-type (:type f))))
                     (print "} ")))
@@ -5724,9 +5795,10 @@
                           :else old-column))]
     {:ls new-ls
      :update-line update-line
-     :update-column update-column}))
+     :update-column update-column})))
 
 
+#?(:clj
 (defn insert-local-fn* [{:keys [line column end-line end-column] :as f} ls]
   {:pre [(#{:local-fn} (::track-kind f))]}
   (let [;_ (prn "current fn" f)
@@ -5743,7 +5815,7 @@
                         (with-out-str 
                           ;; DON'T DELETE THESE PRINTS
                           (print "(")
-                          ;(print (str "^" (pprint-str-no-line ::t/auto-gen) " "))
+                          ;(print (str "^" (pprint-str-no-line :clojure.core.typed/auto-gen) " "))
                           (print (pprint-str-no-line (qualify-typed-symbol 'ann-form))))))
         indentation *indentation*
         indentation-spaces (apply str (repeat (+ (dec column) indentation) " "))
@@ -5822,8 +5894,9 @@
                           :else old-column))]
   {:ls new-ls
    :update-line update-line
-   :update-column update-column}))
+   :update-column update-column})))
 
+#?(:clj
 (defn insert-local-fns [local-fns old config]
   {:post [(string? %)]}
   ;(prn "insert-local-fns" local-fns)
@@ -5865,7 +5938,7 @@
                          (update-coords update-line update-column)
                          (next fns))]
           (recur ls
-                 next-fns))))))
+                 next-fns)))))))
 
 (comment
   (println
@@ -5906,8 +5979,10 @@
       {}))
   )
 
-(declare prepare-ann infer-anns)
+#?(:clj
+(declare prepare-ann infer-anns))
 
+#?(:clj
 (defn insert-generated-annotations-in-str
   "Insert annotations after ns form."
   [old ns {:keys [replace-top-level? no-local-ann?] :as config}]
@@ -5941,18 +6016,20 @@
                      (conj out (first ls)))
               (str/join "\n" (concat out 
                                      [""
-                                      ann-str])))))))))
+                                      ann-str]))))))))))
     
 
 
+#?(:clj
 (defn delete-generated-annotations [ns config]
   (impl/with-clojure-impl
     (update-file (ns-file-name (if (symbol? ns)
                                  ns ;; avoid `the-ns` call in case ns does not exist yet.
                                  (ns-name ns)))
                  nil
-                 delete-generated-annotations-in-str)))
+                 delete-generated-annotations-in-str))))
 
+#?(:clj
 (defn prepare-ann [requires top-level config]
   {:post [(string? %)]}
   (binding [*print-length* nil
@@ -5967,13 +6044,15 @@
       (println generate-ann-start)
       (doseq [a top-level]
         (pprint a))
-      (print generate-ann-end))))
+      (print generate-ann-end)))))
 
+#?(:clj
 (defn default-out-dir [{:keys [spec?] :as config}]
   (let [cp-root (-> "" java.io.File. .getAbsoluteFile .getPath)
         dir-name (str "generated-" (if spec? "spec" "type") "-annotations")]
-    (str cp-root "/" dir-name)))
+    (str cp-root "/" dir-name))))
 
+#?(:clj 
 (defn insert-or-replace-generated-annotations [ns {:keys [out-dir] :as config}]
   (impl/with-clojure-impl
     (let [nsym (ns-name ns)
@@ -5988,13 +6067,16 @@
                           (coerce/ns->file nsym)))
                    insert-generated-annotations-in-str
                    ns
-                   config))))
+                   config)))))
 
+#?(:clj
 (defn insert-generated-annotations [ns config]
-  (insert-or-replace-generated-annotations ns config))
+  (insert-or-replace-generated-annotations ns config)))
+#?(:clj
 (defn replace-generated-annotations [ns config]
-  (insert-or-replace-generated-annotations ns (assoc config :replace-top-level? true)))
+  (insert-or-replace-generated-annotations ns (assoc config :replace-top-level? true))))
 
+#?(:clj
 (defn infer-anns
   ([ns {:keys [spec?] :as config}]
    {:pre [(or (instance? clojure.lang.Namespace ns)
@@ -6062,8 +6144,9 @@
            (generate-tenv config infer-results)
            (populate-envs config)
            (out (assoc config :explicit-require-needed require-info
-                       :call-flows (:call-flows infer-results))))))))
+                       :call-flows (:call-flows infer-results)))))))))
 
+#?(:clj
 (defn infer-with-frontend [front-end {:keys [ns fuel out-dir save-infer-results load-infer-results debug
                                              no-local-ann? polymorphic? spec-diff? no-squash-vertically
                                              spec-macros] :as args}]
@@ -6119,10 +6202,12 @@
                                      (when out-dir
                                        {:out-dir out-dir})
                                      (when fuel
-                                       {:fuel fuel})))))
+                                       {:fuel fuel}))))))
 
-(defn runtime-infer [args] (infer-with-frontend :type args))
-(defn spec-infer [args] (infer-with-frontend :spec args))
+#?(:clj
+(defn runtime-infer [args] (infer-with-frontend :type args)))
+#?(:clj
+(defn spec-infer [args] (infer-with-frontend :spec args)))
 
 (defn refresh-runtime-infer []
   (reset! results-atom (initial-results))

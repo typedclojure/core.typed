@@ -53,9 +53,11 @@
                  "module-analyzer-jvm/src/main/clojure"
                  "module-infer/src/main/clojure"
                  "module-infer/src/main/cljs"
+                 "module-infer/src/main/cljc"
                  "module-check/src/main/clojure"
                  "module-check/src/main/cljs"
                  "module-rt/src/main/clojure"
+                 "module-rt/src/main/cljc"
                  "module-rt/src/main/cljs"]
   :test-paths ["module-cljs/src/test/clojure"
                "module-cljs/src/test/cljs"
@@ -66,6 +68,7 @@
                "module-check/src/test/cljs"
                "module-check/src/test/resources"
                "module-rt/test/clojure"
+               "module-rt/test/cljc"
                "module-rt/test/cljs"]
   ;:resource-paths [~(libyjp-jar-path)]
 
