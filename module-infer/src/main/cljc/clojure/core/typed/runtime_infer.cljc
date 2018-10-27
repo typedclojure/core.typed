@@ -1,5 +1,17 @@
 (ns clojure.core.typed.runtime-infer
   (:refer-clojure :exclude [any? #?(:cljs -val)])
+  #?(:cljs
+     (:require-macros [clojure.core.typed.runtime-infer
+                       :refer [debug-flat
+                               debug
+                               debug-when
+                               debug-squash
+                               prs
+                               time-if-slow
+                               debug-output
+                               debug-output-when
+                               when-fuel
+                               ]]))
   (:require [#?(:clj clojure.pprint :cljs cljs.pprint) :as pp]
             [#?(:clj clojure.core :cljs cljs.core) :as core]
             [clojure.set :as set]
@@ -100,19 +112,21 @@
 (def ^:dynamic *debug* nil)
 (def ^:dynamic *debug-depth* 0)
 
+#?(:clj
 (defmacro debug-flat
   ([msg]
    `(when (= :all *debug*)
       (print (str (apply str (repeat *debug-depth* "  ")) *debug-depth* ": "))
-      ~msg)))
+      ~msg))))
 
+#?(:clj
 (defmacro debug 
   ([msg body]
    `(do
       (debug-flat ~msg)
       (binding [*debug-depth* (when (= :all *debug*)
                                 (inc *debug-depth*))]
-        ~body))))
+        ~body)))))
 
 #_
 (defalias Type
@@ -420,8 +434,7 @@
        (keyword? (:op t))))
 
 (defn -class [cls args]
-  {:pre [
-         (vector? args)
+  {:pre [(vector? args)
          (every? type? args)]}
   (assert ((some-fn keyword? string?) cls) cls)
   {:op :class
@@ -608,16 +621,18 @@
                              c)
                     c))))))
 
+#?(:clj
 (defmacro debug-when [state msg]
   `(when (and (set? *debug*)
               (contains? *debug* ~state))
      (let [msg# ~msg]
        (println)
-       (println (str "SQUASH ITERATION:\n" msg#)))))
+       (println (str "SQUASH ITERATION:\n" msg#))))))
 
+#?(:clj
 (defmacro debug-squash [msg]
   `(debug-when :squash 
-               (str "\nSQUASH ITERATION:\n" ~msg "\n")))
+               (str "\nSQUASH ITERATION:\n" ~msg "\n"))))
 
 (defn rename-alias [env old new]
   {:pre [(symbol? old)
@@ -748,8 +763,9 @@
 
     :else (assert nil (str "bad type " m))))
 
+#?(:clj
 (defmacro prs [t]
-  `(parse-type '~t))
+  `(parse-type '~t)))
 
 (def ^:dynamic *unparse-abbrev-alias* false)
 (def ^:dynamic *unparse-abbrev-class* false)
@@ -1818,7 +1834,10 @@
         seqable-t? (fn [m]
                      (boolean
                        (when (-class? m)
-                         (#{:vector :map :string :coll :seqable} (::class-instance m)))))
+                         ;; while string is "seqable", it mixes fine with named things.
+                         ;; we don't include :string here so (U Str Sym) is preserved
+                         ;; and not upcast to Any.
+                         (#{:vector :map :coll :seqable} (::class-instance m)))))
         atomic-type? (fn [v]
                        (boolean
                          (or
@@ -2025,16 +2044,22 @@
     {:op :IFn
      :arities arities}))
 
+#?(:clj
+(defn current-time [] (. System (nanoTime))))
+#?(:cljs
+(defn current-time [] (.getTime (js/Date.))))
+
+#?(:clj
 (defmacro time-if-slow
   "Evaluates expr and prints the time it took.  Returns the value of expr."
   [msg expr]
-  `(let [start# (. System (nanoTime))
+  `(let [start# (current-time)
          ret# ~expr
-         msduration# (/ (double (- (. System (nanoTime)) start#)) 1000000.0)]
+         msduration# (/ (double (- (current-time) start#)) 1000000.0)]
      (when (< 1000 msduration#)
        (prn (str "Elapsed time: " msduration# " msecs"))
        (prn ~msg))
-     ret#))
+     ret#)))
 
 ; join : Type Type -> Type
 (defn join [t1 t2]
@@ -2546,6 +2571,7 @@
   existing aliases when :mandatory keysets are identical.
   Never merge HMaps with different likely tag values."
   [env config]
+  {:post [(map? %)]}
   (letfn [(do-alias [env-atom t]
             {:pre [(HMap? t)]}
             (let [a-atom (atom nil)
@@ -3725,6 +3751,18 @@
                (add-infer-results! results-atom (infer-results paths (-class (classify v) [])))
                v)))))
 
+(declare gen-track-config)
+
+#?(:cljs
+(defn track-cljs-val [v root]
+  (track (gen-track-config)
+         results-atom
+         v
+         #{[(var-path
+              'root
+              root)]}
+         #{})))
+
 #?(:clj
 (def prim-invoke-interfaces
   (into #{}
@@ -4797,6 +4835,7 @@
         ]
     (vals tagk->as)))
 
+#?(:clj
 (defmacro debug-output [msg env config]
   `(when (or (= :iterations *debug*)
              (when (set? *debug*)
@@ -4806,8 +4845,9 @@
            msg# ~msg]
        (println)
        (println (str "ITERATION: " msg#))
-       (pprint-env env# config#))))
+       (pprint-env env# config#)))))
 
+#?(:clj
 (defmacro debug-output-when [debug-state msg env config]
   `(when (and (set? *debug*)
               (contains? *debug* ~debug-state))
@@ -4816,7 +4856,7 @@
            msg# ~msg]
        (println)
        (println (str "ITERATION: " msg#))
-       (pprint-env env# config#))))
+       (pprint-env env# config#)))))
 
 (defn rename-HMap-aliases [env config]
   (reduce (fn [env a]
@@ -5023,13 +5063,15 @@
           (list (qualify-spec-symbol 'and)
                 s))))
 
+#?(:clj
 (defmacro when-fuel [env & body]
   `(let [env# ~env]
      (if (enough-fuel? env#)
        (dec-fuel (do ~@body))
-       env#)))
+       env#))))
 
 (defn squash-vertically [env config]
+  {:pre [(map? env)]}
   (reduce
     (fn [env [v t]]
       (debug-when :iterations (str "squash-vertically: " v))
@@ -5061,6 +5103,7 @@
     (type-env env)))
 
 (defn populate-envs [env {:keys [spec? no-squash-vertically] :as config}]
+  {:pre [(map? env)]}
   (debug "populate-envs:"
   (let [;; create recursive types
         env (if-let [fuel (:fuel config)]
@@ -5075,8 +5118,9 @@
         env (if no-squash-vertically
               env
               (let [_ (debug-output "top of populate-envs" env config)
+                    #?@(:cljs [_ (assert (map? env) [(pr-str (type env)) env])])
                     env (when-fuel env
-                                   (squash-vertically env config))
+                          (squash-vertically env config))
                     _ (debug-output "after squash vertically" env config)]
                 env))
         ;; ensure all HMaps correspond to an alias
@@ -6155,6 +6199,21 @@
            (populate-envs config)
            (out (assoc config :explicit-require-needed require-info
                        :call-flows (:call-flows infer-results)))))))))
+
+#?(:cljs
+(defn infer-cljs-anns
+  [{:keys [spec? debug] :as config}]
+  (binding [*ann-for-ns* (fn [] 'root)
+            *debug* debug
+            ]
+    (let [infer-results @results-atom
+          out (if spec? 
+                envs-to-specs
+                envs-to-annotations)]
+      (-> (init-env)
+          (generate-tenv config infer-results)
+          (populate-envs config)
+          (out config))))))
 
 #?(:clj
 (defn infer-with-frontend [front-end {:keys [ns fuel out-dir save-infer-results load-infer-results debug

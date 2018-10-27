@@ -17,7 +17,7 @@
             :url "http://www.eclipse.org/legal/epl-v10.html"}
 
   :dependencies [[org.clojure/clojure "1.9.0"]
-                 [org.clojure/clojurescript "0.0-SNAPSHOT"]
+                 ;[org.clojure/clojurescript "0.0-SNAPSHOT"]
                  [org.clojure/clojurescript "1.10.373"]
                  [com.taoensso/timbre "2.1.2"]
                  [org.clojure/core.match "0.2.0-alpha12"]
@@ -35,8 +35,8 @@
 
   :repl-options {:port 64545
                  :timeout 6645464645555}
-  :profiles {:dev {:dependencies [[cider/piggieback "0.3.6"]
-                                  [org.clojure/tools.nrepl "0.2.13"]]
+  :profiles {:dev {:dependencies [[cider/piggieback "0.3.10"]
+                                  #_[org.clojure/tools.nrepl "0.2.13"]]
                    :repl-options {:nrepl-middleware [cider.piggieback/wrap-cljs-repl]}} }
   :injections [(require 'clojure.core.typed)
                (clojure.core.typed/install
