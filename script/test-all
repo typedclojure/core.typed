@@ -3,7 +3,7 @@
 # fail on error
 set -e
 
-function tst {
+tst () {
   echo "Testing $1"
   cd $1
   ./script/test
