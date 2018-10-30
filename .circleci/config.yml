@@ -7,7 +7,6 @@ jobs:
       - image: circleci/openjdk:8-jdk
     steps:
       - checkout
-      - run: sudo apt-get install rlwrap
       - run:
           command: |
             curl -O https://download.clojure.org/install/linux-install-1.9.0.397.sh
