@@ -13,3 +13,4 @@ function tst {
 tst module-rt
 tst module-infer
 tst module-analyzer-jvm
+tst module-check
