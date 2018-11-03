@@ -467,6 +467,8 @@
      #'pre/pre-parse      jpre/pre-parse
      #'ana2/var?          var?
      #'ana2/create-var    taj/create-var
+     #'ana2/resolve-ns    jana2/resolve-ns
+     #'ana2/resolve-sym   jana2/resolve-sym
      #'*ns*               (the-ns (or (-> opts :env :ns)
                                       *ns*))}))
 
