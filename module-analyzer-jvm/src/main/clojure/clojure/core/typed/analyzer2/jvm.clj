@@ -51,7 +51,7 @@
         (let [[op & args] form]
           (if (specials op)
             form
-            (let [v (u/resolve-sym op env)
+            (let [v (ana/resolve-sym op env)
                   m (meta v)
                   local? (-> env :locals (get op))
                   macro? (and (not local?) (:macro m)) ;; locals shadow macros
@@ -214,6 +214,24 @@
    :collect-closed-overs/where      #{:deftype :reify :fn :loop :try}
    :collect-closed-overs/top-level? false})
 
+(defn resolve-ns
+  "Resolves the ns mapped by the given sym in the global env"
+  [ns-sym {:keys [ns]}]
+  {:pre [((some-fn symbol? nil?) ns-sym)]
+   :post [(or (and (symbol? %)
+                   (not (namespace %)))
+              (nil? %))]}
+  (when ns-sym
+    (some-> (or (get (ns-aliases ns) ns-sym)
+                (find-ns ns))
+            ns-name)))
+
+(defn resolve-sym
+  "Resolves the value mapped by the given sym in the global env"
+  [sym {:keys [ns] :as env}]
+  (when (symbol? sym)
+    (ns-resolve ns sym)))
+
 (defn analyze
   "Analyzes a clojure form using tools.analyzer augmented with the JVM specific special ops
    and returns its AST, after running #'run-passes on it.
@@ -240,6 +258,8 @@
                             #'ana/scheduled-passes    scheduled-default-passes
                             #'pre/pre-parse     jpre/pre-parse
                             #'ana/var?          var?
+                            #'ana/resolve-ns    resolve-ns
+                            #'ana/resolve-sym   resolve-sym
                             #'*ns*              (the-ns (:ns env))}
                            (:bindings opts))
        (env/ensure (taj/global-env)
@@ -317,7 +337,7 @@
                                                           (if-let [[op & r] (and (seq? form) form)]
                                                             (if (or (ju/macro? op  env)
                                                                     (ju/inline? op r env))
-                                                              (vary-meta form assoc ::ana/resolved-op (u/resolve-sym op env))
+                                                              (vary-meta form assoc ::ana/resolved-op (ana/resolve-sym op env))
                                                               form)
                                                             form)))))))]
          (if (and (seq? mform) (= 'do (first mform)) (next mform)

@@ -193,7 +193,7 @@
         (let [[op & args] form]
           (if (taj/specials op)
             form
-            (let [v (ta-utils/resolve-sym op env)
+            (let [v (ana2/resolve-sym op env)
                   m (meta v)
                   local? (-> env :locals (get op))
                   macro? (and (not local?) (:macro m)) ;; locals shadow macros
@@ -476,7 +476,7 @@
       (when (seq? form)
         (let [[op & args] form]
           (when-not (taj/specials op)
-            (let [v (ta-utils/resolve-sym op env)
+            (let [v (ana2/resolve-sym op env)
                   m (meta v)
                   local? (-> env :locals (get op))
                   macro? (and (not local?) (:macro m)) ;; locals shadow macros
