@@ -229,6 +229,7 @@
 (defn resolve-sym
   "Resolves the value mapped by the given sym in the global env"
   [sym {:keys [ns] :as env}]
+  {:pre [((some-fn symbol? nil?) sym)]}
   (when (symbol? sym)
     (ns-resolve ns sym)))
 
@@ -325,6 +326,8 @@
        (let [env (merge env (u/-source-info form env))
              [mform raw-forms] (with-bindings {Compiler/LOADER     (RT/makeClassLoader)
                                                #'*ns*              (the-ns (:ns env))
+                                               #'ana/resolve-ns    resolve-ns
+                                               #'ana/resolve-sym   resolve-sym
                                                #'ana/macroexpand-1 (get-in opts [:bindings #'ana/macroexpand-1] 
                                                                            macroexpand-1)}
                                  (loop [form form raw-forms []]
