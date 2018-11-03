@@ -214,6 +214,7 @@
    :collect-closed-overs/where      #{:deftype :reify :fn :loop :try}
    :collect-closed-overs/top-level? false})
 
+; (U Sym nil) -> (U Sym nil)
 (defn resolve-ns
   "Resolves the ns mapped by the given sym in the global env"
   [ns-sym {:keys [ns]}]
@@ -226,10 +227,10 @@
                 (find-ns ns))
             ns-name)))
 
+;Any -> Any
 (defn resolve-sym
   "Resolves the value mapped by the given sym in the global env"
   [sym {:keys [ns] :as env}]
-  {:pre [((some-fn symbol? nil?) sym)]}
   (when (symbol? sym)
     (ns-resolve ns sym)))
 
